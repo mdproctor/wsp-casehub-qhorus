@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-qhorus]
 tags: [gateway, architecture, a2a, normative]
+excerpt: "A channel can have at most one HumanParticipatingChannelBackend — enforced as a hard constraint at registration — because two human participants on different platforms produce two independent conversations with no way to detect contradiction."
 ---
 
 Qhorus channels were built for agent-to-agent communication. Adding external transports — WhatsApp, Slack, a Claudony panel — meant introducing a gateway layer, which sounds straightforward until you ask: what happens when two humans reply on two different platforms to the same channel?

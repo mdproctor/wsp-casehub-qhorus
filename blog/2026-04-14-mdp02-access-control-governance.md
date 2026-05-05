@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [quarkus, mcp, multi-agent, access-control, tdd]
+excerpt: "Write permissions, admin role, rate limiting, and observer mode land via strict TDD, with non-@Tool convenience overloads solving the AddParameter-breaks-existing-tests problem without duplicating @Tool names."
 ---
 
 Phase 11 started with housekeeping. The previous session had shipped all the HITL work but left fifteen child issues from phases 6, 9, and 10 still open on GitHub. I closed those, then built four issues under epic #45: write permissions, admin role, rate limiting, and observer mode. Claude and I worked through all four in one session, strict TDD throughout — test first, watch it fail, implement the minimum to pass.

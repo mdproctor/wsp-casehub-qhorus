@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [quarkus, mcp, multi-agent, hitl, a2a]
+excerpt: "Forty-two commits close phases 6 through 10 — read-side dispatch filtering handles all three target modes in one private method, and human-in-the-loop approval gates move to quarkus-workitems as the correct domain."
 ---
 
 Today I set out to close phases 6 through 10 of Qhorus — addressing, A2A compatibility, and human-in-the-loop controls. Forty-two commits later, the test count sits at 439.

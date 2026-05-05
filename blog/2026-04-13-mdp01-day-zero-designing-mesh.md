@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [architecture, mcp, design, quarkus]
+excerpt: "Designing the Qhorus multi-agent mesh starts by studying A2A, ACP, AutoGen, LangGraph, and CrewAI — and deciding that Qhorus should be infrastructure orthogonal to all of them, not another orchestration model."
 ---
 
 I'd been running `cross-claude-mcp` for a while — a Node.js server that let Claude agents share channels, pass messages, and coordinate on shared artefacts. It worked, but it wasn't production-grade. No native image, no proper lifecycle, no Quarkus. When I started thinking seriously about what the Quarkus Native AI agent ecosystem should look like, Qhorus was the obvious starting point.

@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [mcp, observability, quarkus-ledger, claudony]
+excerpt: "Phase 12 ships structured observability via AgentMessageLedgerEntry, but the unplanned work is discovering that Claudony's hand-rolled JSON-RPC endpoint conflicts with quarkus-mcp-server-http at the same path."
 ---
 
 Phase 12 landed as planned. Every EVENT message through `send_message` now creates an `AgentMessageLedgerEntry` — a JPA subclass of quarkus-ledger's `LedgerEntry` — with `toolName`, `durationMs`, optional `tokenCount`, and optional `contextRefs` capturing what the agent could see at decision time. Two new MCP tools: `list_events` queries the structured audit trail with channel, agent, and time range filters; `get_channel_timeline` gives a chronological interleaved view of all message types for a channel.

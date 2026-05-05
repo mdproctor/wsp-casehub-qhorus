@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-qhorus]
 tags: [documentation, ledger, mcp-server, quarkus]
+excerpt: "Writing the developer guide reveals a missing tool — get_obligation_activity — because Part 6 keeps circling the same question: how do you see everything one obligation touched across all three channels in one call?"
 ---
 
 There's a point when explaining a system to yourself reveals the gaps. This session hit it writing the developer guide for Qhorus's agent mesh.

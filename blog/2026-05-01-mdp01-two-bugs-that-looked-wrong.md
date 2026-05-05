@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-qhorus]
 tags: [testing, quarkus, debugging]
+excerpt: "Both failing tests present misleading symptoms — the watchdog test counts two alerts because the scheduler runs on a separate thread that can see committed test data, not because evaluateAll() was called twice."
 ---
 
 Two tests were failing. Both had misleading symptoms.

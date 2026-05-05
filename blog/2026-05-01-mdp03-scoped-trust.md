@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-qhorus]
 tags: [ledger, trust, maven, quarkus]
+excerpt: "Every Qhorus attestation was landing on the global \"*\" capability tag, collapsing capability-scoped Beta distributions into one number — a two-method fix routes attestations to the correct scope by parsing the originating COMMAND's content."
 ---
 
 casehub-ledger's trust score infrastructure is built around capability-scoped

@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-qhorus]
 tags: [maven, ci-cd, module-split, mcp, breaking-changes]
+excerpt: "A casehub-engine release window triggers twenty-one tasks across five repos in one session — breaking MCP renames, module splits to stop JPA entities leaking onto test classpaths, and a naming audit across the ecosystem."
 ---
 
 The last entry ended with all eight MCP consistency decisions made, the non-breaking ones shipped, and the breaking redesign deferred. Then casehub-engine finished a PR. That's a release window — a moment when downstream consumers are quiescent and won't be broken by anything we push upstream. I decided not to let it pass.

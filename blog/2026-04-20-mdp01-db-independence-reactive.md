@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [persistence, reactive, quarkus-ledger, store-pattern]
+excerpt: "Phase 13 extracts five store interfaces across all Qhorus domains, with in-memory alternatives in a testing module and Query value objects whose matches() predicate applies the same filter logic as the JPQL."
 ---
 
 Phase 13 wasn't on the original roadmap. It landed because I wanted Qhorus to be properly portable before going further — and because the quarkus-workitems project had already worked out the right pattern.

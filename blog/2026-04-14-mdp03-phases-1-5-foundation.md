@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [mcp, panache, semantics, wait-for-reply, artefacts]
+excerpt: "Zero Java to five complete phases in one session — BARRIER channel semantics, wait_for_reply with SSE keepalives, and artefact lifecycle — with code review catching a double-claim race and a UUID format assumption breaking human agent names."
 ---
 
 The next session was long. We went from zero Java to five complete phases in one pass — core data model, MCP tools, channel semantics, wait_for_reply, and artefact lifecycle. 193 tests by the end. Two critical production bugs found and fixed along the way.

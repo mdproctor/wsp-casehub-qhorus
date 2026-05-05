@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [quarkus-ledger, transactions, flyway, schema]
+excerpt: "Reconciling Qhorus with quarkus-ledger's API changes reveals that ledger write failures should use @Transactional(REQUIRES_NEW) to prevent audit failures from rolling back message delivery."
 ---
 
 This session was mostly reconciliation — catching Qhorus up to changes in quarkus-ledger that had shipped since Phase 12 was built.

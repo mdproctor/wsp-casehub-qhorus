@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [ledger, normative-layer, trust, eigentrust]
+excerpt: "Extending the ledger to all nine speech-act types reframes Qhorus from audit middleware to normative governance infrastructure — and the trust scoring models in quarkus-ledger turn out to be composable with agent reputation via EigenTrust propagation."
 ---
 
 When we started this session the plan was clear: extend the ledger to record all nine message types, not just EVENT. The CommitmentStore had just shipped as the live view of obligation state. The ledger would be the immutable historical record alongside it.

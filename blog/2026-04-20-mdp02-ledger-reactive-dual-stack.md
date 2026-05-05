@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [reactive, quarkus-ledger, dual-stack, architecture]
+excerpt: "quarkus-ledger ships dual blocking/reactive repositories, unlocking Qhorus's reactive migration — and AgentMessageLedgerEntryRepository switches from Panache statics to EntityManager injection to resolve the List return-type conflict."
 ---
 
 The previous entry ended with a deferred question — reactive migration blocked

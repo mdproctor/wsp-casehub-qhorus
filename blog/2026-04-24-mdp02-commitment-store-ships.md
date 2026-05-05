@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [commitment-store, pending-reply, obligation-lifecycle, deontic, tdd]
+excerpt: "PendingReply was always instantiating Singh's social commitment model for the QUERY→RESPONSE case — CommitmentStore completes the picture with seven states covering every path a QUERY or COMMAND can reach."
 ---
 
 `PendingReply` has existed since the first week of Qhorus. It's a thin record: correlationId, channelId, expiresAt. Its entire purpose is to answer one question for `wait_for_reply`: "is there still an outstanding request with this ID?" When the RESPONSE arrives, the record is deleted. When it times out, the record is deleted. That's it.

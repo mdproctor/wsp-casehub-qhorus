@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [reactive, dual-stack, quarkus, mutiny]
+excerpt: "The 39 MCP tools split into 20 pure reactive chains and 19 @Blocking delegates, with the QhorusMcpToolsBase extraction fixing a Java import limitation where inherited nested types cannot be imported via the subclass name."
 ---
 
 Before any reactive services could share logic with the blocking ones, `QhorusMcpTools` needed surgery. All 23 response records, seven entity-to-DTO mappers, and three validation helpers were buried inside a 1300-line class alongside the actual `@Tool` methods. The extraction pulled them into `QhorusMcpToolsBase` — an abstract class with no CDI annotations, no `@Tool`, no service injection.

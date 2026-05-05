@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [quarkus, persistence, named-datasource, spi, testing]
+excerpt: "Migrating to a named datasource exposes an inheritance constraint — AgentMessageLedgerEntry and LedgerEntry must share a persistence unit — resolved by including the ledger package in Qhorus's persistence unit configuration."
 ---
 
 Claudony sent a message this week that was both a reasonable request and a

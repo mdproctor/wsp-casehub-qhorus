@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [reactive, dual-stack, subagent-driven-development, testing]
+excerpt: "Issue #74 ships five reactive store interfaces and implementations via the subagent workflow — one issue per session after the planning tool hit the 32k output limit generating the full eight-issue plan at once."
 ---
 
 The previous session ended with a clear constraint: the `superpowers:writing-plans`

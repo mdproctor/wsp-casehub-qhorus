@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [quarkus-qhorus]
 tags: [jlama, ci, testing, examples, casehubio]
+excerpt: "Fixing Jlama takes four cascading commits — the ARM_128 UnsupportedOperationException surfaces only after the boot crash is fixed, and requires the native Apple Silicon library rather than the Java Vector API path."
 ---
 
 Yesterday's entry ended on the Jlama wall — `quarkus-langchain4j-jlama 0.26.1` crashing at test bootstrap with `Unsupported value type: [ALL-UNNAMED]`. I'd traced the root cause to `META-INF/quarkus-extension.properties` inside the Jlama runtime JAR, containing `dev-mode.jvm-option.std.enable-native-access=ALL-UNNAMED`. The fix location was clear: remove those JVM options from `model-providers/jlama/runtime/pom.xml`. One commit to the cloned repo, problem solved.
