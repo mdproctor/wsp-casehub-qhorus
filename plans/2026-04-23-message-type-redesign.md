@@ -1,0 +1,1346 @@
+# MessageType Redesign Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace the 6-value `MessageType` enum with a 9-type taxonomy (QUERY, COMMAND, RESPONSE, STATUS, DECLINE, HANDOFF, DONE, FAILURE, EVENT) grounded in speech act theory and deontic semantics, add three new `Message` envelope fields, update all consumers, and demonstrate the types with real LangChain4j + Ollama agents in a new examples module.
+
+**Architecture:** Two independent workstreams — (1) core enum + entity + consumer changes across `runtime/`, `testing/`, and `examples/`; (2) a new `examples/agent-communication/` module using `quarkus-langchain4j-ollama` with `llama3.2:3b` to demonstrate typed message flows with real LLM agents. The workstreams are sequenced: core changes first, examples second.
+
+**Tech Stack:** Java 21, Quarkus 3.32.2, Hibernate ORM (named `qhorus` datasource), Quarkus MCP Server, quarkus-langchain4j-ollama with Quarkus Dev Services (Docker-managed — no brew required), `gemma3:1b` as primary model (815MB, fastest; fallback to `llama3.2:3b` if classification accuracy insufficient), JUnit 5, RestAssured, `@QuarkusTest`, InMemory stores from `quarkus-qhorus-testing`.
+
+---
+
+## Workstream 1 — Core MessageType Redesign
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageType.java` | Replace 6 values with 9; update `isAgentVisible()` |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/Message.java` | Add `commitmentId`, `deadline`, `acknowledgedAt` fields |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageService.java` | Update REQUEST → QUERY\|COMMAND in correlation/poll logic |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/ReactiveMessageService.java` | Same as MessageService |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/QhorusMcpToolsBase.java` | Update serialization; add `deadline` to records |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/QhorusMcpTools.java` | Update type parsing, correlationId rule, `send_message` description |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/ReactiveQhorusMcpTools.java` | Same as QhorusMcpTools |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/A2AResource.java` | Update `deriveState()` to handle FAILURE |
+| `runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/ReactiveA2AResource.java` | Same as A2AResource |
+| `runtime/src/main/resources/application.properties` (test) | No change — schema generation handles new columns |
+| `testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryMessageStore.java` | Handle new fields in `put()` |
+| All test files with `MessageType.REQUEST` (40 usages) | Classify each to QUERY or COMMAND by intent |
+
+---
+
+### Task 1: Replace the MessageType enum
+
+**Files:**
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageType.java`
+
+- [ ] **Step 1: Write the failing compilation check**
+
+Temporarily add to any test class:
+```java
+// Verify new types exist — remove after Task 1
+void typesSmokeCheck() {
+    assertThat(MessageType.QUERY).isNotNull();
+    assertThat(MessageType.COMMAND).isNotNull();
+    assertThat(MessageType.DECLINE).isNotNull();
+    assertThat(MessageType.FAILURE).isNotNull();
+}
+```
+
+- [ ] **Step 2: Run to confirm it fails**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl runtime -Dno-format -q 2>&1 | tail -5
+```
+Expected: `cannot find symbol` errors for QUERY, COMMAND, DECLINE, FAILURE.
+
+- [ ] **Step 3: Replace MessageType.java**
+
+```java
+package io.quarkiverse.qhorus.runtime.message;
+
+public enum MessageType {
+    /** Ask for information. Receiver must RESPONSE or DECLINE. Carries correlation_id. */
+    QUERY,
+    /** Ask for action. Receiver must execute then DONE or FAILURE. Carries correlation_id. */
+    COMMAND,
+    /** Answer a QUERY. Discharges the QUERY obligation. Carries correlation_id. */
+    RESPONSE,
+    /** Report progress on an open COMMAND. Extends the deadline window. */
+    STATUS,
+    /** Refuse a QUERY or COMMAND. Requires non-empty content. */
+    DECLINE,
+    /** Transfer obligation to named target. Target field must be non-null. */
+    HANDOFF,
+    /** Signal successful completion of a COMMAND. Terminal. */
+    DONE,
+    /** Signal unsuccessful termination of a COMMAND. Requires non-empty content. Terminal. */
+    FAILURE,
+    /** Observer-only telemetry. NOT delivered to agent context. */
+    EVENT;
+
+    /** Whether this message type appears in agent context (true for all except EVENT). */
+    public boolean isAgentVisible() {
+        return this != EVENT;
+    }
+
+    /** Whether this type carries a correlationId (auto-generated by infrastructure). */
+    public boolean requiresCorrelationId() {
+        return this == QUERY || this == COMMAND;
+    }
+
+    /** Whether this type requires non-empty content. */
+    public boolean requiresContent() {
+        return this == DECLINE || this == FAILURE;
+    }
+
+    /** Whether this type requires a non-null target field. */
+    public boolean requiresTarget() {
+        return this == HANDOFF;
+    }
+
+    /** Whether this is a terminal type (no further messages expected from sender). */
+    public boolean isTerminal() {
+        return this == HANDOFF || this == DONE || this == FAILURE;
+    }
+}
+```
+
+- [ ] **Step 4: Compile**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl runtime -Dno-format -q 2>&1 | tail -10
+```
+Expected: compile errors only from existing REQUEST references — not from MessageType itself.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageType.java
+git commit -m "feat(message): replace 6-type enum with 9-type speech-act taxonomy
+
+QUERY + COMMAND replace REQUEST. DECLINE and FAILURE are new.
+Adds requiresCorrelationId(), requiresContent(), requiresTarget(),
+isTerminal() helper methods.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 2: Add envelope fields to Message entity
+
+**Files:**
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/Message.java`
+
+- [ ] **Step 1: Add three new fields to Message.java**
+
+Add after the `artefactRefs` field:
+
+```java
+/** Links to CommitmentStore entry. Auto-set by infrastructure on QUERY/COMMAND. */
+@Column(name = "commitment_id")
+public UUID commitmentId;
+
+/**
+ * When the obligation must be discharged. Null = no temporal constraint (STATUS, RESPONSE, EVENT).
+ * Set from channel config default on QUERY/COMMAND when not provided by sender.
+ */
+@Column(name = "deadline")
+public Instant deadline;
+
+/** When the obligation was explicitly accepted. Null in v1; populated by v2 ACK mechanism. */
+@Column(name = "acknowledged_at")
+public Instant acknowledgedAt;
+```
+
+The full field block should now read (in order): `id`, `channelId`, `sender`, `messageType`, `content`, `correlationId`, `inReplyTo`, `replyCount`, `artefactRefs`, `target`, `commitmentId`, `deadline`, `acknowledgedAt`, `createdAt`.
+
+- [ ] **Step 2: Compile**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl runtime -Dno-format -q
+```
+Expected: clean compile (new fields are purely additive).
+
+- [ ] **Step 3: Run existing tests to confirm schema generation works**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl runtime -Dno-format -Dtest=SmokeTest -q 2>&1 | tail -5
+```
+Expected: PASS (schema `drop-and-create` regenerates with new columns; existing tests don't reference new fields).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/Message.java
+git commit -m "feat(message): add commitmentId, deadline, acknowledgedAt to Message envelope
+
+commitmentId: links to future CommitmentStore (v2)
+deadline: temporal layer — when obligation must be discharged
+acknowledgedAt: null in v1, populated in v2 ACK mechanism
+
+Refs #<issue>"
+```
+
+---
+
+### Task 3: Update InMemoryMessageStore for new fields
+
+**Files:**
+- Modify: `testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryMessageStore.java`
+- Modify: `testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryReactiveMessageStore.java`
+
+- [ ] **Step 1: Find the put() method in InMemoryMessageStore**
+
+```bash
+grep -n "put\|createdAt\|commitmentId" testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryMessageStore.java
+```
+
+- [ ] **Step 2: Update put() to initialise timestamp fields**
+
+In `InMemoryMessageStore.put()`, ensure `createdAt` and any new Instant fields are initialised if null (mirroring `@PrePersist`). Add after the existing `createdAt` null check:
+
+```java
+if (message.commitmentId == null && 
+    (message.messageType == MessageType.QUERY || message.messageType == MessageType.COMMAND)) {
+    message.commitmentId = UUID.randomUUID();
+}
+```
+
+- [ ] **Step 3: Apply same change to InMemoryReactiveMessageStore**
+
+The reactive store's `put()` implementation needs the same commitmentId auto-generation. Apply identically.
+
+- [ ] **Step 4: Run store contract tests**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl testing -Dno-format -q 2>&1 | tail -5
+```
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryMessageStore.java \
+        testing/src/main/java/io/quarkiverse/qhorus/testing/InMemoryReactiveMessageStore.java
+git commit -m "feat(testing): auto-generate commitmentId in InMemory stores for QUERY/COMMAND
+
+Mirrors @PrePersist behaviour in JPA stores.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 4: Update MessageService — correlation and poll logic
+
+**Files:**
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageService.java`
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/ReactiveMessageService.java`
+
+- [ ] **Step 1: Find all REQUEST references in MessageService**
+
+```bash
+grep -n "REQUEST\|correlationId\|RESPONSE" runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageService.java
+```
+
+- [ ] **Step 2: Update correlation_id auto-generation rule**
+
+Find the line checking `msgType == MessageType.REQUEST` (used to auto-generate correlationId). Replace:
+
+```java
+// Before
+if (corrId == null && msgType == MessageType.REQUEST) {
+
+// After
+if (corrId == null && msgType.requiresCorrelationId()) {
+```
+
+- [ ] **Step 3: Update poll exclusion — EVENT exclusion is unchanged**
+
+The existing `excludeTypes(List.of(MessageType.EVENT))` in poll methods is correct and unchanged. Verify it does not reference REQUEST.
+
+- [ ] **Step 4: Apply same changes to ReactiveMessageService**
+
+Search and apply the same `requiresCorrelationId()` substitution.
+
+- [ ] **Step 5: Compile**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl runtime -Dno-format -q 2>&1 | tail -5
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/MessageService.java \
+        runtime/src/main/java/io/quarkiverse/qhorus/runtime/message/ReactiveMessageService.java
+git commit -m "fix(message): use requiresCorrelationId() for auto-generation in service layer
+
+Replaces REQUEST-specific check. QUERY and COMMAND both auto-generate correlationId.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 5: Update A2A state machine
+
+**Files:**
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/A2AResource.java`
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/ReactiveA2AResource.java`
+
+- [ ] **Step 1: Find deriveState()**
+
+```bash
+grep -n "deriveState\|RESPONSE\|STATUS\|DONE\|completed\|working\|submitted" runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/A2AResource.java
+```
+
+- [ ] **Step 2: Update deriveState() to handle FAILURE**
+
+```java
+private String deriveState(MessageType lastType) {
+    if (lastType == null) return "submitted";
+    return switch (lastType) {
+        case RESPONSE, DONE -> "completed";
+        case FAILURE, DECLINE -> "failed";
+        case STATUS -> "working";
+        default -> "submitted";
+    };
+}
+```
+
+- [ ] **Step 3: Apply same change to ReactiveA2AResource**
+
+- [ ] **Step 4: Run A2A tests**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl runtime -Dno-format -Dtest="A2ASendMessageTest,A2AGetTaskTest" -q 2>&1 | tail -10
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/A2AResource.java \
+        runtime/src/main/java/io/quarkiverse/qhorus/runtime/api/ReactiveA2AResource.java
+git commit -m "fix(a2a): handle FAILURE and DECLINE in deriveState()
+
+FAILURE and DECLINE map to 'failed' task state.
+DONE and RESPONSE map to 'completed'.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 6: Update MCP tools — type parsing, validation, tool description
+
+**Files:**
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/QhorusMcpToolsBase.java`
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/QhorusMcpTools.java`
+- Modify: `runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/ReactiveQhorusMcpTools.java`
+
+- [ ] **Step 1: Find REQUEST-specific logic and type validation in QhorusMcpTools**
+
+```bash
+grep -n "REQUEST\|valueOf\|msgType\|correlationId\|requiresContent\|requiresTarget" \
+  runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/QhorusMcpTools.java | head -30
+```
+
+- [ ] **Step 2: Add type validation using new helper methods**
+
+After `MessageType.valueOf(type.toUpperCase())` parsing, add:
+
+```java
+MessageType msgType = MessageType.valueOf(type.toUpperCase());
+
+if (msgType.requiresContent() && (content == null || content.isBlank())) {
+    return error(msgType.name() + " requires non-empty content explaining the reason.");
+}
+if (msgType.requiresTarget() && (target == null || target.isBlank())) {
+    return error("HANDOFF requires a non-null target (instance:id, capability:tag, or role:name).");
+}
+```
+
+- [ ] **Step 3: Update correlationId auto-generation to use helper**
+
+Replace `if (corrId == null && msgType == MessageType.REQUEST)` with:
+```java
+if (corrId == null && msgType.requiresCorrelationId()) {
+```
+
+- [ ] **Step 4: Update send_message tool description**
+
+Find the `@ToolArg` or `@Description` annotation on the `type` parameter of `send_message`. Replace with:
+
+```
+The message type. Choose:
+QUERY — asking for information (no action, no side effects)
+COMMAND — asking for action to be taken (side effects expected)
+RESPONSE — answering a QUERY (carries correlationId of the QUERY)
+STATUS — reporting progress on a COMMAND (extends deadline window)
+DECLINE — refusing a QUERY or COMMAND (content must explain why)
+HANDOFF — transferring obligation to another agent (target required)
+DONE — signalling successful completion of a COMMAND
+FAILURE — signalling unsuccessful termination of a COMMAND (content must explain why)
+EVENT — telemetry only, not delivered to agents
+```
+
+- [ ] **Step 5: Add deadline parameter to send_message**
+
+Add optional `deadline` parameter (ISO-8601 duration string, e.g. `"PT30M"` for 30 minutes):
+
+```java
+@ToolArg(description = "Optional deadline as ISO-8601 duration (e.g. PT30M). Defaults to channel config. Only meaningful for QUERY and COMMAND.", required = false)
+String deadline
+```
+
+In the implementation, parse and set on the Message:
+```java
+if (deadline != null && !deadline.isBlank() && msgType.requiresCorrelationId()) {
+    message.deadline = Instant.now().plus(Duration.parse(deadline));
+}
+```
+
+- [ ] **Step 6: Apply same changes to ReactiveQhorusMcpTools**
+
+- [ ] **Step 7: Compile**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl runtime -Dno-format -q 2>&1 | tail -5
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add runtime/src/main/java/io/quarkiverse/qhorus/runtime/mcp/
+git commit -m "feat(mcp): validate DECLINE/FAILURE content, HANDOFF target; add deadline param
+
+send_message now validates:
+- DECLINE and FAILURE require non-empty content
+- HANDOFF requires non-null target
+- Optional deadline parameter (ISO-8601 duration) for QUERY/COMMAND
+
+Updated messageType description for LLM classification.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 7: Migrate all REQUEST usages in tests
+
+**Files:**
+- Modify: all test files in `runtime/src/test/` containing `MessageType.REQUEST` (40 usages)
+
+- [ ] **Step 1: Find all REQUEST usages**
+
+```bash
+grep -rn "MessageType\.REQUEST\|\"REQUEST\"\|'REQUEST'" runtime/src/test/ testing/src/test/ examples/src/test/ 2>/dev/null
+```
+
+- [ ] **Step 2: Classify and replace each usage**
+
+Rules for classification:
+- Usage is sending a query for information (row counts, status checks, what-is-X questions) → `MessageType.QUERY`
+- Usage is sending a task/action request (do X, process Y, generate Z) → `MessageType.COMMAND`
+- Usage is testing correlation/reply mechanics (the correlationId pairing) → `MessageType.QUERY` (cleaner — QUERY→RESPONSE is the canonical query pattern)
+- Usage is testing channel semantics (BARRIER release, COLLECT) → `MessageType.COMMAND` (action-oriented)
+
+Do NOT use find-replace. Read each usage in context and classify.
+
+- [ ] **Step 3: Run the full test suite**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl runtime -Dno-format -q 2>&1 | tail -10
+```
+Expected: all 716 tests pass (44 `@Disabled` skipped).
+
+- [ ] **Step 4: Run testing module tests**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl testing -Dno-format -q 2>&1 | tail -5
+```
+Expected: all 120 tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add runtime/src/test/ testing/src/test/
+git commit -m "refactor(tests): migrate MessageType.REQUEST → QUERY or COMMAND by intent
+
+40 usages classified:
+- Information requests → QUERY
+- Action/task requests → COMMAND
+- Correlation mechanics tests → QUERY
+
+Refs #<issue>"
+```
+
+---
+
+### Task 8: Add tests for new types and validation
+
+**Files:**
+- Create: `runtime/src/test/java/io/quarkiverse/qhorus/runtime/message/MessageTypeValidationTest.java`
+
+- [ ] **Step 1: Write MessageTypeValidationTest**
+
+```java
+package io.quarkiverse.qhorus.runtime.message;
+
+import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+
+import io.quarkus.test.junit.QuarkusTest;
+
+@QuarkusTest
+class MessageTypeValidationTest {
+
+    @Test
+    void declineWithoutContentIsRejected() {
+        String channelId = UUID.randomUUID().toString();
+        given()
+            .contentType("application/json")
+            .body("""
+                {"channel_id": "%s", "sender": "agent-a", "type": "DECLINE", "content": ""}
+                """.formatted(channelId))
+            .when().post("/qhorus/messages/send")
+            .then().statusCode(400);
+    }
+
+    @Test
+    void failureWithoutContentIsRejected() {
+        String channelId = UUID.randomUUID().toString();
+        given()
+            .contentType("application/json")
+            .body("""
+                {"channel_id": "%s", "sender": "agent-a", "type": "FAILURE", "content": "  "}
+                """.formatted(channelId))
+            .when().post("/qhorus/messages/send")
+            .then().statusCode(400);
+    }
+
+    @Test
+    void handoffWithoutTargetIsRejected() {
+        String channelId = UUID.randomUUID().toString();
+        given()
+            .contentType("application/json")
+            .body("""
+                {"channel_id": "%s", "sender": "agent-a", "type": "HANDOFF", "content": "take over"}
+                """.formatted(channelId))
+            .when().post("/qhorus/messages/send")
+            .then().statusCode(400);
+    }
+
+    @Test
+    void queryAutoGeneratesCorrelationId() {
+        String channelId = createChannel();
+        String response = given()
+            .contentType("application/json")
+            .body("""
+                {"channel_id": "%s", "sender": "agent-a", "type": "QUERY",
+                 "content": "what is the count?"}
+                """.formatted(channelId))
+            .when().post("/qhorus/messages/send")
+            .then().statusCode(200)
+            .extract().asString();
+        assertThat(response).contains("correlation_id");
+    }
+
+    @Test
+    void commandAutoGeneratesCorrelationId() {
+        String channelId = createChannel();
+        String response = given()
+            .contentType("application/json")
+            .body("""
+                {"channel_id": "%s", "sender": "agent-a", "type": "COMMAND",
+                 "content": "process the report"}
+                """.formatted(channelId))
+            .when().post("/qhorus/messages/send")
+            .then().statusCode(200)
+            .extract().asString();
+        assertThat(response).contains("correlation_id");
+    }
+
+    @Test
+    void isAgentVisibleReturnsFalseForEventOnly() {
+        for (MessageType t : MessageType.values()) {
+            if (t == MessageType.EVENT) {
+                assertThat(t.isAgentVisible()).isFalse();
+            } else {
+                assertThat(t.isAgentVisible()).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void requiresCorrelationIdForQueryAndCommandOnly() {
+        assertThat(MessageType.QUERY.requiresCorrelationId()).isTrue();
+        assertThat(MessageType.COMMAND.requiresCorrelationId()).isTrue();
+        assertThat(MessageType.RESPONSE.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.STATUS.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.DECLINE.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.HANDOFF.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.DONE.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.FAILURE.requiresCorrelationId()).isFalse();
+        assertThat(MessageType.EVENT.requiresCorrelationId()).isFalse();
+    }
+
+    private String createChannel() {
+        return given()
+            .contentType("application/json")
+            .body("""
+                {"name": "test-%s", "semantic": "APPEND"}
+                """.formatted(UUID.randomUUID()))
+            .when().post("/qhorus/channels")
+            .then().statusCode(200)
+            .extract().path("id");
+    }
+}
+```
+
+- [ ] **Step 2: Run the new tests**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl runtime -Dno-format \
+  -Dtest=MessageTypeValidationTest -q 2>&1 | tail -10
+```
+Expected: all pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add runtime/src/test/java/io/quarkiverse/qhorus/runtime/message/MessageTypeValidationTest.java
+git commit -m "test(message): validate DECLINE/FAILURE content, HANDOFF target, correlationId rules
+
+Refs #<issue>"
+```
+
+---
+
+### Task 9: Full test suite green + DESIGN.md sync
+
+- [ ] **Step 1: Run the full suite**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean test -Dno-format -q 2>&1 | tail -15
+```
+Expected: all modules pass. If any test fails, fix before proceeding.
+
+- [ ] **Step 2: Invoke java-git-commit for DESIGN.md sync**
+
+Use the `java-git-commit` skill (or `java-update-design`) to sync `docs/DESIGN.md` with the MessageType changes: update the Message Types section, add the new enum values and their semantics, note the new Message fields.
+
+- [ ] **Step 3: Final commit for Workstream 1**
+
+```bash
+git add docs/DESIGN.md
+git commit -m "docs: sync DESIGN.md with MessageType redesign
+
+9-type taxonomy, new Message envelope fields, breaking change noted.
+
+Closes #<issue>"
+```
+
+---
+
+## Workstream 2 — LangChain4j + Ollama Agent Communication Examples
+
+### Files to Create
+
+| File | Responsibility |
+|---|---|
+| `examples/agent-communication/pom.xml` | Module POM with quarkus-langchain4j-ollama dependency |
+| `examples/agent-communication/src/main/resources/application.properties` | Ollama config, InMemory store activation |
+| `examples/agent-communication/src/main/java/.../agent/OrchestratorAgent.java` | `@RegisterAiService` — sends typed messages, decides QUERY vs COMMAND |
+| `examples/agent-communication/src/main/java/.../agent/WorkerAgent.java` | `@RegisterAiService` — receives messages, sends STATUS/DONE/DECLINE |
+| `examples/agent-communication/src/main/java/.../QhorusChannel.java` | Shared channel/instance setup helper |
+| `examples/agent-communication/src/test/java/.../CodeReviewPipelineTest.java` | Example 1: COMMAND→STATUS→QUERY→RESPONSE→DONE |
+| `examples/agent-communication/src/test/java/.../RefundAuthorisationTest.java` | Example 2: QUERY→RESPONSE→COMMAND→DONE |
+| `examples/agent-communication/src/test/java/.../OutOfScopeDeclineTest.java` | Example 3: COMMAND→DECLINE |
+
+### Prerequisites
+
+**Docker only — no brew required.** Quarkus Dev Services manages Ollama automatically.
+
+The test profile uses `quarkus.langchain4j.ollama.devservices.enabled=true`. On first test run, Quarkus pulls `gemma3:1b` into a Docker container and starts it. Subsequent runs reuse the cached image.
+
+If `gemma3:1b` classification accuracy falls below 80% in Task 15, change one line:
+```properties
+quarkus.langchain4j.ollama.devservices.model-name=llama3.2:3b
+```
+The Dev Service pulls and switches automatically.
+
+---
+
+### Task 10: Create the examples/agent-communication module
+
+**Files:**
+- Create: `examples/agent-communication/pom.xml`
+- Modify: `examples/pom.xml` (add module reference)
+
+- [ ] **Step 1: Add module to examples/pom.xml**
+
+In `examples/pom.xml`, add to `<modules>`:
+```xml
+<module>agent-communication</module>
+```
+
+- [ ] **Step 2: Create examples/agent-communication/pom.xml**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>io.quarkiverse.qhorus</groupId>
+    <artifactId>quarkus-qhorus-examples</artifactId>
+    <version>999-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>quarkus-qhorus-example-agent-communication</artifactId>
+  <name>Quarkus Qhorus :: Examples :: Agent Communication</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.quarkiverse.qhorus</groupId>
+      <artifactId>quarkus-qhorus</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkiverse.qhorus</groupId>
+      <artifactId>quarkus-qhorus-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkiverse.langchain4j</groupId>
+      <artifactId>quarkus-langchain4j-ollama</artifactId>
+      <version>0.23.0</version>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.rest-assured</groupId>
+      <artifactId>rest-assured</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
+```
+
+- [ ] **Step 3: Create application.properties**
+
+Create `examples/agent-communication/src/main/resources/application.properties`:
+
+```properties
+# Ollama via Quarkus Dev Services — Docker managed, no manual setup required
+# First run downloads gemma3:1b (~815MB) and caches in Docker
+quarkus.langchain4j.ollama.devservices.enabled=true
+quarkus.langchain4j.ollama.devservices.model-name=gemma3:1b
+# If classification accuracy < 80% in Task 15, change model-name to llama3.2:3b
+quarkus.langchain4j.ollama.timeout=60s
+quarkus.langchain4j.ollama.log-requests=true
+quarkus.langchain4j.ollama.log-responses=true
+
+# Qhorus — InMemory stores (no database needed)
+quarkus.arc.selected-alternatives=\
+  io.quarkiverse.qhorus.testing.InMemoryChannelStore,\
+  io.quarkiverse.qhorus.testing.InMemoryMessageStore,\
+  io.quarkiverse.qhorus.testing.InMemoryInstanceStore,\
+  io.quarkiverse.qhorus.testing.InMemoryDataStore,\
+  io.quarkiverse.qhorus.testing.InMemoryPendingReplyStore
+
+quarkus.http.test-port=0
+```
+
+- [ ] **Step 4: Compile the new module**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl examples/agent-communication -Dno-format -q 2>&1 | tail -10
+```
+Expected: clean compile.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add examples/pom.xml examples/agent-communication/
+git commit -m "feat(examples): scaffold agent-communication module with Ollama + InMemory stores
+
+Uses llama3.2:3b via Ollama for free local LLM inference.
+No database required — InMemory stores from quarkus-qhorus-testing.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 11: Create OrchestratorAgent and WorkerAgent
+
+**Files:**
+- Create: `examples/agent-communication/src/main/java/io/quarkiverse/qhorus/examples/agent/OrchestratorAgent.java`
+- Create: `examples/agent-communication/src/main/java/io/quarkiverse/qhorus/examples/agent/WorkerAgent.java`
+- Create: `examples/agent-communication/src/main/java/io/quarkiverse/qhorus/examples/agent/AgentResponse.java`
+
+- [ ] **Step 1: Create AgentResponse record**
+
+```java
+package io.quarkiverse.qhorus.examples.agent;
+
+/**
+ * Structured response from an agent specifying what message type to send
+ * and what to say. LLMs populate this from context.
+ */
+public record AgentResponse(
+    /** One of: QUERY COMMAND RESPONSE STATUS DECLINE HANDOFF DONE FAILURE */
+    String messageType,
+    /** The natural language content of the message */
+    String content,
+    /** Correlation ID to reply to (for RESPONSE, DONE, FAILURE, STATUS) */
+    String correlationId
+) {}
+```
+
+- [ ] **Step 2: Create OrchestratorAgent**
+
+```java
+package io.quarkiverse.qhorus.examples.agent;
+
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
+import io.quarkiverse.langchain4j.RegisterAiService;
+
+@RegisterAiService
+public interface OrchestratorAgent {
+
+    @SystemMessage("""
+        You are an orchestrator agent coordinating work between specialist agents.
+        You communicate using typed messages. Always respond with JSON matching:
+        {"messageType": "<TYPE>", "content": "<text>", "correlationId": "<id or null>"}
+
+        Message types:
+        QUERY — when you need information before acting (no side effects)
+        COMMAND — when you need another agent to do something
+        RESPONSE — when answering a QUERY from another agent
+        STATUS — to report progress while working
+        DECLINE — to refuse a task you cannot handle (explain why in content)
+        DONE — when your task is complete
+        FAILURE — when a task cannot be completed (explain why in content)
+        """)
+    @UserMessage("{{task}}")
+    AgentResponse decide(String task);
+}
+```
+
+- [ ] **Step 3: Create WorkerAgent**
+
+```java
+package io.quarkiverse.qhorus.examples.agent;
+
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
+import io.quarkiverse.langchain4j.RegisterAiService;
+
+@RegisterAiService
+public interface WorkerAgent {
+
+    @SystemMessage("""
+        You are a specialist worker agent. You receive tasks and respond appropriately.
+        Always respond with JSON matching:
+        {"messageType": "<TYPE>", "content": "<text>", "correlationId": "<id or null>"}
+
+        Message types:
+        QUERY — when you need clarification before you can act
+        RESPONSE — when answering a question
+        STATUS — to report you are working on a task
+        DECLINE — if the task is outside your capabilities (explain why in content)
+        DONE — when your task is complete
+        FAILURE — if you cannot complete the task (explain why in content)
+        """)
+    @UserMessage("You received this message (type={{type}}, correlationId={{correlationId}}): {{content}}")
+    AgentResponse handle(String type, String correlationId, String content);
+}
+```
+
+- [ ] **Step 4: Compile**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn compile -pl examples/agent-communication -Dno-format -q 2>&1 | tail -5
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add examples/agent-communication/src/main/java/
+git commit -m "feat(examples): OrchestratorAgent and WorkerAgent AI services with structured responses
+
+Agents return AgentResponse(messageType, content, correlationId).
+LLM chooses messageType from context using the taxonomy description.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 12: Example 1 — Code Review Pipeline (COMMAND→STATUS→QUERY→RESPONSE→DONE)
+
+**Files:**
+- Create: `examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/CodeReviewPipelineTest.java`
+
+- [ ] **Step 1: Write the test**
+
+```java
+package io.quarkiverse.qhorus.examples;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.UUID;
+
+import jakarta.inject.Inject;
+
+import org.junit.jupiter.api.Test;
+
+import io.quarkiverse.qhorus.examples.agent.OrchestratorAgent;
+import io.quarkiverse.qhorus.examples.agent.WorkerAgent;
+import io.quarkiverse.qhorus.runtime.channel.ChannelService;
+import io.quarkiverse.qhorus.runtime.message.MessageService;
+import io.quarkiverse.qhorus.runtime.message.MessageType;
+import io.quarkus.test.junit.QuarkusTest;
+
+/**
+ * Demonstrates a code review pipeline:
+ *   Orchestrator sends COMMAND → Worker sends STATUS → Worker sends QUERY
+ *   → Orchestrator sends RESPONSE → Worker sends DONE
+ *
+ * Run with: -Dollama.available=true (requires ollama serve + llama3.2:3b)
+ */
+@QuarkusTest
+// Dev Services starts Ollama automatically — no @EnabledIfSystemProperty needed
+class CodeReviewPipelineTest {
+
+    @Inject OrchestratorAgent orchestrator;
+    @Inject WorkerAgent worker;
+    @Inject ChannelService channelService;
+    @Inject MessageService messageService;
+
+    @Test
+    void codeReviewPipelineUsesCorrectMessageTypes() {
+        // Orchestrator decides to delegate a code review
+        var orchestratorDecision = orchestrator.decide(
+            "Delegate a code review of the authentication module to the worker agent. " +
+            "You need them to check for security vulnerabilities."
+        );
+
+        assertThat(orchestratorDecision.messageType()).isEqualTo("COMMAND");
+        assertThat(orchestratorDecision.content()).isNotBlank();
+
+        // Worker acknowledges and reports progress
+        var workerStatus = worker.handle(
+            "COMMAND",
+            UUID.randomUUID().toString(),
+            orchestratorDecision.content()
+        );
+
+        assertThat(workerStatus.messageType()).isIn("STATUS", "QUERY");
+
+        // If worker needs clarification, they use QUERY — not COMMAND
+        if ("QUERY".equals(workerStatus.messageType())) {
+            assertThat(workerStatus.content())
+                .as("A QUERY should ask for information, not issue a command")
+                .doesNotContain("please do", "you must", "execute");
+
+            // Orchestrator responds with RESPONSE — not DONE (task not complete yet)
+            var orchestratorResponse = orchestrator.decide(
+                "The worker asked: " + workerStatus.content() +
+                ". Answer their question about the auth module — it uses JWT tokens, RS256 algorithm."
+            );
+            assertThat(orchestratorResponse.messageType()).isEqualTo("RESPONSE");
+        }
+
+        // Worker completes the review
+        var workerDone = worker.handle(
+            "COMMAND",
+            UUID.randomUUID().toString(),
+            "Complete your code review of the authentication module. " +
+            "It uses JWT with RS256. Report your findings."
+        );
+
+        assertThat(workerDone.messageType()).isIn("DONE", "STATUS");
+        assertThat(workerDone.content()).isNotBlank();
+    }
+}
+```
+
+- [ ] **Step 2: Run with Ollama available**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test \
+  -pl examples/agent-communication \
+  -Dtest=CodeReviewPipelineTest \
+  -Dno-format -q 2>&1 | tail -15
+```
+Expected: PASS. If FAIL, check that Ollama is running and model is pulled.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/CodeReviewPipelineTest.java
+git commit -m "feat(examples): code review pipeline demonstrating COMMAND→STATUS→QUERY→RESPONSE→DONE
+
+Real LLM agent (llama3.2:3b via Ollama) chooses correct message types from context.
+Validates the QUERY vs COMMAND distinction and the QUERY→RESPONSE cycle.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 13: Example 2 — Refund Authorisation (QUERY→RESPONSE→COMMAND→DONE)
+
+**Files:**
+- Create: `examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/RefundAuthorisationTest.java`
+
+- [ ] **Step 1: Write the test**
+
+```java
+package io.quarkiverse.qhorus.examples;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.UUID;
+
+import jakarta.inject.Inject;
+
+import org.junit.jupiter.api.Test;
+
+import io.quarkiverse.qhorus.examples.agent.OrchestratorAgent;
+import io.quarkiverse.qhorus.examples.agent.WorkerAgent;
+import io.quarkus.test.junit.QuarkusTest;
+
+/**
+ * Demonstrates the refund authorisation pattern:
+ * Agent asks BEFORE acting (QUERY) rather than assuming authority (COMMAND).
+ * Prevents the "£50k refund on a £500 order" failure mode.
+ */
+@QuarkusTest
+// Dev Services starts Ollama automatically — no @EnabledIfSystemProperty needed
+class RefundAuthorisationTest {
+
+    @Inject OrchestratorAgent orchestrator;
+    @Inject WorkerAgent worker;
+
+    @Test
+    void agentAsksBeforeIssuingRefund() {
+        // Worker receives a request to handle a refund — amount unknown
+        var workerDecision = worker.handle(
+            "COMMAND",
+            UUID.randomUUID().toString(),
+            "Process a refund for customer order #4521. The customer is unhappy."
+        );
+
+        // The worker should QUERY for the approved amount, not immediately COMMAND or DONE
+        // A competent agent does not assume refund authority
+        assertThat(workerDecision.messageType())
+            .as("Agent should ask about refund amount before acting, not assume authority")
+            .isIn("QUERY", "STATUS");
+
+        if ("QUERY".equals(workerDecision.messageType())) {
+            assertThat(workerDecision.content())
+                .as("The query should ask about amount, approval, or policy")
+                .containsAnyOf("amount", "approved", "policy", "authoris", "limit", "maximum");
+
+            // Orchestrator authorises a specific amount via RESPONSE
+            var orchestratorResponse = orchestrator.decide(
+                "The refund agent asked: " + workerDecision.content() +
+                ". Tell them: apply standard 10% goodwill gesture, maximum £50."
+            );
+
+            assertThat(orchestratorResponse.messageType()).isEqualTo("RESPONSE");
+            assertThat(orchestratorResponse.content())
+                .containsAnyOf("10%", "£50", "50", "goodwill");
+
+            // Now worker can act — with bounded authority
+            var workerFinal = worker.handle(
+                "RESPONSE",
+                workerDecision.correlationId(),
+                orchestratorResponse.content()
+            );
+
+            assertThat(workerFinal.messageType()).isIn("DONE", "STATUS");
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Run**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test \
+  -pl examples/agent-communication \
+  -Dtest=RefundAuthorisationTest \
+  -Dno-format -q 2>&1 | tail -10
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/RefundAuthorisationTest.java
+git commit -m "feat(examples): refund authorisation demonstrating QUERY-before-COMMAND pattern
+
+Validates that a competent agent asks for authority before acting.
+The enterprise failure mode: agent assumes refund amount without asking.
+
+Refs #<issue>"
+```
+
+---
+
+### Task 14: Example 3 — Out-of-Scope Decline (COMMAND→DECLINE)
+
+**Files:**
+- Create: `examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/OutOfScopeDeclineTest.java`
+
+- [ ] **Step 1: Write the test**
+
+```java
+package io.quarkiverse.qhorus.examples;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.UUID;
+
+import jakarta.inject.Inject;
+
+import org.junit.jupiter.api.Test;
+
+import io.quarkiverse.qhorus.examples.agent.WorkerAgent;
+import io.quarkus.test.junit.QuarkusTest;
+
+/**
+ * Demonstrates structured refusal:
+ * An agent receives a task outside its capabilities and sends DECLINE with a reason.
+ * This is distinct from FAILURE (tried and failed) — DECLINE means "will not attempt".
+ */
+@QuarkusTest
+// Dev Services starts Ollama automatically — no @EnabledIfSystemProperty needed
+class OutOfScopeDeclineTest {
+
+    @Inject WorkerAgent worker;
+
+    @Test
+    void agentDeclinesTaskOutsideCapabilities() {
+        // Ask a code review agent to do financial analysis — outside its role
+        var response = worker.handle(
+            "COMMAND",
+            UUID.randomUUID().toString(),
+            "You are a code review specialist. Perform a full financial audit " +
+            "of the company's Q3 accounts and produce an IFRS-compliant report."
+        );
+
+        assertThat(response.messageType())
+            .as("Agent should DECLINE a task outside its capabilities, not attempt and FAIL")
+            .isEqualTo("DECLINE");
+
+        assertThat(response.content())
+            .as("DECLINE must include a reason — cannot be empty")
+            .isNotBlank()
+            .hasSizeGreaterThan(10);
+    }
+
+    @Test
+    void declineIsDistinctFromFailure() {
+        // Ask agent to do something it tried and couldn't complete
+        var attemptedTask = worker.handle(
+            "COMMAND",
+            UUID.randomUUID().toString(),
+            "You attempted to compile the code but the build system is unavailable. " +
+            "Report the outcome — you tried but could not complete the compilation."
+        );
+
+        // For a task that was attempted but failed — FAILURE is correct, not DECLINE
+        assertThat(attemptedTask.messageType())
+            .as("A task attempted but not completed should be FAILURE, not DECLINE")
+            .isIn("FAILURE", "STATUS");
+    }
+}
+```
+
+- [ ] **Step 2: Run**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test \
+  -pl examples/agent-communication \
+  -Dtest=OutOfScopeDeclineTest \
+  -Dno-format -q 2>&1 | tail -10
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/OutOfScopeDeclineTest.java
+git commit -m "feat(examples): out-of-scope decline demonstrating DECLINE vs FAILURE distinction
+
+DECLINE = will not attempt (outside capabilities)
+FAILURE = attempted but could not complete
+
+Both require non-empty content explaining why.
+
+Closes #<issue>"
+```
+
+---
+
+### Task 15: Classification accuracy baseline test
+
+**Files:**
+- Create: `examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/ClassificationAccuracyTest.java`
+
+This test validates the paper claim: the 9-type taxonomy is LLM-classifiable. Run it to measure baseline accuracy before v1 ships.
+
+- [ ] **Step 1: Write the classification accuracy test**
+
+```java
+package io.quarkiverse.qhorus.examples;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import jakarta.inject.Inject;
+
+import org.junit.jupiter.api.Test;
+
+import io.quarkiverse.qhorus.examples.agent.OrchestratorAgent;
+import io.quarkiverse.qhorus.examples.agent.WorkerAgent;
+import io.quarkus.test.junit.QuarkusTest;
+
+/**
+ * Baseline classification accuracy test.
+ * Validates that llama3.2:3b correctly classifies the 9 message types
+ * from natural language context descriptions.
+ * Target: >= 80% accuracy across all scenarios.
+ */
+@QuarkusTest
+// Dev Services starts Ollama automatically — no @EnabledIfSystemProperty needed
+class ClassificationAccuracyTest {
+
+    @Inject OrchestratorAgent orchestrator;
+    @Inject WorkerAgent worker;
+
+    record Scenario(String prompt, String expectedType, String description) {}
+
+    @Test
+    void classifiesQueryCorrectly() {
+        var scenarios = new Scenario[]{
+            new Scenario("What is the current row count in the orders table?", "QUERY", "information request"),
+            new Scenario("How many agents are currently registered?", "QUERY", "count query"),
+            new Scenario("Is the compliance report ready?", "QUERY", "status question"),
+        };
+        assertAccuracy(scenarios, 0.8);
+    }
+
+    @Test
+    void classifiesCommandCorrectly() {
+        var scenarios = new Scenario[]{
+            new Scenario("Generate the monthly compliance report and send it to the finance team.", "COMMAND", "action request"),
+            new Scenario("Process all pending refund requests in the queue.", "COMMAND", "batch action"),
+            new Scenario("Run the database migration for the new schema.", "COMMAND", "execution request"),
+        };
+        assertAccuracy(scenarios, 0.8);
+    }
+
+    @Test
+    void classifiesDeclineCorrectly() {
+        var scenarios = new Scenario[]{
+            new Scenario(
+                "You are a code review agent. You received a COMMAND to perform a financial audit. " +
+                "This is outside your domain. Respond appropriately.", "DECLINE", "out of scope"),
+            new Scenario(
+                "You are a read-only reporting agent. You received a COMMAND to delete customer records. " +
+                "You do not have write permissions. Respond appropriately.", "DECLINE", "permission refused"),
+        };
+        assertAccuracy(scenarios, 0.8);
+    }
+
+    private void assertAccuracy(Scenario[] scenarios, double minAccuracy) {
+        int correct = 0;
+        for (Scenario scenario : scenarios) {
+            var response = orchestrator.decide(scenario.prompt());
+            if (scenario.expectedType().equals(response.messageType())) {
+                correct++;
+            } else {
+                System.out.printf("MISS [%s]: expected=%s actual=%s%n",
+                    scenario.description(), scenario.expectedType(), response.messageType());
+            }
+        }
+        double accuracy = (double) correct / scenarios.length;
+        System.out.printf("Accuracy: %.0f%% (%d/%d)%n", accuracy * 100, correct, scenarios.length);
+        assertThat(accuracy).isGreaterThanOrEqualTo(minAccuracy);
+    }
+}
+```
+
+- [ ] **Step 2: Run and record the baseline**
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test \
+  -pl examples/agent-communication \
+  -Dtest=ClassificationAccuracyTest \
+  -Dno-format 2>&1 | grep -E "Accuracy|MISS|Tests run"
+```
+Record the accuracy numbers. If below 80%, the `@SystemMessage` classification guide needs tuning.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add examples/agent-communication/src/test/java/io/quarkiverse/qhorus/examples/ClassificationAccuracyTest.java
+git commit -m "test(examples): baseline LLM classification accuracy for 9-type taxonomy
+
+Tests that llama3.2:3b correctly classifies QUERY, COMMAND, DECLINE from context.
+Target: >= 80% per category. Results inform the journal paper evaluation.
+
+Closes #<issue>"
+```
+
+---
+
+## Self-Review
+
+**Spec coverage check:**
+
+| Spec section | Covered by task |
+|---|---|
+| §1 Problem statement | Tasks 1, 8 (validation tests prove the fix) |
+| §2 Design principles | Embedded in all tasks |
+| §3 Two-part message structure | Tasks 2, 3 (new Message fields) |
+| §4.1 9-type overview | Task 1 (enum) |
+| §4.2 Four-layer semantics | Task 1 (Javadoc), Task 6 (MCP tool description) |
+| §4.3 Per-type developer definitions | Task 6 (MCP tool description), Tasks 12-14 (examples) |
+| §4.4 isAgentVisible() | Task 1 (unchanged but verified in Task 8) |
+| §5 New Message fields | Task 2 |
+| §6.1 deadline parameter | Task 6 |
+| §6.2 Type string parsing / REQUEST removed | Tasks 6, 7 |
+| §6.3 LLM-assisted classification | Tasks 11-15 |
+| §7.1 REQUEST removed | Tasks 7, 8 |
+| §7.2 Consumer impact | Tasks 4, 5, 6, 7 |
+| §7.3 What is not breaking | Verified by test suite in Task 9 |
+| §8 Deferred scope | Documented — not implemented |
+| §9 Theoretical foundation | ADR-0005 (separate work item) |
+| §10 LLM-assisted envelope population | Tasks 11-15 |
+| §11 Policy and compliance | Task 6 (tool description), Task 15 (accuracy baseline) |
+| §12 Open questions | All resolved in spec; Tasks 2, 6 implement the resolutions |
+
+**No gaps found.**
+
+**Placeholder scan:** No TBDs, TODOs, or "implement later" patterns found.
+
+**Type consistency:** `AgentResponse` record used consistently across Tasks 11-15. `MessageType` enum values used consistently throughout. `requiresCorrelationId()`, `requiresContent()`, `requiresTarget()` defined in Task 1 and used in Tasks 4, 6.
