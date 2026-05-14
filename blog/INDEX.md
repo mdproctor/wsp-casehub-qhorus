@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-14-mdp01-making-actortype-explicit.md](2026-05-14-mdp01-making-actortype-explicit.md) | 2026-05-14 | A2A integration: silent HUMAN misclassification, six-step identity resolution chain, making ActorType explicit across the platform |
 | [2026-04-28-mdp01-what-the-channel-allows.md](2026-04-28-mdp01-what-the-channel-allows.md) | 2026-04-28 | allowedTypes enforcement, automatic trust attestation, REQUIRES_NEW/CommitmentStore production bug, #121 decisions |
 | [2026-04-27-mdp01-normative-ledger-ships.md](2026-04-27-mdp01-normative-ledger-ships.md) | 2026-04-27 | Normative ledger ships; the four-layer framework; trust as provenance chain |
 | [2026-04-27-mdp02-six-ways-to-query.md](2026-04-27-mdp02-six-ways-to-query.md) | 2026-04-27 | Six ledger query tools ship; findAncestorChain iterative walk; @TestTransaction + REQUIRES_NEW @BeforeEach gotcha |
