@@ -27,3 +27,5 @@
 | [2026-05-01-mdp03-scoped-trust.md](2026-05-01-mdp03-scoped-trust.md) | 2026-05-01 | capabilityTag on LedgerAttestation; SNAPSHOT interface contract break; javap to read named queries from JARs |
 | [2026-05-01-mdp04-the-body-of-work.md](2026-05-01-mdp04-the-body-of-work.md) | 2026-05-01 | Reading the three normative docs together; normative-summary.md; cross-channel causal correlation documented; platform conventions |
 | [2026-05-05-mdp01-the-coherence-invariant.md](2026-05-05-mdp01-the-coherence-invariant.md) | 2026-05-05 | Channel backend abstraction: split-conversation invariant, ActorType alignment, A2A actor classification bug, TOCTOU race caught in review |
+
+| [2026-05-15-mdp01-what-excludedtype-actually-excludes.md](2026-05-15-mdp01-what-excludedtype-actually-excludes.md) | 2026-05-15 | ExcludedTypeBuildItem doesn't gate JAX-RS; Capabilities in BooleanSupplier is silent; the pivot to @IfBuildProperty on quarkus.datasource.qhorus.reactive |
