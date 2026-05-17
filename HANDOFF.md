@@ -1,46 +1,54 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-15 — qhorus#141 shipped and closed
+**Date:** 2026-05-17 — qhorus#151 and #142 shipped and closed
 
 ---
 
 ## What Was Done This Session
 
-**qhorus#141** — Gate `quarkus-hibernate-reactive-panache` behind build-time flag.
+**qhorus#151** — `DELEGATED → "completed"` in A2A state; fixed to `"working"`.
 
-Three approaches failed before the right one landed:
-1. `ExcludedTypeBuildItem` + `Capabilities` — `ExcludedTypeBuildItem` doesn't gate JAX-RS scanners; `Capabilities` can't be injected in `BooleanSupplier` (evaluated before CapabilityBuildItems are produced). Claudony reported duplicate `/a2a` endpoint.
-2. `Class.forName()` in BooleanSupplier — subagents added `@IfBuildProperty(quarkus.datasource.reactive)` (wrong property) and broke `A2AResource` by removing `@UnlessBuildProperty`.
-3. `@Priority(1)` on reactive JPA stores — CDI ambiguity with `InMemoryReactive*Store @Priority(1)` from testing module.
+Extracted `A2ATaskState` (package-private utility) with `fromCommitmentState` and
+`fromMessageHistory` static methods. Both resource classes delegate to it. The fix
+revealed two non-obvious facts about the commitment lifecycle:
+- `findByCorrelationId` returns the child OPEN commitment after HANDOFF, not the
+  parent DELEGATED. The `DELEGATED → "working"` branch in `fromCommitmentState` is
+  currently unreachable via the live HTTP path; the OPEN guard falls through to
+  `fromMessageHistory` instead.
+- HANDOFF messages require a non-null `target` argument; all other types accept null.
 
-**Fix shipped:** `@IfBuildProperty(quarkus.datasource.qhorus.reactive=true)` on all 23 reactive beans; `@UnlessBuildProperty` on 5 blocking REST/MCP beans; `<optional>true</optional>` on reactive Panache dep; `QhorusProcessor` = `feature()` only; `QhorusBuildConfig` deleted. 2478 tests, 0 failures.
+**qhorus#142** — Flyway V2 classpath conflict with casehub-work.
+
+Moved all 10 migrations from `db/migration/` to `db/migration/qhorus/`. Updated
+`quarkus.flyway.qhorus.locations=classpath:db/migration/qhorus`. Subagent missed
+staging the deletions; code review caught it; fixed in follow-up commit.
 
 **Artifacts:**
-- ADR-0007: `docs/adr/0007-reactive-stack-activation.md`
-- Protocol PP-20260514-f41258 corrected in parent repo (`universal/quarkus-optional-extension-dep.md`)
-- 4 garden entries (GE-20260515-196055, acba9e, bccf6c, b8e86a)
-- Claudony text prepared (see previous conversation)
-- Installed to local m2
-
-**Consumer cleanup issues filed:** claudony#112, devtown#25 (workaround removal). aml#13 already existed.
-**Assessment issues filed:** engine#253, qhorus#152 (reactive dep assessment for other modules).
+- Spec promoted to `docs/specs/2026-05-17-flyway-scoped-migration-location.md`
+- Plan archived to `plans/attic/epic-142-flyway-versioning/`
+- DESIGN.md `§Persistence Abstraction`: new `### Schema management` subsection
+- parent repo: `PLATFORM.md` and `flyway-version-range-allocation.md` updated
+- 4 garden entries: GE-20260517-97d306, aaf0a7, 8d62e3, e10a0f
+- Issues filed: #155 (Flyway dir-scoping convention), #156 (V1003 gap), #157 (schema gaps)
+- Epic `epic-142-flyway-versioning` closed; branches retained for inspection
 
 ## Current State
 
-- **Branch:** `main` — clean, fully pushed, installed to m2
-- **Test count:** 2478 passing, 88 skipped (reactive JPA — Docker)
-- **Untracked:** `docs/squash-plan-*.md` (stale, can delete)
+- **Project branch:** `epic-142-flyway-versioning` (retained; not merged to main yet)
+- **Workspace branch:** `epic-142-flyway-versioning` (retained)
+- **Tests:** runtime suite passing; `docs/squash-plan-*.md` still untracked (can delete)
 
 ## Immediate Next Steps
 
-Priority order:
-1. **#142** (bug) — Flyway V2 conflict with casehub-work when on same classpath. Fix: renumber one V2 migration per `flyway-version-range-allocation.md`. Check which module owns V2 and which needs to yield.
-2. **#151** (bug) — `DELEGATED` → `"completed"` in A2A state mapping is wrong; fix `toA2AState(DELEGATED)` → `"working"`
-3. **#132** (feat) — Delivery guarantees for registered backends (retry + dead-letter)
+1. Delete epic branches when done inspecting:
+   `git -C /Users/mdproctor/claude/casehub/qhorus checkout main && git branch -d epic-142-flyway-versioning`
+   `git -C /Users/mdproctor/claude/public/casehub/qhorus checkout main && git branch -d epic-142-flyway-versioning`
+2. **#132** (feat) — Delivery guarantees for registered backends (retry + dead-letter)
+3. **#156** (docs) — Document V1003 version gap / next-migration convention
+4. **#157** (chore) — Remove dead `pending_reply` table; add `commitment` table migration
 
 ## References
 
 | What | Path |
 |---|---|
-| Latest blog | `blog/2026-05-15-mdp01-what-excludedtype-actually-excludes.md` |
-| ADR-0007 | `wksp/../qhorus/docs/adr/0007-reactive-stack-activation.md` |
+| Latest blog | `blog/2026-05-17-mdp01-after-the-handoff.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
