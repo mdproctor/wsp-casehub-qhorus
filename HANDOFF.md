@@ -1,54 +1,55 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-17 — qhorus#151 and #142 shipped and closed
+**Date:** 2026-05-19 — #153, #154, #142 shipped; all three epics closed and merged to main
 
 ---
 
 ## What Was Done This Session
 
-**qhorus#151** — `DELEGATED → "completed"` in A2A state; fixed to `"working"`.
+**qhorus#154** — `correlationId` threading through inbound human message path.
+`NormalisedMessage` expanded from 3 to 7 fields (complete domain representation).
+`ChannelGateway.receiveHumanMessage()` now a clean 1:1 mapping. `ClinicalInboundNormaliser`
+passes `correlationId` through — commitment auto-fulfillment unblocked for clinical.
 
-Extracted `A2ATaskState` (package-private utility) with `fromCommitmentState` and
-`fromMessageHistory` static methods. Both resource classes delegate to it. The fix
-revealed two non-obvious facts about the commitment lifecycle:
-- `findByCorrelationId` returns the child OPEN commitment after HANDOFF, not the
-  parent DELEGATED. The `DELEGATED → "working"` branch in `fromCommitmentState` is
-  currently unreachable via the live HTTP path; the OPEN guard falls through to
-  `fromMessageHistory` instead.
-- HANDOFF messages require a non-null `target` argument; all other types accept null.
+**qhorus#153** — `MessageObserver` SPI + `InProcessMessageBus` CDI default.
+CDI-event-only design rejected in brainstorming: qhorus is a distributed mesh,
+CDI events don't cross JVM boundaries. `MessageObserver` is transport-agnostic with
+`Scope { LOCAL, CLUSTER }`. `InProcessMessageBus` (`@DefaultBean`) fires CDI events
+for embedded harnesses; Kafka/WebSocket implementations are future additive beans.
+Architecture doc at `docs/messaging-architecture.md`. Multi-node fleet gap documented
+as qhorus#162. `fireAsync()` pre-commit race documented; `MessageReceivedEvent`
+self-contained to avoid DB reads in observers (tracked qhorus#166 for JTA fix).
 
-**qhorus#142** — Flyway V2 classpath conflict with casehub-work.
-
-Moved all 10 migrations from `db/migration/` to `db/migration/qhorus/`. Updated
-`quarkus.flyway.qhorus.locations=classpath:db/migration/qhorus`. Subagent missed
-staging the deletions; code review caught it; fixed in follow-up commit.
+**qhorus#142** — Flyway migration path (`db/migration/qhorus/`) was on the epic branch
+but never merged to main. Found by branch hygiene scan. Fixed. Installed artifact updated.
 
 **Artifacts:**
-- Spec promoted to `docs/specs/2026-05-17-flyway-scoped-migration-location.md`
-- Plan archived to `plans/attic/epic-142-flyway-versioning/`
-- DESIGN.md `§Persistence Abstraction`: new `### Schema management` subsection
-- parent repo: `PLATFORM.md` and `flyway-version-range-allocation.md` updated
-- 4 garden entries: GE-20260517-97d306, aaf0a7, 8d62e3, e10a0f
-- Issues filed: #155 (Flyway dir-scoping convention), #156 (V1003 gap), #157 (schema gaps)
-- Epic `epic-142-flyway-versioning` closed; branches retained for inspection
+- Specs: `docs/specs/` — all three epics promoted
+- Blog: `blog/2026-05-19-mdp01-the-mesh-beneath-the-event.md`
+- Garden: 5 new entries + 1 revision (tools domain)
+- Protocols: epic close requires code merge, EPIC-CLOSED deletion date,
+  MessageObserver `@ApplicationScoped` (parent repo committed)
+- Issues filed: qhorus#158–#167, clinical#16
 
 ## Current State
 
-- **Project branch:** `epic-142-flyway-versioning` (retained; not merged to main yet)
-- **Workspace branch:** `epic-142-flyway-versioning` (retained)
-- **Tests:** runtime suite passing; `docs/squash-plan-*.md` still untracked (can delete)
+- **Both repos:** `main` — all three epics merged
+- **Epic branches retained:** epic-142 (delete after 2026-06-02), epic-153, epic-154
+  (all have `EPIC-CLOSED.md`)
+- **Local .m2:** up to date from current main
+- **Tests:** 27 unit tests passing; `@QuarkusTest` CDI env issue pre-existing
 
 ## Immediate Next Steps
 
-1. Delete epic branches when done inspecting:
-   `git -C /Users/mdproctor/claude/casehub/qhorus checkout main && git branch -d epic-142-flyway-versioning`
-   `git -C /Users/mdproctor/claude/public/casehub/qhorus checkout main && git branch -d epic-142-flyway-versioning`
-2. **#132** (feat) — Delivery guarantees for registered backends (retry + dead-letter)
-3. **#156** (docs) — Document V1003 version gap / next-migration convention
-4. **#157** (chore) — Remove dead `pending_reply` table; add `commitment` table migration
+1. **#132** — Delivery guarantees for registered backends (retry + dead-letter) — main feature item
+2. **Cross-repo branch review** — user to coordinate with work-claude on casehub-work
+   (hygiene done this session by mistake; watch: `WorkItemExcludedUsersTest` after `-X ours`)
+3. **clinical#16** — PiResponseListener workaround removal — now unblocked
+4. **claudony #131** — claudony can close; qhorus side complete
 
 ## References
 
 | What | Path |
 |---|---|
-| Latest blog | `blog/2026-05-17-mdp01-after-the-handoff.md` |
+| Latest blog | `blog/2026-05-19-mdp01-the-mesh-beneath-the-event.md` |
+| Architecture doc | `docs/messaging-architecture.md` (SVG diagrams, Claudony gap included) |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
