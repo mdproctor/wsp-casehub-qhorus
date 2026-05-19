@@ -30,3 +30,4 @@
 
 | [2026-05-15-mdp01-what-excludedtype-actually-excludes.md](2026-05-15-mdp01-what-excludedtype-actually-excludes.md) | 2026-05-15 | ExcludedTypeBuildItem doesn't gate JAX-RS; Capabilities in BooleanSupplier is silent; the pivot to @IfBuildProperty on quarkus.datasource.qhorus.reactive |
 | [2026-05-19-mdp01-the-mesh-beneath-the-event.md](2026-05-19-mdp01-the-mesh-beneath-the-event.md) | 2026-05-19 | #154 NormalisedMessage expansion; #153 MessageObserver SPI — CDI event replaced by transport-agnostic SPI with LOCAL/CLUSTER scope; multi-node fleet gap documented |
+| [2026-05-19-mdp02-what-drop-and-create-hides.md](2026-05-19-mdp02-what-drop-and-create-hides.md) | 2026-05-19 | Cleanup epic: FlywayMigrationSchemaTest proves migration files, Instance.handles() lifecycle fix retires @ApplicationScoped constraint, @DefaultBean stub unblocks all @QuarkusTest |
