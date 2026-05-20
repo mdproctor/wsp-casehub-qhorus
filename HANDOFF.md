@@ -1,40 +1,59 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-19 — epic-a2a-lifecycle-cleanup closed; 6 issues resolved; all @QuarkusTest tests unblocked
+**Date:** 2026-05-20 — #172 reactive gating property rename; #173 getChannelTimeline store bypass fixed; all closed epics on main
 
 ---
 
 ## What Was Done This Session
 
-**epic-a2a-lifecycle-cleanup** — six issues, all closed and merged to main:
+**#173 (quick fix):** `getChannelTimeline()` in `ReactiveQhorusMcpTools` was calling `Message.<Message>find(...)` (raw Panache) instead of `blockingMessageStore.scan()` — bypassed `InMemoryMessageStore` in tests, breaking Claudony. Fixed with one injection + one call. Installed to local .m2.
 
-- **#151** — already done from previous session; closed on discovery
-- **#157** — removed dead `pending_reply` table from V1 schema; added V10 commitment migration (`fk_commitment_channel`, `fk_commitment_parent`, `idx_commitment_state_expires`); `FlywayMigrationSchemaTest` proves Flyway migrations directly (bypasses drop-and-create)
-- **#167** — `MessageObserverDispatcher` now uses `Instance.handles()` with `finally`-close; any CDI scope valid on `MessageObserver`; `@ApplicationScoped`-only constraint retired (protocol PP-20260518-837246 updated)
-- **#160** — E2E commitment auto-fulfillment test via `ChannelGatewayCommitmentE2ETest` with `@QuarkusTestProfile`; `StubReactiveLedgerEntryRepository` (`@DefaultBean`) fixes the pre-existing CDI env issue — all `@QuarkusTest` tests now run
-- **#155/#156** — Flyway directory-scoping documented in PLATFORM.md; V9→V1003 gap explained in V1003 header
+**#172 (reactive gating property rename):**
+- Renamed gating property from `quarkus.datasource.qhorus.reactive` → `casehub.qhorus.reactive.enabled` across all 28 runtime beans
+- Added `QhorusBuildTimeConfig` (`@ConfigRoot BUILD_TIME`) in deployment module to formally declare the property — makes `@IfBuildProperty` reliable for a custom property in extension context
+- Removed `@Alternative` from reactive beans that used it only as a gating workaround (not for legitimate CDI selection)
+- Added `BlockingTierPurityTest` — 7 reflection checks that blocking service beans have no `Uni<T>` methods
+- Protocol PP-20260520-a86db7 filed: qhorus uses `@IfBuildProperty` per-bean, not `ExcludedTypeBuildItem`
+
+**Key finding:** `ExcludedTypeBuildItem` from a `@BuildStep` in the deployment module is silently not invoked during Quarkus 3.32.2 workspace test augmentation — the method exists in bytecode, is listed in `quarkus-build-steps.list`, but never runs. No error. Garden entries GE-20260520-48e1d4 and GE-20260520-c52767 capture this and the related `SRCFG00050` trap.
+
+**Also:** Closed #167, #160, #157 on GitHub — they were resolved in the previous epic but never explicitly closed. Deleted stale `feat/issue-88-message-type-redesign` scaffold branch. Merged `issue-172-reactive-tier-separation` to main; pushed to origin.
 
 **Side-effects:**
-- Protocol PP-20260519-1f5e2c: `@DefaultBean` stub pattern for cross-module reactive CDI deps in tests
-- Garden: 4 new entries (InstanceHandle.close(), Instance.handles() wildcard, Flyway baselineVersion, Flyway migration TDD)
-- `#171` filed: `delete_channel` must call `commitmentStore.deleteAll(channelId)` before `channelStore.delete(channelId)` (fk_commitment_channel has no CASCADE)
+- `casehub.qhorus.reactive.enabled` must NOT appear in `application.properties` — BUILD_TIME-only property causes `SRCFG00050` at runtime. Only set via `@TestProfile.getConfigOverrides()` for reactive tests.
+- `#168` ("reduce selected-alternatives burden") — may be closeable now that `@Alternative` is removed from reactive service beans. Needs verification.
 
 ## Current State
 
-- **Both repos:** `main` — epic merged
-- **Epic branches retained:** epic-142, epic-153, epic-154, epic-a2a-lifecycle-cleanup (all with `EPIC-CLOSED.md`; epic-a2a deletion: 2026-06-02)
-- **Tests:** 40 passing (including 4 new `@QuarkusTest` E2E tests now unblocked); `LedgerQueryE2ETest` still fails to load (separate pre-existing CDI issue, unrelated)
-- **Next Flyway domain migration:** V11 (V10 is commitment table)
+- **Both repos:** `main` — issue-172 merged and pushed to `origin` (`mdproctor/qhorus`)
+- **Epic branches retained:** epic-142, epic-153, epic-154, epic-a2a-lifecycle-cleanup, issue-172 (all with `EPIC-CLOSED.md`)
+- **Tests:** 1093 passing, 44 skipped (matching baseline)
+- **Plan B for #172:** Category B `@Blocking @Transactional` tool conversion to pure `Uni<T>` — no issue filed yet; spec at `specs/issue-172-reactive-tier-separation/2026-05-19-reactive-tier-separation-design.md` covers the design
+- **Next Flyway domain migration:** V11
 
-## Immediate Next Steps
+## Immediate Next Step
 
-1. **#132** — Delivery guarantees for registered backends (retry + dead-letter) — main feature item
-2. **clinical#16** — PiResponseListener workaround removal — unblocked since #154
-3. **claudony#117** — `ClaudonyChannelBackend` — unblocked since qhorus#131 (gateway SPI) and qhorus#153 (MessageObserver SPI)
-4. **#171** — `delete_channel` must also delete commitments before channel deletion
+Check whether **#168** ("reduce selected-alternatives maintenance burden in consumers") can be closed — our `@Alternative` removal from reactive service beans directly addresses it. Then pick up **#132** (delivery guarantees).
+
+## What's Left
+
+- **#171** — `delete_channel` must call `commitmentStore.deleteAll(channelId)` before channel deletion (no CASCADE on fk_commitment_channel) · S · Low
+- **Plan B (#172)** — file an issue and implement Category B reactive tool conversion in `ReactiveQhorusMcpTools` (remove `@Blocking @Transactional`, convert to `Uni<T>`) · L · High
+- **#168** — verify and close if addressed by this session's changes · XS · Low
+
+## What's Next
+
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #132 | Delivery guarantees for backends (retry + dead-letter) | L | High | Main feature item |
+| #171 | delete_channel commitments cascade fix | S | Low | Filed last session |
+| Plan B | Category B reactive tool conversion in ReactiveQhorusMcpTools | L | High | File issue first; spec exists |
+| clinical#16 | PiResponseListener workaround removal | S | Low | Unblocked since #154 |
+| claudony#117 | ClaudonyChannelBackend | M | Med | Unblocked since qhorus#131 + #153 |
 
 ## References
 
 | What | Path |
 |---|---|
-| Latest blog | `blog/2026-05-19-mdp02-what-drop-and-create-hides.md` |
+| Latest blog | `blog/2026-05-20-mdp01-the-buildstep-that-wasnt.md` |
+| #172 spec | `specs/issue-172-reactive-tier-separation/2026-05-19-reactive-tier-separation-design.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
