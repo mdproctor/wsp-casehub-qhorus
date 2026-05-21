@@ -37,3 +37,4 @@
 | [2026-05-21-mdp02-subdirectory-wasnt-scoped.md](2026-05-21-mdp02-subdirectory-wasnt-scoped.md) | 2026-05-21 | Flyway recursive scan finds db/migration/qhorus/ even when only the named datasource targets it; fix: move to db/qhorus/migration/; protocol Rule 4 corrected |
 | [2026-05-21-mdp03-inner-records-api-boundaries.md](2026-05-21-mdp03-inner-records-api-boundaries.md) | 2026-05-21 | Inner records promoted to api module; stale jar gotcha after clean compile; silent named-PU mismatch in reactive services; shared QhorusEntityMapper |
 | [2026-05-21-mdp04-when-the-squash-has-history.md](2026-05-21-mdp04-when-the-squash-has-history.md) | 2026-05-21 | git-squash on full history hits merge commit boundary; 5 clean squashes on linear section |
+| [2026-05-21-mdp05-jar-disagreed-with-protocol.md](2026-05-21-mdp05-jar-disagreed-with-protocol.md) | 2026-05-21 | Flyway V1004 taken by ledger JAR; V2000 confirmed; test improved to use both locations |
