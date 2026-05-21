@@ -1,7 +1,0 @@
-branch: issue-179-add-ledger-migration-path
-project-sha: 9267b2ce285398e0c7ab21566f14ffe1b33b0c60
-date: 2026-05-21
-issue: 179
-flyway-next-v: 1008
-design-repo: workspace
-design-section-hashes:
