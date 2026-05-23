@@ -16,7 +16,6 @@ Start #132 (delivery guarantees for backends — retry + dead-letter). File issu
 - **claudony#135** — add `deadline` + `correlationId` as first-class params to `postToChannel()` SPI · S · Low _(Claudony work; qhorus ready)_
 - **#193** — ReactiveMessageService full enforcement parity (ACL, rate limit, type policy, LAST_WRITE, ledger, fanOut) · M · Med _(deferred — service @Disabled)_
 - **#198** — Two deferred review items: double channel-read in `sendHumanMessage()`, reactive deadline test · S · Low
-- **`backup/pre-squash-main-20260522`** and **`backup/pre-squash-main-20260523`** — local backup branches, safe to delete · XS · Low
 
 ## What's Next
 
