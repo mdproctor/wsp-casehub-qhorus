@@ -1,51 +1,41 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-23 — #185–189 batch review findings + dispatch enforcement re-arch
+**Date:** 2026-05-23 — #192 deadline dispatch + #191, #194, #195, #196 batch
 
 ---
 
 ## What Was Done This Session
 
-Resolved all 5 review findings from #184. #185–187 and #189 were minor cleanup (test gaps, Javadoc, dead code, assertj version, Jackson config, UUID parsing). #188 was architectural: enforcement (paused, ACL, rate limit, LAST_WRITE, fanOut) moved from `QhorusMcpTools.sendMessage()` into `MessageService.dispatch()` — every caller now gets enforcement automatically. `AllowedWritersPolicy` extracted as a shared `@ApplicationScoped` bean with unified capability supplier (instance tags + synthetic role tag). `QhorusChannelBackend.post()` made a no-op; CDI cycle `MessageService↔ChannelGateway` resolves via Arc proxies. All 5 issues closed; branch `issue-185-review-findings` closed and pushed to `mdproctor/qhorus` main.
+Closed branch `issue-192-deadline-dispatch`. `MessageDispatch` gained `Instant deadline`; `MessageService.dispatch()` now sets `message.deadline` for the first time. `ReactiveMessageService.send()` replaced with `dispatch(MessageDispatch) → Uni<DispatchResult>` (paused check added; enforcement parity deferred to #193). `QhorusDashboardService.sendHumanMessage()` updated. Claudony `postToChannel()` updated. Also closed: #191 (parentReplyCount semantics documented), #194 (ChannelRef channel name fix), #195 (LAST_WRITE design decision documented), #196 (artefact_refs UUID error messages). All 1190 qhorus tests pass. Branch rebased and pushed to mdproctor/qhorus main.
 
 ## Immediate Next Step
 
-File a qhorus issue for Plan B (Category B `@Blocking` tools in `ReactiveQhorusMcpTools` → `Uni<T>`) before starting it, then pick it up or move to #132.
-
-## Cross-Module
-
-**We're blocking:**
-- `casehubio/aml#30` — AML can proceed; #184+#188 both shipped. No further action from qhorus.
+Open upstream PR from mdproctor/qhorus main → casehubio/qhorus main, or start #132 (delivery guarantees for backends — file issue first).
 
 ## What's Left
 
-- **claudony#129** — replace local DTO copies with api types · S · Low _(skip for now — user said no cross-repo work)_
-- **Plan B** — Category B reactive tool conversion · L · High _(file issue first)_
-- **#191** — LAST_WRITE parentReplyCount=0 correctness · S · Low
-- **#193** — ReactiveMessageService enforcement parity · M · Med _(deferred — service is @Disabled)_
-- **#194** — fanOut ChannelRef name is UUID not channel name · S · Low
-- **#195** — LAST_WRITE design trade-off decision needed · S · Low _(design question, needs decision)_
-- **#196** — artefact_refs UUID error message inconsistency · XS · Low
-- **parent#50** — PLATFORM.md boundary rules need dispatch() note · XS · Low
+- **claudony#135** — add `deadline` + `correlationId` as first-class params to `postToChannel()` SPI · S · Low _(Claudony work; qhorus ready)_
+- **#193** — ReactiveMessageService full enforcement parity (ACL, rate limit, type policy, LAST_WRITE, ledger, fanOut) · M · Med _(deferred — service @Disabled)_
+- **#198** — Two deferred review items: double channel-read in `sendHumanMessage()`, reactive deadline test · S · Low
+- **`backup/pre-squash-main-20260522`** — local branch, safe to delete · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #132 | Delivery guarantees for backends (retry + dead-letter) | L | High | Main feature item |
-| Plan B | Category B reactive tool conversion | L | High | File issue first |
-| #191 | LAST_WRITE parentReplyCount=0 | S | Low | Tracked, low priority |
+| #132 | Delivery guarantees for backends (retry + dead-letter) | L | High | Main feature item; file issue first |
+| #193 | ReactiveMessageService enforcement parity | M | Med | Deferred; needs reactive versions of enforcement beans |
 
 ## Notes
 
-- Push workflow: `git push origin main` only (mdproctor/qhorus); promote to casehubio/qhorus manually
-- `backup/pre-squash-main-20260522` local branch — safe to delete (confirmed clean)
+- Push workflow: `git push origin main` only (mdproctor/qhorus); upstream PR to casehubio/qhorus is manual
+- `backup/pre-squash-main-20260522` local branch — confirmed clean, safe to delete
 - `remotes/origin/claude/agent-argument-graphs-DWlFm` — unknown remote branch, left untouched
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-05-23-mdp01-closing-the-dispatch-bypass.md` |
-| Spec (#188) | `specs/2026-05-23-dispatch-enforcement-design.md` (workspace) / `docs/specs/` (project) |
-| Protocol | `casehub/parent/docs/protocols/casehub/message-service-dispatch-enforcement-gate.md` |
+| Latest blog | `blog/2026-05-23-mdp02-four-fixes-three-not-bugs.md` |
+| Spec (#192) | `specs/2026-05-23-deadline-dispatch-design.md` |
+| Plan (attic) | `plans/attic/issue-192-deadline-dispatch/2026-05-23-deadline-dispatch.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
