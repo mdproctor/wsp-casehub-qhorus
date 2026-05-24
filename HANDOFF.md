@@ -1,29 +1,29 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-24 — parent docs maintenance + CI triage
+**Date:** 2026-05-24 — branch hygiene, blog archaeology, conventions
 
 ---
 
 ## What Was Done This Session
 
-Light session. Updated the parent repo platform docs: added the Dispatch Gate section to the qhorus deep dive, expanded the capability ownership row in `PLATFORM.md` with `MessageDispatch` / `DispatchResult` detail, and fixed a stale `INFORM` → `STATUS` in the normative `/observe` channel `allowedTypes` (INFORM doesn't exist in the 9-type taxonomy from ADR-0005). Both changes landed on `issue-60-sync-all-repo-lists` in the parent repo. CI failed with a transient 401 from GitHub Packages — re-ran, cleared.
+Two wraps in one session. First wrap: parent docs updated (dispatch gate, INFORM→STATUS fix), CI 401 triage. Second wrap: full branch audit — all 15 non-backup, non-marked branches verified and stamped with `chore: branch closed`. Missing blog entry recovered from `epic-142-flyway-versioning` (written after work-end, never promoted). `working-style.md` updated with branch closure convention (corrected from "squash-merged" to accurate rebase-merge language). Two garden entries submitted: `git commit --amend` silent no-op on empty commits (score 13), `git diff --name-only` direction trap for old branches (score 9). All blogs published to mdproctor.github.io (43 total, all current).
 
 ## Immediate Next Step
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Unchanged — `git show HEAD~2:HANDOFF.md`*
 
 Start **#132 — delivery guarantees for backends (retry + dead-letter)**. File the issue if it doesn't exist yet, then run `work-start`.
 
 ## What's Left
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Unchanged — `git show HEAD~2:HANDOFF.md`*
 
 ## What's Next
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Unchanged — `git show HEAD~2:HANDOFF.md`*
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-05-24-mdp01-platform-docs-catch-up.md` |
+| Latest blog | `blog/2026-05-24-mdp02-branch-hygiene-archaeology.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
