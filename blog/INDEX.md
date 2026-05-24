@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-24-mdp02-branch-hygiene-archaeology.md](2026-05-24-mdp02-branch-hygiene-archaeology.md) | 2026-05-24 | 22 branches audited and stamped; recovered a missing blog entry from a closed epic; git diff direction trap |
 | [2026-05-24-mdp01-platform-docs-catch-up.md](2026-05-24-mdp01-platform-docs-catch-up.md) | 2026-05-24 | Fixing stale INFORM→STATUS and documenting the dispatch gate in platform docs |
 | [2026-05-23-mdp02-four-fixes-three-not-bugs.md](2026-05-23-mdp02-four-fixes-three-not-bugs.md) | 2026-05-23 | Four fixes after the dispatch work — three weren't real bugs |
 | [2026-05-21-mdp05-the-stub-that-outlived-its-purpose.md](2026-05-21-mdp05-the-stub-that-outlived-its-purpose.md) | 2026-05-21 | Removing the hand-rolled ledger_entry stub from FlywayMigrationSchemaTest — real migrations replace the workaround once qhorus#179 clears the path |
