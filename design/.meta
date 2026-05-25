@@ -1,0 +1,8 @@
+branch: issue-182-s-xs-batch
+project-sha: 64d83d6d09d421417dad114cee2f0b5b499b71ab
+date: 2026-05-25
+issue: 182
+issue-repo: casehubio/qhorus
+flyway-next-v: 11
+design-repo: workspace
+design-section-hashes:
