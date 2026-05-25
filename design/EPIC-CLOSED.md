@@ -1,4 +1,4 @@
-# Branch Closed — issue-179-add-ledger-migration-path
-**Date:** 2026-05-21
-**Issue:** #179
-**Scheduled for deletion:** 2026-06-04
+# Branch Closed — issue-182-s-xs-batch
+**Date:** 2026-05-25
+**Issue:** #182 (batch anchor)
+**Scheduled for deletion:** 2026-06-08
