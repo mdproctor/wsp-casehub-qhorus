@@ -2,7 +2,7 @@
 
 **Issue:** casehubio/qhorus#200  
 **Date:** 2026-05-27  
-**Status:** Approved (rev 2 — incorporates spec review)
+**Status:** Approved (rev 3 — incorporates round-2 spec review)
 
 ---
 
@@ -63,7 +63,7 @@ public record AgentStaleContext(
 
 public record ChannelIdleContext(
     List<String> channelNames,   // up to 3; may be fewer than total idle channels
-    long idleSeconds
+    long thresholdSeconds        // configured idle threshold — not per-channel elapsed time
 ) implements AlertContext {
     public WatchdogConditionType conditionType() { return WatchdogConditionType.CHANNEL_IDLE; }
 }
@@ -138,7 +138,10 @@ interface Watchdog {
     Alert alert();   // new
 
     interface Alert {
-        List<AlertEndpoint> endpoints();   // empty list = no external delivery
+        @WithDefault("")
+        List<AlertEndpoint> endpoints();   // empty list = no external delivery; @WithDefault("") required
+                                           // by SmallRye Config for List<T> — omitting it causes
+                                           // SRCFG00014 startup failure when no endpoints are configured
 
         interface AlertEndpoint {
             @WithName("connector-id")
@@ -196,7 +199,7 @@ public class ConnectorAlertBridge {
                 + (c.staleInstanceIds().isEmpty() ? "" : "\nIDs: " + String.join(", ", c.staleInstanceIds()));
             case ChannelIdleContext c ->
                 event.summary() + "\nIdle channels: " + String.join(", ", c.channelNames())
-                + "\nIdle for: " + c.idleSeconds() + "s";
+                + "\nIdle > " + c.thresholdSeconds() + "s";
             case QueueDepthContext c ->
                 event.summary() + "\nChannel: " + c.channelName()
                 + "\nDepth: " + c.messageCount() + " (threshold: " + c.threshold() + ")";
@@ -236,8 +239,9 @@ Each method builds a typed `AlertContext` record:
 - **`evaluateBarrierStuck`**: passes `new BarrierStuckContext(ch.id, ch.name, missingList, elapsedSeconds)` per stuck channel. Each stuck channel fires a **separate event** — the watchdog fires once per stuck barrier, not one aggregate per evaluation cycle.
 - **`evaluateApprovalPending`**: accumulates `oldestExpiryAt` via `stream().map(c -> c.expiresAt).filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(null)`. The current count-only query must change to `list()` to support this.
 - **`evaluateAgentStale`**: changes from `count()` to `list(...).stream().limit(10)` to gather instance IDs for the context.
-- **`evaluateChannelIdle`**: passes `new ChannelIdleContext(names, threshold)`.
+- **`evaluateChannelIdle`**: passes `new ChannelIdleContext(names, threshold)` — `threshold` maps to `thresholdSeconds`.
 - **`evaluateQueueDepth`**: passes `new QueueDepthContext(ch.name, count, threshold)`.
+- **`evaluateAgentStale`** (latent bug fix): the pre-existing code runs two queries with inconsistent cutoff filters — first `count("status = 'stale' AND lastSeen < ?1", cutoff)` to decide whether to fire, then `count("status = 'stale'")` with no cutoff for the alert message. The new implementation collapses both into a single `list("status = 'stale' AND lastSeen < ?1", cutoff).stream().limit(10)` call, fixing the inconsistency: the count in the alert now matches the condition that triggered it.
 
 #### `fireAlert()` ordering — critical
 
@@ -314,10 +318,10 @@ casehub-qhorus/
 | `WatchdogConditionType` / `AlertContext` records | `runtime/src/test/` | Unit — construct directly, assert fields |
 | `WatchdogEvaluationService` — event fired on alert | `runtime/src/test/` | `@QuarkusTest @TestTransaction` — call `evaluateAll()` directly; use `@ApplicationScoped` capture bean with `CountDownLatch.await()` to wait for async delivery (GE-20260517-712fe5). This requires the capture bean to be an `@ObservesAsync` observer — the CountDownLatch ensures the test thread waits rather than asserting before delivery. |
 | `ConfiguredWatchdogAlertRouter` | `runtime/src/test/` | `@QuarkusTest` with config overrides — assert `route()` returns expected `AlertDeliveryTarget` list |
-| `ConnectorAlertBridge` | `connectors/src/test/` | `@QuarkusTest` — inject bridge, call `onAlert()` directly (GE-20260513-b15933 — no async delivery needed in bridge test); `@Mock TestConnectorService` or `@Mock TestSlackConnector` captures messages |
-| End-to-end (evaluateAll → alert → connector mock) | `connectors/src/test/` | `@QuarkusTest` — trigger via `evaluateAll()`, wait via CountDownLatch in capture bridge observer |
+| `ConnectorAlertBridge` | `connectors/src/test/` | `@QuarkusTest` — inject bridge, call `onAlert()` directly (GE-20260513-b15933 — no async delivery needed in bridge test); `@Mock TestSlackConnector` or stub `ConnectorService` captures sent messages |
+| End-to-end (evaluateAll → event → bridge → connector mock) | `runtime/src/test/` | `@QuarkusTest` with `casehub-qhorus-connectors` on test classpath — call `evaluateAll()` directly; `ConnectorAlertBridge` picks up the async event via CountDownLatch capture; assert on mock connector. **Not in `connectors/src/test/`** — that module does not depend on the runtime artifact, so `WatchdogEvaluationService` is not available there. |
 
-**Testing distinction**: In service-layer tests (proving the event IS fired from `evaluateAll()`), the CountDownLatch capture works because you wait for delivery. In bridge tests (proving the bridge calls the connector correctly), there is no async — call `onAlert()` directly. These apply GE-20260517-712fe5 and GE-20260513-b15933 to different test layers, not contradictory contexts.
+**Testing distinction**: Service-layer tests (event IS fired) use CountDownLatch + `evaluateAll()` in `runtime/src/test/`. Bridge tests (bridge calls connector) call `onAlert()` directly in `connectors/src/test/` — no async delivery needed. E2E lives in `runtime/src/test/` where the runtime classpath is already present.
 
 ---
 
