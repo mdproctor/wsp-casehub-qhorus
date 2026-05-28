@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-28-mdp01-teaching-watchdog-to-reach-outside.md](2026-05-28-mdp01-teaching-watchdog-to-reach-outside.md) | 2026-05-28 | WatchdogAlertEvent + ConnectorAlertBridge — sealed AlertContext, SPI router, fireAsync ordering |
 | [2026-05-24-mdp02-branch-hygiene-archaeology.md](2026-05-24-mdp02-branch-hygiene-archaeology.md) | 2026-05-24 | 22 branches audited and stamped; recovered a missing blog entry from a closed epic; git diff direction trap |
 | [2026-05-25-mdp01-filed-as-s-filed-wrong.md](2026-05-25-mdp01-filed-as-s-filed-wrong.md) | 2026-05-25 | S/XS batch: closed #182 (index already existed), AiServicesProcessor -parameters gotcha, #158 per-backend normaliser design |
 | [2026-05-24-mdp01-platform-docs-catch-up.md](2026-05-24-mdp01-platform-docs-catch-up.md) | 2026-05-24 | Fixing stale INFORM→STATUS and documenting the dispatch gate in platform docs |
