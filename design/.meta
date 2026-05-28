@@ -1,8 +1,0 @@
-branch: issue-200-watchdog-alert-event
-project-sha: 6db2edb3029b94df619ef9c9e5572e047bd134fb
-date: 2026-05-26
-issue: 200
-issue-repo: casehubio/qhorus
-flyway-next-v: none
-design-repo: workspace
-design-section-hashes: 
