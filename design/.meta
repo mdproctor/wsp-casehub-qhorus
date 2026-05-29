@@ -1,0 +1,8 @@
+branch: issue-193-reactive-dispatch-enforcement
+project-sha: 649a4ed400a89c08ddea04914bd23aa89ed347e7
+date: 2026-05-29
+issue: 193
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
