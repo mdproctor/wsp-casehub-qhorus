@@ -1,0 +1,8 @@
+branch: issue-207-watchdog-store-followups
+project-sha: e739ea127c11fd5849ab6a55b3de3e403f413e35
+date: 2026-05-29
+issue: 207
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
