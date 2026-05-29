@@ -1,46 +1,49 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-29 — qhorus#207 #208 #209 watchdog store follow-ups
+**Date:** 2026-05-29 — issue-212 XS/S batch closed
 
 ---
 
 ## What Was Done This Session
 
-**#207 + #208 + #209** completed and closed. Routed `w.lastFiredAt` through `WatchdogStore.put(w)` (store-seam compliance), added Javadoc to `ReactiveMessageStore.count()` and improved `InMemoryMessageStore.count()` comment, added negative tests + debounce test + ID capture fixes to `WatchdogEvaluationServiceTest`. 2 squashed commits on upstream main. Also filed #210 (BARRIER_STUCK/CHANNEL_IDLE zero coverage) and #211 (NPE on `ch.lastActivityAt` in `evaluateBarrierStuck()`).
+**#212 batch complete.** All 5 issues closed and pushed to upstream (casehubio/qhorus):
+- #211 (XS) — null guard for `lastActivityAt` in watchdog evaluation
+- #210 (S) — BARRIER_STUCK + CHANNEL_IDLE test coverage
+- #204 (S) — `registerBackend()` dedup guard (synchronized block extended to all types)
+- #150 (S) — A2A: `ErrorResponse` record (M1), max-priority `fromMessageHistory` (M2)
+- #199 (S) — `TrustGateService` wired into `dispatch()` — `casehub.qhorus.commitment.min-obligor-trust`
 
-**Garden:** GE-20260529-9f3557 — `@TestTransaction` + JPA auto-flush makes store-seam compliance tests pass before the fix is applied.
+Key discoveries: `casehub.ledger.datasource=qhorus` required in `QuarkusTestProfile.getConfigOverrides()` on context restart (now PP-20260529-6047d2 + garden REVISE GE-20260424-6b88a0). `distinctSendersByChannel` excludes the passed type — now in CLAUDE.md.
 
-**CLAUDE.md:** documented unconditional pre-push hook (`.githooks/pre-push`) — blocks every push post-squash, requires `--no-verify` after git-squash approval.
+Filed **#213** — `ObligorTrustPolicy` SPI to replace the colon-heuristic target guard in the trust gate.
 
 ## Immediate Next Step
 
-Address the 4 stale open epic branches (10–11 days, no EPIC-CLOSED.md):
+Audit the 4 stale open epic branches (10–11 days, no closure marker):
 - `epic-142-flyway-versioning`
 - `epic-153-cdi-message-event`
 - `epic-154-inbound-correlationid`
 - `epic-a2a-lifecycle-cleanup`
 
-Either close them (work-end) or confirm they're still active. Then pick up #132 (delivery guarantees).
+Close with `work-end` or confirm still active. Then pick up #213 or #132.
 
 ## What's Left
 
-- **claudony#135** — add `deadline` + `correlationId` as first-class params to `postToChannel()` SPI · S · Low _(Claudony work; qhorus ready)_
-- **#193** — ReactiveMessageService full enforcement parity · M · Med _(deferred — service @Disabled)_
+- **claudony#135** — `deadline` + `correlationId` as first-class params to `postToChannel()` SPI · S · Low _(Claudony work; qhorus ready)_
+- **#193** — ReactiveMessageService enforcement parity · M · Med _(deferred, @Disabled)_
 - **#203** — Qhorus dispatch to DraftHouse on successful publish · ? · ?
-- **#210** — BARRIER_STUCK / CHANNEL_IDLE zero test coverage in WatchdogEvaluationServiceTest · S · Low
-- **#211** — `evaluateBarrierStuck()` NPE on `ch.lastActivityAt` when channel created with no messages · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Audit 4 stale epic branches | XS | Low | Close or confirm active before new work |
-| #210+#211 | Watchdog BARRIER_STUCK/CHANNEL_IDLE coverage + NPE fix | XS–S | Low | Small batch; natural follow-on to this session |
-| #132 | Delivery guarantees for backends (retry + dead-letter) | L | High | Main feature item |
-| #193 | ReactiveMessageService enforcement parity | M | Med | Deferred; needs reactive enforcement beans |
+| — | Audit 4 stale epic branches | XS | Low | Do first |
+| #213 | ObligorTrustPolicy SPI — replace colon heuristic | M | Med | Follow-on from #199 |
+| #132 | Delivery guarantees (retry + dead-letter) | L | High | Main feature item |
+| #193 | ReactiveMessageService enforcement parity | M | Med | Needs reactive enforcement beans |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-05-29-mdp02-the-test-that-passed-too-soon.md` |
+| Latest blog | `blog/2026-05-29-mdp03-five-fixes-three-assumptions.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
