@@ -14,111 +14,233 @@ limiting, trust gating, type policy, LAST_WRITE semantics, ledger writes, or fan
 calls `CommitmentService` (blocking JTA) from inside a Hibernate Reactive event loop — a latent
 threading bug that surfaces as soon as the tests are un-@Disabled.
 
-The blocking service also has a store-seam violation: the LAST_WRITE branch calls
-`Message.<Message> find(...)` directly (Panache static) instead of going through `MessageStore`.
-This breaks `InMemoryMessageStore` substitution in tests and is fixed here alongside the reactive
-work.
+The blocking service also has a `PP-20260529-eb19c3` store-seam violation: the LAST_WRITE branch
+calls `Message.<Message> find(...)` (Panache static) instead of going through `MessageStore`. This
+breaks `InMemoryMessageStore` substitution in tests and is fixed alongside the reactive work.
 
 ---
 
 ## Scope
 
 ### New class
-- `ReactiveCommitmentService` — full reactive mirror of `CommitmentService`, gated
-  `@IfBuildProperty(casehub.qhorus.reactive.enabled=true)`, uses `ReactiveCommitmentStore` +
-  `Panache.withTransaction("qhorus", ...)`. Each state-transition method opens its own transaction
-  (equivalent semantics to `REQUIRES_NEW` in the blocking service).
+- `ReactiveCommitmentService` — reactive mirror of `CommitmentService` for state-transition
+  operations only (acknowledge / fulfill / decline / fail / delegate / expireOverdue).
+  Gated `@IfBuildProperty(casehub.qhorus.reactive.enabled=true)`. Each method opens its own
+  `Panache.withTransaction("qhorus", ...)`.
+  Note: the `open()` case (COMMAND/QUERY) is handled inline in Phase 2, not via this service —
+  see dispatch design below.
 
-### Store seam fix
-Add `findLastMessage(UUID channelId): Optional<Message>` to `MessageStore` and
-`findLastMessage(UUID channelId): Uni<Optional<Message>>` to `ReactiveMessageStore`. Implement in:
-- `JpaMessageStore` — `Message.<Message> find("channelId = ?1 ORDER BY id DESC", channelId).page(0,1).firstResultOptional()`
-- `ReactiveJpaMessageStore` — reactive Panache equivalent
-- `InMemoryMessageStore` — stream over in-memory store, max-id entry
-- `InMemoryReactiveMessageStore` — wrap blocking impl via `Uni.createFrom().item(...)`
+### Store seam additions
 
-Fix `MessageService.dispatch()` LAST_WRITE block to call `messageStore.findLastMessage(ch.id)`
-instead of the direct Panache static call.
+**`MessageStore` + `ReactiveMessageStore`:**
+Add `findLastMessage(UUID channelId)` → `Optional<Message>` / `Uni<Optional<Message>>`.
+Returns the most recent message in the channel regardless of sender.
 
-### `ReactiveLedgerWriteService` — return type change
-`record(Channel, Message)` changes from `Uni<Void>` to `Uni<LedgerWriteOutcome>`. After saving
-the ledger entry, map to `new LedgerWriteOutcome(entry.id, ch.id, entry.causedByEntryId)`.
-`causedByEntryId` is already resolved for DONE/FAILURE/DECLINE/HANDOFF via
-`findLatestByCorrelationId`. Attestation remains deferred: replace the no-op
-`logSkippedAttestation` with a `LOG.warn` and file casehub-ledger issue for reactive
-`LedgerAttestation` persistence.
+**`ReactiveChannelStore`:**
+Add `updateLastActivity(UUID channelId)` → `Uni<Void>`. Issues a targeted `UPDATE` query
+(`lastActivityAt = now()`). Does not load or re-attach the channel entity — avoids session
+management concerns when the channel was loaded pre-transaction.
 
-### `ReactiveMessageService.dispatch()` — full enforcement sequence
+**Implementations (all four stores + `InMemoryReactiveChannelStore`):**
+- `JpaMessageStore.findLastMessage()` — `Message.<Message>find("channelId=?1 ORDER BY id DESC", id).page(0,1).firstResultOptional()`
+- `ReactiveJpaMessageStore.findLastMessage()` — reactive Panache equivalent
+- `InMemoryMessageStore.findLastMessage()` — scan in-memory list for max-id entry
+- `InMemoryReactiveMessageStore.findLastMessage()` — wrap blocking impl via `Uni.createFrom().item(...)`
+- `ReactiveJpaChannelStore.updateLastActivity()` — `repo.update("lastActivityAt=?1 WHERE id=?2", Instant.now(), channelId).replaceWithVoid()`
+- `InMemoryReactiveChannelStore.updateLastActivity()` — find-and-mutate in-memory map
 
-The method is restructured into explicit phases, preserving the exact same enforcement ordering as
-`MessageService.dispatch()`:
+**Fix `MessageService.dispatch()` LAST_WRITE block:**
+Replace `Message.<Message> find(...)` with `messageStore.findLastMessage(ch.id)`.
 
-**Phase 1 — Pre-transaction reactive checks**
+### `ReactiveLedgerWriteService` — signature change
 
-Inside a `channelStore.find(channelId).flatMap(...)` chain (no transaction open yet):
+`record(Channel, Message)` → `record(MessageDispatch dispatch, Long messageId, UUID commitmentId, Instant occurredAt)`.
 
-1. Paused check — sync on loaded channel (already present)
-2. ACL: `reactiveInstanceService.findCapabilityTagsForInstance(sender)` → `Uni<List<String>>`.
-   In the flatMap callback, call `allowedWritersPolicy.isAllowedWriter(sender, ch.allowedWriters,
-   () -> preResolvedTags)` synchronously. The supplier is `() -> preResolvedTags` — no I/O; safe
-   on the event loop.
-3. Rate limit check — `rateLimiter.check(...)` — in-memory, safe on event loop.
-4. Trust gate — `Uni.createFrom().item(() -> trustGateService.meetsThreshold(target, threshold))
-   .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())`. One hop to a worker pool thread for
-   the JPA query; control returns to the event loop before the transaction opens. Trust gate is
-   skipped (pass) when `minObligorTrust == 0.0` or type != COMMAND — same guard as blocking path.
-5. Type policy — sync on loaded channel, safe on event loop.
+Aligns with blocking `LedgerWriteService.record(dispatch, messageId, commitmentId, occurredAt)`.
+Enables full three-priority `subjectId` resolution:
+1. `dispatch.subjectId()` if explicitly set
+2. Earliest entry with non-null `subjectId` in correlationId thread
+3. Fallback to `dispatch.channelId()`
 
-**Phase 2 — Reactive transaction**
+Return type changes from `Uni<Void>` to `Uni<LedgerWriteOutcome>`. Map result:
+`new LedgerWriteOutcome(entry.id, resolvedSubjectId, entry.causedByEntryId)`.
 
-`Panache.withTransaction("qhorus", () -> ...)`:
+Attestation remains deferred (casehub-ledger does not yet expose reactive `LedgerAttestation`
+persistence). Replace `logSkippedAttestation` with `LOG.infof` (deferred by design, not an error).
+File casehub-ledger issue.
 
-6. LAST_WRITE: `reactiveMessageStore.findLastMessage(channelId)`. If present and same sender →
-   in-place update, return early (no ledger, no fanOut, no commitment — mirrors blocking path).
-   If present and different sender → throw `IllegalStateException`. If absent → continue.
-7. Normal insert — `reactiveMessageStore.put(message)`.
-8. Reply count — `reactiveMessageStore.find(inReplyTo).invoke(opt -> opt.ifPresent(p -> p.replyCount++))`.
-9. Channel activity update.
-10. Ledger write — `reactiveLedgerWriteService.record(ch, message)` → `Uni<LedgerWriteOutcome>`.
-    The ledger write runs inside the same transaction so it commits atomically with the message.
+---
 
-**Phase 2 output — primitive carrier**
+## `ReactiveMessageService.dispatch()` — Full Enforcement Sequence
 
-The `withTransaction` flatMap returns a local record (not `DispatchResult`) carrying extracted
-primitives before the transaction closes — matching the blocking service's "Extract primitives
-BEFORE REQUIRES_NEW boundary" comment:
+### LAST_WRITE early-exit: discriminated union
 
-```
-record DispatchContext(long messageId, UUID commitmentId, Instant occurredAt,
-                       LedgerWriteOutcome ledgerOutcome, String channelName,
-                       int replyCount)
+The `withTransaction` block returns `Uni<TransactResult>` where:
+
+```java
+sealed interface TransactResult permits OverwriteResult, FullResult {}
+record OverwriteResult(DispatchResult result) implements TransactResult {}
+record FullResult(DispatchContext ctx) implements TransactResult {}
 ```
 
-Entities are not passed across the transaction boundary.
+Pattern-matching on `TransactResult` drives the chain after Phase 2. `OverwriteResult` carries
+a complete `DispatchResult` — Phase 3 and Phase 4 are skipped entirely.
 
-**Phase 3 — Post-transaction commitment**
+### DispatchContext — primitive carrier across boundaries
 
-`.flatMap(ctx -> reactiveCommitmentService.updateState(dispatch, ctx.commitmentId()).replaceWith(ctx))`:
+```java
+record DispatchContext(
+    long messageId, UUID commitmentId, Instant occurredAt,
+    LedgerWriteOutcome ledgerOutcome, String channelName, int replyCount)
+```
 
-- `ReactiveCommitmentService` opens its own `withTransaction("qhorus", ...)` for each call.
-- This is semantically equivalent to `REQUIRES_NEW` in the blocking path: the outer message
-  transaction commits first, then the commitment state is updated in a separate transaction.
-- EVENT messages skip commitment as in the blocking path.
+Primitives are extracted from the persisted `Message` entity before the transaction closes.
+No JPA entities cross the transaction boundary.
 
-**Phase 4 — Sync side effects and DispatchResult construction** (any thread, already on event loop)
+---
 
-`.map(ctx -> { sideEffects(ctx); return buildDispatchResult(ctx); })`:
+### Pre-transaction phase — channel load + sync/reactive checks
 
-- Observer fan-out — `MessageObserverDispatcher.dispatch(...)` (already present).
-- Rate limit recording — `rateLimiter.recordSend(...)` — in-memory.
-- `channelGateway.fanOut(...)` — already spawns a virtual thread per backend, returns immediately;
-  safe to call directly from the event loop.
-- Returns `DispatchResult` built from `ctx` — `ledgerEntryId`, `subjectId`, `causedByEntryId`
-  from `ctx.ledgerOutcome()`, now all non-null.
+```
+channelStore.find(channelId)   // reactive load, outside tx
+  .flatMap(chOpt -> {
+    // 1. Paused check — sync
+    // 2. ACL — conditional reactive fetch, then sync check
+    // 3. Rate limit check — sync, in-memory
+    // 4. Trust gate — worker thread hop via ManagedExecutor
+    // 5. Type policy — sync, in-memory
+  })
+```
+
+**Paused check** — sync, same as blocking path.
+
+**ACL (guarded fetch):**
+```java
+Uni<List<String>> tagsUni =
+    (ch != null && ch.allowedWriters != null && !ch.allowedWriters.isBlank()
+     && dispatch.type() != MessageType.EVENT)
+    ? reactiveInstanceService.findCapabilityTagsForInstance(dispatch.sender())
+    : Uni.createFrom().item(List.of());
+```
+`flatMap` on `tagsUni`, then call `allowedWritersPolicy.isAllowedWriter(sender, ch.allowedWriters,
+() -> preResolvedTags)` synchronously. The supplier is `() -> preResolvedTags` — no I/O. Open
+channels and EVENT messages skip the DB fetch entirely.
+
+**Rate limit check** — `rateLimiter.check(...)` — in-memory, safe on event loop.
+
+**Trust gate:**
+```java
+@Inject ManagedExecutor executor;  // CDI/MP context-preserving, not Infrastructure.getDefaultWorkerPool()
+
+Uni<Void> trustCheck = (ch != null && dispatch.type() == MessageType.COMMAND
+    && dispatch.target() != null && !dispatch.target().contains(":")
+    && config.commitment().minObligorTrust() > 0.0)
+    ? Uni.createFrom().item(() -> {
+          if (!trustGateService.meetsThreshold(dispatch.target(), config.commitment().minObligorTrust()))
+              throw new IllegalStateException("...");
+          return null;
+      }).runSubscriptionOn(executor).replaceWithVoid()
+    : Uni.createFrom().voidItem();
+```
+One `ManagedExecutor` hop for the JPA query. Control returns to the event loop before
+`withTransaction` opens.
+
+**Type policy** — `messageTypePolicy.validate(ch, dispatch.type())` — sync, in-memory.
+
+---
+
+### Phase 2 — Single `Panache.withTransaction("qhorus", ...)`
+
+Returns `Uni<TransactResult>`.
+
+```
+1. LAST_WRITE semantics
+   reactiveMessageStore.findLastMessage(channelId)
+   — Same sender: update in-place, updateLastActivity, recordSend, return OverwriteResult
+   — Different sender: throw IllegalStateException
+   — No entry: continue
+
+2. Normal insert
+   reactiveMessageStore.put(message)
+   Extract messageId, commitmentId (UUID), occurredAt as primitives
+
+3. Commitment open — inline, same session/tx
+   IF COMMAND or QUERY with non-null correlationId:
+     reactiveCommitmentStore.save(new Commitment(...OPEN...))
+   Atomic with message insert — eliminates the consistency window where message.commitmentId
+   is set but no matching commitment row exists.
+   (REQUIRES_NEW in the blocking path was a JTA workaround; Panache has no such constraint.)
+
+4. Reply count
+   IF inReplyTo != null:
+     reactiveMessageStore.find(inReplyTo).invoke(opt -> opt.ifPresent(p -> p.replyCount++))
+
+5. Channel activity
+   reactiveChannelStore.updateLastActivity(ch.id)
+   — Targeted UPDATE query; the channel entity stays outside the session (loaded pre-tx).
+
+6. Ledger write
+   reactiveLedgerWriteService.record(dispatch, messageId, commitmentId, occurredAt)
+   → Uni<LedgerWriteOutcome>
+
+7. Return FullResult(new DispatchContext(messageId, commitmentId, occurredAt,
+                                        ledgerOutcome, ch.name, replyCount))
+```
+
+---
+
+### Phase 3 — State transitions (ReactiveCommitmentService)
+
+Only invoked from `FullResult` path. Skipped for LAST_WRITE overwrite and EVENT.
+
+```java
+reactiveCommitmentService.updateState(dispatch, ctx.commitmentId())
+```
+
+`updateState(MessageDispatch dispatch, UUID commitmentId)` — switches on `dispatch.type()`:
+- STATUS → `acknowledge(correlationId)`
+- RESPONSE, DONE → `fulfill(correlationId)`
+- DECLINE → `decline(correlationId)`
+- FAILURE → `fail(correlationId)`
+- HANDOFF → `delegate(correlationId, dispatch.target())`
+- COMMAND, QUERY, EVENT → no-op (open already done in Phase 2)
+
+Each transition opens its own `withTransaction("qhorus", ...)`.
+
+---
+
+### Phase 4 — Post-transaction side effects
+
+```java
+.invoke(ctx -> {
+    // Observer dispatch — post-commit (correctness fix: blocking path dispatches
+    // inside @Transactional, risking observers seeing pre-commit state)
+    MessageObserverDispatcher.dispatch(ctx.channelName(), dispatch.channelId(), message, observers.handles());
+
+    // Rate limit recording (EVENT bypasses, same as blocking path)
+    if (ch != null && dispatch.type() != MessageType.EVENT)
+        rateLimiter.recordSend(ch.id, dispatch.sender(), ch.rateLimitPerChannel, ch.rateLimitPerInstance);
+
+    // fanOut (ch null guard: channel may not exist in gateway registry)
+    if (ch != null) {
+        try {
+            channelGateway.fanOut(ch.id, ch.name, new OutboundMessage(...));
+        } catch (Exception e) { /* non-fatal, logged by ChannelGateway per-backend */ }
+    }
+})
+.map(ctx -> new DispatchResult(
+    ctx.messageId(), dispatch.channelId(), dispatch.sender(), dispatch.type(),
+    dispatch.correlationId(), dispatch.inReplyTo(),
+    ArtefactRefParser.parse(dispatch.artefactRefs()), dispatch.target(),
+    ctx.ledgerOutcome().entryId(), ctx.ledgerOutcome().subjectId(),
+    ctx.ledgerOutcome().causedByEntryId(), ctx.replyCount()))
+```
+
+---
 
 ### New injections in `ReactiveMessageService`
 
-```
+```java
 @Inject ReactiveInstanceService reactiveInstanceService;
 @Inject AllowedWritersPolicy allowedWritersPolicy;
 @Inject RateLimiter rateLimiter;
@@ -126,41 +248,64 @@ Entities are not passed across the transaction boundary.
 @Inject MessageTypePolicy messageTypePolicy;
 @Inject ReactiveLedgerWriteService reactiveLedgerWriteService;
 @Inject ReactiveCommitmentService reactiveCommitmentService;
+@Inject ReactiveChannelStore reactiveChannelStore;
 @Inject ChannelGateway channelGateway;
 @Inject QhorusConfig config;
+@Inject ManagedExecutor executor;
 ```
 
-`AllowedWritersPolicy`, `RateLimiter`, `MessageTypePolicy`, `ChannelGateway`, and `QhorusConfig`
-are not gated by `@IfBuildProperty` — injecting them in the reactive service is safe.
+`AllowedWritersPolicy`, `RateLimiter`, `MessageTypePolicy`, `ChannelGateway`, `QhorusConfig`,
+and `ManagedExecutor` carry no `@IfBuildProperty` gate — safe to inject in the reactive service.
 
-### `ReactiveCommitmentService` — method signatures
+---
 
-Mirrors `CommitmentService` one-for-one, all returning `Uni<?>`:
+## `ReactiveCommitmentService` — Design
+
+All state-transition methods mirror `CommitmentService` one-for-one, returning `Uni<?>`.
+
+**`delegate()` — two-save flatMap chain (explicit, not delegated to blocking helper):**
 
 ```java
-Uni<Commitment> open(UUID commitmentId, String correlationId, UUID channelId,
-    MessageType type, String requester, String obligor, Instant expiresAt)
-Uni<Optional<Commitment>> acknowledge(String correlationId)
-Uni<Optional<Commitment>> fulfill(String correlationId)
-Uni<Optional<Commitment>> decline(String correlationId)
-Uni<Optional<Commitment>> fail(String correlationId)
-Uni<Optional<Commitment>> delegate(String correlationId, String delegatedTo)
-Uni<Integer> expireOverdue()
-Uni<Optional<Commitment>> findByCorrelationId(String correlationId)
+public Uni<Optional<Commitment>> delegate(String correlationId, String delegatedTo) {
+    if (correlationId == null || correlationId.isBlank())
+        return Uni.createFrom().item(Optional.empty());
+    return Panache.withTransaction("qhorus", () ->
+        store.findByCorrelationId(correlationId)
+            .flatMap(opt -> {
+                if (opt.isEmpty() || opt.get().state.isTerminal())
+                    return Uni.createFrom().item(Optional.empty());
+                Commitment c = opt.get();
+                UUID parentId = c.id;
+                c.state = CommitmentState.DELEGATED;
+                c.delegatedTo = delegatedTo;
+                c.resolvedAt = Instant.now();
+                return store.save(c).flatMap(saved -> {
+                    Commitment child = new Commitment();
+                    child.correlationId = correlationId;
+                    child.channelId = c.channelId;
+                    child.messageType = c.messageType;
+                    child.requester = c.requester;
+                    child.obligor = delegatedTo;
+                    child.expiresAt = c.expiresAt;
+                    child.state = CommitmentState.OPEN;
+                    child.parentCommitmentId = parentId;
+                    return store.save(child).map(ignored -> Optional.of(saved));
+                });
+            })
+    );
+}
 ```
 
-`updateState(MessageDispatch, Long messageId, UUID commitmentId)` is a package-private
-dispatcher method (mirrors the switch block in `MessageService.dispatch()`) — not `@Tool`-exposed.
+All other transitions (`acknowledge`, `fulfill`, `decline`, `fail`) are straightforward single-save
+`transition(correlationId, targetState, consumer)` — exactly as in the blocking service.
 
-Each mutating method uses `Panache.withTransaction("qhorus", () -> ...)`. `findByCorrelationId`
-uses the store directly (no transaction needed for reads in Hibernate Reactive outside a session —
-wrap in `Panache.withSession("qhorus", ...)`).
+`expireOverdue()` uses a `flatMap` to iterate `findExpiredBefore(now())` → save each → count.
 
 ---
 
 ## Testing
 
-### PostgreSQL DevServices test profile
+### PostgreSQL DevServices profile
 
 `ReactiveTestProfile.getConfigProfile()` returns `"reactive-pg"`.
 
@@ -174,31 +319,43 @@ wrap in `Panache.withSession("qhorus", ...)`).
 %reactive-pg.quarkus.datasource.qhorus.jdbc=true
 %reactive-pg.quarkus.flyway.qhorus.migrate-at-start=true
 %reactive-pg.quarkus.hibernate-orm.qhorus.database.generation=none
-# Default datasource stub for casehub-ledger beans (@Default EntityManager)
+# Default datasource stub — satisfies casehub-ledger @Default EntityManager
 %reactive-pg.quarkus.datasource.db-kind=h2
-%reactive-pg.quarkus.datasource.jdbc.url=jdbc:h2:mem:ledger-stub-reactive;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+%reactive-pg.quarkus.datasource.jdbc.url=jdbc:h2:mem:reactive-ledger-stub;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
 %reactive-pg.quarkus.hibernate-orm.database.generation=drop-and-create
-# casehub.ledger.datasource must point to qhorus so ledger beans use the named PU
+# Required: ledger service uses named PU for its own queries
 %reactive-pg.casehub.ledger.datasource=qhorus
 ```
 
 `ReactiveTestProfile.getConfigOverrides()` keeps `casehub.qhorus.reactive.enabled=true`.
 
-### Test coverage additions
+### Contract test expansion
 
-`MessageServiceContractTest` adds abstract setup/teardown helpers and new test methods:
+`MessageServiceContractTest` (abstract base) gets abstract setup helpers that each runner
+provides via its own `@BeforeEach` / helper methods — not datasource-aware, just channel-config
+factories. The two concrete runners (blocking H2 via `MessageServiceTest`, reactive PG via
+`ReactiveMessageServiceTest`) each satisfy the abstract helper contract through their own
+`@QuarkusTest` context.
 
-- `paused_channel_rejects_send` — channel.paused=true → `IllegalStateException`
-- `acl_channel_rejects_unauthorised_sender` — `allowedWriters` set, wrong sender
-- `acl_channel_permits_authorised_sender` — sender in `allowedWriters`
-- `rate_limit_channel_rejects_burst` — send until rate limit fires
-- `type_policy_rejects_disallowed_type` — channel with `allowedTypes` set
-- `last_write_channel_update_in_place` — same sender overwrites; different sender throws
-- `commitment_opened_for_command` — `CommitmentStore` has OPEN entry after COMMAND
-- `ledger_entry_populated_in_dispatch_result` — `DispatchResult.ledgerEntryId` is non-null
+New test methods added to the base:
 
-The abstract class adds new abstract setup helpers for creating channels with specific
-configurations (paused, ACL, rate limit, type policy, LAST_WRITE).
+| Test | What it asserts |
+|------|-----------------|
+| `paused_channel_rejects_send` | `IllegalStateException` when channel.paused=true |
+| `acl_rejects_unauthorised_sender` | Non-ACL sender → rejected |
+| `acl_permits_authorised_sender` | ACL-listed sender → accepted |
+| `rate_limit_rejects_burst` | Dispatch until limit fires |
+| `type_policy_rejects_disallowed_type` | `MessageTypeViolationException` from dispatch |
+| `last_write_same_sender_updates_in_place` | Second dispatch returns same message id |
+| `last_write_different_sender_throws` | `IllegalStateException` |
+| `commitment_opened_for_command` | CommitmentStore has OPEN entry after COMMAND |
+| `ledger_entry_id_populated_in_result` | `DispatchResult.ledgerEntryId()` non-null |
+| `observers_see_committed_state` | Observer CDI event fires after tx commits; observer can read message from store |
+
+The last test (`observers_see_committed_state`) verifies the correctness fix: the existing
+`ReactiveMessageService` dispatches observers inside `withTransaction` (pre-commit). Moving
+dispatch to Phase 4 (post-commit) ensures observers see committed state. The test wires a
+`@TestObserver` that reads back from the store inside the handler and asserts the message exists.
 
 `ReactiveMessageServiceTest` removes `@Disabled`.
 
@@ -206,9 +363,5 @@ configurations (paused, ACL, rate limit, type policy, LAST_WRITE).
 
 ## Out of scope / issues filed
 
-- **casehub-ledger**: Reactive `LedgerAttestation` persistence — `saveAttestation()` in
-  `ReactiveMessageLedgerEntryRepository` currently throws `UnsupportedOperationException`.
-  File as casehub-ledger issue.
-- **casehub-ledger**: Reactive `TrustGateService.meetsThreshold()` — `Uni<Boolean>` variant.
-  File as casehub-ledger issue. Until then, worker-thread bridge used in
-  `ReactiveMessageService`.
+- **casehub-ledger**: Reactive `LedgerAttestation` persistence — file as casehub-ledger issue.
+- **casehub-ledger**: `Uni<Boolean> meetsThreshold()` reactive variant on `TrustGateService` — file as casehub-ledger issue; `ManagedExecutor` bridge is the interim solution.
