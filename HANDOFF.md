@@ -21,7 +21,6 @@ Pick up the S/XS queue — run `/work` and start with #215 (fire `ChannelInitial
 
 - **casehub-ledger#105** — reactive `LedgerAttestation` persistence · S · Med _(ledger work)_
 - **casehub-ledger#106** — `Uni<Boolean> TrustGateService.meetsThreshold()` · S · Low _(ledger work)_
-- **claudony#135** — `deadline` + `correlationId` first-class in `postToChannel()` SPI · S · Low _(Claudony; qhorus ready)_
 - **#221** — CDI async wiring test for `@ObservesAsync InboundMessage` (coverage gap) · S · Med
 
 ## What's Next
