@@ -1,49 +1,49 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-05-30 — #219 closed, connector bridge merged to casehubio/qhorus main
+**Date:** 2026-05-31 — #213 closed + 10 batch issues resolved and merged to casehubio/qhorus main
 
 ---
 
 ## What Was Done This Session
 
-**#219 merged.** `casehub-qhorus-connector-backend` ships — bridges `InboundMessage` CDI events from casehub-connectors into Qhorus channels via `HumanParticipatingChannelBackend`. Key deliverables: `ChannelConnectorBinding` JPA entity + V14 migration, `ChannelBindingStore` store seam (blocking + InMemory), `ConnectorChannelBackend` (sync `@Observes ChannelInitialisedEvent` for cache, async `@ObservesAsync InboundMessage` for routing), `ConnectorKeyStrategy`, `OutboundTitle`.
+**Batch of 11 issues cleared** on branch `issue-213-obligor-trust-policy-spi`:
+- **#213 (M)**: `ObligorTrustPolicy` SPI extracted from `MessageService` — `ObligorTrustContext(obligorId, channelId, channelName)` in `api/spi/`; `DefaultObligorTrustPolicy` in `runtime/message/`
+- **#215 (XS)**: `ChannelService.updateConnectorBinding()` fires `ChannelInitialisedEvent` on binding update
+- **#217 (S)**: `create_channel` extended with 4 connector binding params; new `update_channel_binding` MCP tool
+- **#203 (XS)**: drafthouse added to CI dispatch chain in publish.yml
+- **#150, #148, #146**: closed without code — all resolved by prior #135 work
+- **#202 (S)**: normaliser telemetry EVENT after every `receiveHumanMessage`
+- **#183 (XS)**: `recovered` flag on `ChannelInitialisedEvent` (startup recovery = true, all else = false)
+- **#164 (S)**: `MessageObserver.channels()` per-channel exact-name filter
+- **#166 (S)**: `MessageObserverDispatcher` defers to JTA post-commit via TSR; STATUS_ACTIVE gate prevents Narayana "state 1" error in `@TestTransaction` tests
 
-Option B mapper refactor: `QhorusEntityMapper` is now a pure transformer (no store injection). `ChannelBindingStore` moved to `QhorusMcpToolsBase` with single-item and batch `toChannelDetail` overloads. `list_channels` pre-loads `findAll()` to eliminate N+1. `QhorusDashboardService.listChannels()` uses `runSubscriptionOn(worker-pool)` for the blocking `findAll()` call. `NativeImageResourcePatternsBuildItem` now registers both `db/qhorus/migration/*.sql` and `db/ledger/migration/*.sql` (LedgerProcessor does not self-register — GE-20260530-0dc6de).
+Squashed to 8 clean commits. Merged to `casehubio/qhorus` main.
 
-PR #222 had conflicts post-work-end (squash-merge orphan from #193 — GE-20260422-ceb229 revised). Fixed with `git rebase --onto origin/main 8e84605`. `casehub-qhorus 0.2-SNAPSHOT` installed locally.
-
-Filed: casehubio/qhorus#221 (CDI async wiring gap for `@ObservesAsync InboundMessage` — currently untested).
+Also: `consumer-spi-placement` protocol and `jta-tsr-status-active-gate` protocol added to casehub parent. ADR-0012 (JTA post-commit dispatch). 3 garden entries + 1 revise.
 
 ## Immediate Next Step
 
-Pick up the S/XS queue — run `/work` and start with #215 (fire `ChannelInitialisedEvent` on connector binding update, XS). Then #217, #203, #150, #148, #146, #202, #183, #164, #166 in turn. After S/XS batch, proceed to #213 (M).
+Pick up the next issue — run `/work` to start a new branch. The What's Next queue below reflects the remaining open issues.
 
 ## What's Left
 
-- **casehub-ledger#105** — reactive `LedgerAttestation` persistence · S · Med _(ledger work)_
-- **casehub-ledger#106** — `Uni<Boolean> TrustGateService.meetsThreshold()` · S · Low _(ledger work)_
+- **casehub-ledger#105** — reactive `LedgerAttestation` persistence · S · Med
+- **casehub-ledger#106** — `Uni<Boolean> TrustGateService.meetsThreshold()` · S · Low
 - **#221** — CDI async wiring test for `@ObservesAsync InboundMessage` (coverage gap) · S · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #215 | Fire `ChannelInitialisedEvent` on connector binding update — enables cache refresh | XS | Low | Unblocked by #219; enables #217 |
-| #217 | MCP tools for creating/updating channels with connector bindings | S | Low | Needs #215 first |
-| #203 | Add drafthouse to CI dispatch chain | XS | Low | Unblocked |
-| #150 | A2A batch cleanup — JSON error injection, deriveState ordering, ensureRegistered race | XS | Low | Unblocked |
-| #148 | LAST_WRITE channel semantics for A2A inbound | S | Low | Unblocked |
-| #146 | Artefact claim/release lifecycle for A2A inbound | S | Low | Unblocked |
-| #202 | Normaliser telemetry EVENT on receiveHumanMessage | S | Low | Unblocked |
-| #183 | Add `recovered` flag to `ChannelInitialisedEvent` | XS | Low | Now applicable (ConnectorChannelBackend is the first real observer that needs it) |
-| #164 | Per-channel subscription scope on MessageObserver | S | Med | Unblocked |
-| #166 | Dispatch MessageObserver after transaction commit via JTA | S | Med | Unblocked |
-| #213 | ObligorTrustPolicy SPI — replace colon heuristic in trust gate | M | Med | After S/XS batch |
+| #221 | CDI async wiring test for ConnectorChannelBackend.onInboundMessage | S | Med | Unblocked |
+| #216 | Per-connector InboundNormaliser — email threading, type inference | S | Med | Unblocked |
+| #214 | Auto-channel creation on first contact from external connector | S | High | Needs #215/#217 ✅ |
+| #213 | ObligorTrustPolicy SPI | M | Med | ✅ Done this session |
 | #132 | Delivery guarantees (retry + dead-letter) | L | High | Main feature item |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-05-30-mdp05-humans-in-the-mesh.md` |
-| Connector backend spec | `specs/2026-05-30-connector-channel-backend-completion.md` |
+| Latest blog | `blog/2026-05-30-mdp06-clearing-the-queue.md` |
+| ObligorTrustPolicy spec | `specs/2026-05-30-obligor-trust-policy-spi.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
