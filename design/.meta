@@ -1,0 +1,8 @@
+branch: issue-213-obligor-trust-policy-spi
+project-sha: dc8ba399038b1fb9970817b939acd5db6ab57a32
+date: 2026-05-30
+issue: 213
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
