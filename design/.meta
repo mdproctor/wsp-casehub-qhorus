@@ -1,0 +1,8 @@
+branch: issue-219-connector-channel-backend
+project-sha: 7bfcda5189537de791cad76c850cba26d1631511
+date: 2026-05-30
+issue: 219
+issue-repo: casehubio/qhorus
+flyway-next-v: 14
+design-repo: workspace
+design-section-hashes:
