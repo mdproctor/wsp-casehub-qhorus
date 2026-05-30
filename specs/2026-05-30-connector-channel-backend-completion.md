@@ -7,73 +7,69 @@
 
 ## Context
 
-The bulk of #219 was pre-implemented as untracked files: `ConnectorChannelBackend`, `ChannelConnectorBinding`, `ChannelBindingStore` (interface + JPA + InMemory), `ChannelCreateRequest`, `ChannelService` additions, V14 migration, all unit tests, and an integration test skeleton. `QhorusEntityMapper` and `QhorusDashboardService` were also partially pre-written with `ChannelDetail.ConnectorBinding` references that do not compile yet because `ChannelDetail` itself is missing the field.
+The bulk of #219 was pre-implemented as untracked files: `ConnectorChannelBackend`, `ChannelConnectorBinding`, `ChannelBindingStore` (interface + JPA + InMemory), `ChannelCreateRequest`, `ChannelService` additions, V14 migration, all unit tests, and an integration test skeleton. `QhorusEntityMapper` and `QhorusDashboardService` were also pre-written and already reference `ChannelDetail.ConnectorBinding` (which exists). `ChannelDetail` is already updated with the 14-arg constructor and nested `ConnectorBinding` record. The mapper compiles against the current api module.
 
-The pre-written mapper and dashboard both use **Option A** (mapper injects `ChannelBindingStore` and queries per-channel). The design decision (approved in brainstorming) is **Option B** (caller passes the binding, mapper stays a pure transformer). This spec describes the refactor needed and all remaining gaps.
-
----
-
-## Gap 1 — `ChannelDetail.ConnectorBinding` (api module)
-
-Add a nested record and a nullable field to `ChannelDetail`:
-
-```java
-public record ChannelDetail(
-    UUID channelId,
-    String name,
-    String description,
-    String semantic,
-    String barrierContributors,
-    long messageCount,
-    String lastActivityAt,
-    boolean paused,
-    String allowedWriters,
-    String adminInstances,
-    Integer rateLimitPerChannel,
-    Integer rateLimitPerInstance,
-    String allowedTypes,
-    ConnectorBinding connectorBinding   // null if no binding
-) {
-    public record ConnectorBinding(
-        String inboundConnectorId,
-        String externalKey,
-        String outboundConnectorId,
-        String outboundDestination
-    ) {}
-}
-```
-
-This is a binary break on the canonical constructor. All direct constructions of `ChannelDetail` must be updated. Currently: `QhorusEntityMapper` and `QhorusDashboardService` (private mapping method). Both are already written with the 14-arg form referencing `ConnectorBinding` — they just don't compile yet.
+The pre-written mapper uses **Option A** (mapper injects `ChannelBindingStore`, queries per-channel). The approved design is **Option B** (caller supplies the binding, mapper stays a pure transformer). This spec describes the refactor and all remaining gaps.
 
 ---
 
-## Gap 2 — Refactor `QhorusEntityMapper` to Option B
+## Gap 1 — Refactor `QhorusEntityMapper` to Option B
 
-**Current state (pre-written, Option A):** `QhorusEntityMapper` injects `ChannelBindingStore` and queries it per-channel inside `toChannelDetail(Channel, long)`.
+**Current state (Option A):** `QhorusEntityMapper` injects `ChannelBindingStore` and queries it per-channel inside `toChannelDetail(Channel, long)`.
 
-**Target (Option B):** Remove `ChannelBindingStore` injection from `QhorusEntityMapper`. Change signature to:
+**Target (Option B):** Remove `ChannelBindingStore` injection from `QhorusEntityMapper`. New signature:
 
 ```java
 public ChannelDetail toChannelDetail(Channel ch, long messageCount,
                                      Optional<ChannelConnectorBinding> binding)
 ```
 
-The mapper converts `binding` to `ChannelDetail.ConnectorBinding` if present, null otherwise. No store dependency. No query. Input in / output out.
+The mapper maps `binding` to `ChannelDetail.ConnectorBinding` if present, null otherwise. No store dependency. No query side-effect.
 
-**`QhorusMcpToolsBase.toChannelDetail()` wrapper** — the base class wraps the mapper call. It also needs the binding parameter:
-
-```java
-protected ChannelDetail toChannelDetail(Channel ch, long messageCount,
-                                        Optional<ChannelConnectorBinding> binding) {
-    return entityMapper.toChannelDetail(ch, messageCount, binding);
-}
-```
+The public testing constructor changes from `QhorusEntityMapper(ObjectMapper, ChannelBindingStore)` to `QhorusEntityMapper(ObjectMapper)`. **`QhorusDashboardServiceTest`** constructs the mapper at line 60 — update to the new signature.
 
 ---
 
-## Gap 3 — `ChannelBindingStore.findAll()` for batch loading
+## Gap 2 — `ChannelBindingStore` in `QhorusMcpToolsBase`
 
-Add to the `ChannelBindingStore` interface:
+Neither `QhorusMcpTools` nor `ReactiveQhorusMcpTools` currently injects `ChannelBindingStore`. Under Option B, the lookup responsibility moves to callers. The cleanest location is `QhorusMcpToolsBase`, which already injects `QhorusEntityMapper` and is the base for both concrete tool classes.
+
+Add to `QhorusMcpToolsBase`:
+
+```java
+@Inject ChannelBindingStore bindingStore;
+
+// Single-item path — base class resolves the lookup
+protected ChannelDetail toChannelDetail(Channel ch, long messageCount) {
+    return entityMapper.toChannelDetail(ch, messageCount,
+            bindingStore.findByChannelId(ch.id));
+}
+
+// Batch path — caller pre-fetches, base class resolves by key
+protected ChannelDetail toChannelDetail(Channel ch, long messageCount,
+                                        Map<UUID, ChannelConnectorBinding> allBindings) {
+    return entityMapper.toChannelDetail(ch, messageCount,
+            Optional.ofNullable(allBindings.get(ch.id)));
+}
+```
+
+`QhorusMcpTools` and `ReactiveQhorusMcpTools` need **zero new injections**. All single-channel call sites (`create_channel`, `get_channel`, `pause_channel`, etc.) already call `toChannelDetail(ch, count)` — the single-item overload handles the lookup. The only call site that must explicitly use the batch path is **`list_channels`**:
+
+```java
+// list_channels in QhorusMcpTools
+Map<UUID, ChannelConnectorBinding> allBindings = bindingStore.findAll();
+return channels.stream()
+    .map(ch -> toChannelDetail(ch, countByChannel.getOrDefault(ch.id, 0L), allBindings))
+    .toList();
+```
+
+`find_channel` iterates filtered matches (typically small sets) and uses the single-item path — one `findByChannelId` per match. This is intentionally not optimised; acceptable for typical search result sizes.
+
+---
+
+## Gap 3 — `ChannelBindingStore.findAll()`
+
+Add to the interface:
 
 ```java
 Map<UUID, ChannelConnectorBinding> findAll();
@@ -83,103 +79,113 @@ Implementations:
 - `JpaChannelBindingStore`: `ChannelConnectorBinding.<ChannelConnectorBinding>listAll().stream().collect(toMap(b -> b.channelId, b -> b))`
 - `InMemoryChannelBindingStore`: `Map.copyOf(byChannelId)`
 
-Add a `findAll` contract test to `ChannelBindingStoreContractTest`.
+Add four contract test cases to `ChannelBindingStoreContractTest`:
+1. `findAll_emptyStore_returnsEmptyMap`
+2. `findAll_afterPut_containsBinding`
+3. `findAll_afterDelete_excludesDeletedBinding`
+4. `findAll_returnsSnapshotNotLiveView` — call `findAll()`, mutate store, verify returned map is unchanged
 
 ---
 
-## Gap 4 — Update all `toChannelDetail` call sites
+## Gap 4 — `QhorusDashboardService` update
 
-### `QhorusMcpTools` (blocking)
+**Current state:** has a private `toChannelDetail(Channel, int)` that duplicates mapper logic with Option A binding lookup.
 
-Seven call sites. Pattern:
+**Target:** remove the private method entirely. All channel detail mapping goes through `entityMapper.toChannelDetail()` via `QhorusMcpToolsBase` — except `QhorusDashboardService` does not extend the base. It directly injects `QhorusEntityMapper` (already present) and needs a `ChannelBindingStore` injection (new).
 
-- **Single-channel calls** (create, get, pause, resume, update, delete): `bindingStore.findByChannelId(ch.id)` then pass result
-- **`list_channels`**: call `bindingStore.findAll()` once before the stream, look up by `ch.id` per iteration — eliminates N+1
-
-`QhorusMcpTools` already injects `ChannelBindingStore` (it uses the seam for channel operations). No new injection needed.
-
-### `ReactiveQhorusMcpTools` (reactive)
-
-Same pattern. The binding lookup for single-channel calls is blocking; wrap in `Uni.createFrom().item(...)` if needed, or call on the worker thread (MCP tool methods annotated `@Blocking` are safe to block). For `list_channels`, load all bindings with `Uni.createFrom().item(() -> bindingStore.findAll())` before the reactive chain, then pass by channelId.
-
-### `QhorusDashboardService` (reactive)
-
-**Current state:** has its own private `toChannelDetail(Channel, int)` that duplicates mapper logic — this duplication goes away. All mapping delegates to `entityMapper.toChannelDetail()`.
-
-In `listChannels()`: load bindings before the reactive chain:
+In `listChannels()`, load bindings before the reactive channel chain. Since `bindingStore.findAll()` is blocking and `listChannels()` returns `Uni<T>` without a `@Blocking` annotation, the blocking call must be explicitly dispatched to the worker pool:
 
 ```java
 public Uni<List<ChannelDetail>> listChannels() {
-    return channelService.listAll().flatMap(channels -> {
-        if (channels.isEmpty()) return Uni.createFrom().item(List.of());
-        Map<UUID, ChannelConnectorBinding> bindings =
-            Uni.createFrom().item(bindingStore::findAll).await().indefinitely();
-        // ... map channels using entityMapper.toChannelDetail(ch, count, Optional.ofNullable(bindings.get(ch.id)))
-    });
+    return Uni.createFrom().item(bindingStore::findAll)
+            .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
+            .flatMap(bindings -> channelService.listAll().flatMap(channels -> {
+                if (channels.isEmpty()) return Uni.createFrom().item(List.of());
+                List<Uni<ChannelDetail>> unis = channels.stream()
+                    .map(ch -> messageStore.countByChannel(ch.id)
+                        .map(count -> entityMapper.toChannelDetail(ch, count,
+                                Optional.ofNullable(bindings.get(ch.id)))))
+                    .toList();
+                return Uni.join().all(unis).andFailFast();
+            }));
 }
 ```
 
-Wait — `await().indefinitely()` on a Vert.x event loop thread blocks the loop. The correct pattern for `QhorusDashboardService`:
-
-```java
-return Uni.createFrom().item(bindingStore::findAll)   // blocking Uni — runs on worker pool
-    .flatMap(bindings -> channelService.listAll()
-        .flatMap(channels -> { ... }));
-```
-
-Or keep it simple: since the dashboard is reactive and `bindingStore.findAll()` is blocking, wrap it:
-
-```java
-Uni<Map<UUID, ChannelConnectorBinding>> bindingUni =
-    Uni.createFrom().item(bindingStore::findAll);
-return bindingUni.flatMap(bindings -> channelService.listAll()
-    .flatMap(channels -> { ... use bindings ... }));
-```
-
-Quarkus runs `Uni.createFrom().item(supplier)` on the caller's thread for the subscribe — if that's a Vert.x event loop, it blocks. The safe way is `Uni.createFrom().item(bindingStore::findAll).runSubscriptionOn(Infrastructure.getDefaultWorkerPool())`. However, `QhorusDashboardService` is `@IfBuildProperty(name = "quarkus.datasource.qhorus.reactive", stringValue = "true")` — it is only active in the reactive stack where MCP tool methods are `@Blocking`. In that context, the initial Uni subscription happens on a worker thread. Treat the whole dashboard method as worker-initiated and use the simple form.
-
-The private `toChannelDetail()` method in `QhorusDashboardService` is removed entirely. All channel detail mapping goes through `entityMapper.toChannelDetail(ch, count, Optional.ofNullable(bindings.get(ch.id)))`.
+`runSubscriptionOn(Infrastructure.getDefaultWorkerPool())` is required — without it, `bindingStore::findAll` (blocking JPA) runs on the Vert.x event loop thread and blocks it.
 
 ---
 
-## Gap 5 — Fix integration test `@ObservesAsync` reliability
+## Gap 5 — Fix integration test
 
-GE-20260513-b15933: `@ObservesAsync` events are silently not delivered in `@QuarkusTest`. The integration test fires through `inboundConnectorService.receive(msg)` and waits with `verify(timeout(2000))` and `Thread.sleep(300)` — flaky.
+**`ConnectorChannelBackendIntegrationTest` changes:**
 
-**Fix:** Remove `@Inject InboundConnectorService`. Call `backend.onInboundMessage(msg)` directly through the injected CDI proxy. This is synchronous and deterministic. Remove all `Thread.sleep` and `timeout()` Mockito calls. The `fanOut_sendsViaConnectorService` test drives `gateway.fanOut()` directly — no sleep needed there either.
+1. **Remove `@Inject InboundConnectorService inboundConnectorService`** — no longer used. Calling through `InboundConnectorService.receive()` → `@ObservesAsync` is unreliable in `@QuarkusTest` (GE-20260513-b15933). Call `backend.onInboundMessage(msg)` directly through the injected CDI proxy instead.
+
+2. **`inboundMessage_routesToMessageService`:** Call `backend.onInboundMessage(msg)` directly. The chain is fully synchronous: InMemoryChannelBindingStore lookup → `gateway.receiveHumanMessage()` → mocked `messageService.dispatch()`. Replace `verify(messageService, timeout(2000)).dispatch(...)` with plain `verify(messageService).dispatch(...)`.
+
+3. **`unknownSender_noChannelBound_discardCounterIncremented`:** Call `backend.onInboundMessage(msg)` directly. Remove `verify(messageService, after(1000).never()).dispatch(any())` — synchronous call means dispatch is never called before the line returns. The counter increment is also synchronous; remove the polling loop and assert directly.
+
+4. **`fanOut_sendsViaConnectorService`:** Remove the first routing block entirely — `@BeforeEach` calls `gateway.initChannel()` which fires the synchronous `@Observes ChannelInitialisedEvent`, populating the cache before the test body runs. The fanOut call itself is sufficient:
+
+    ```java
+    @Test
+    void fanOut_sendsViaConnectorService() {
+        OutboundMessage outbound = new OutboundMessage(UUID.randomUUID(), "agent",
+                MessageType.RESPONSE, "We can help", null, null, ActorType.AGENT);
+        gateway.fanOut(channelId, "sms-alice", outbound);
+
+        ArgumentCaptor<ConnectorMessage> captor = ArgumentCaptor.forClass(ConnectorMessage.class);
+        verify(connectorService, timeout(1000).atLeastOnce()).send(eq("twilio-sms"), captor.capture());
+        assertThat(captor.getValue().destination()).isEqualTo("+15551110000");
+        assertThat(captor.getValue().body()).isEqualTo("We can help");
+    }
+    ```
+
+    `timeout(1000)` is still required on `connectorService.send()` — `gateway.fanOut()` dispatches `backend.post()` on a virtual thread (`Thread.ofVirtual().start()`).
+
+5. **Coverage gap acknowledged:** No test exercises the CDI async path `InboundConnectorService.receive()` → `Event.fireAsync()` → `@ObservesAsync ConnectorChannelBackend.onInboundMessage`. Tracked as **casehubio/qhorus#221**.
 
 ---
 
 ## Gap 6 — `NativeImageResourcePatternsBuildItem` in `QhorusProcessor`
 
-Per PP-20260528-flyway-ext-reg. Add to `QhorusProcessor`:
+Per PP-20260528-flyway-ext-reg. `QhorusProcessor` currently only has a `FeatureBuildItem` step. Add:
 
 ```java
 @BuildStep
 NativeImageResourcePatternsBuildItem registerMigrationResources() {
     return NativeImageResourcePatternsBuildItem.builder()
             .includeGlob("db/qhorus/migration/*.sql")
+            .includeGlob("db/ledger/migration/*.sql")
             .build();
 }
 ```
 
-Covers all Qhorus domain migrations in one glob.
+Two globs are required: `db/qhorus/migration/*.sql` for Qhorus domain migrations, and `db/ledger/migration/*.sql` for ledger base migrations. `LedgerProcessor` (casehub-ledger deployment) does **not** register its own SQL files for native image — if `QhorusProcessor` doesn't register them, ledger migrations are absent in native builds.
 
 ---
 
 ## Gap 7 — PLATFORM.md Cross-Repo Dependency Map
 
-Per PP-20260523-605b90. Add row to `casehub-parent/docs/PLATFORM.md`:
+Per PP-20260523-605b90. Add to `casehub-parent/docs/PLATFORM.md` Cross-Repo Dependency Map:
 
 | `casehub-connectors-core` | `casehub-qhorus` | `connector-backend` | optional — `InboundMessage` CDI events → `ConnectorChannelBackend` → Qhorus channel routing; activates by classpath presence |
 
-Extend the build-order comment for `casehub-qhorus` to mention `connector-backend` alongside the existing `connectors` optional module.
+Extend the build-order comment for `casehub-qhorus` to note `connector-backend` alongside the existing `connectors` optional module.
 
 ---
 
 ## Gap 8 — Protocol update: bridge module placement exception
 
-`cross-foundation-bridge-module-placement.md` (PP-20260528-6b1d80) states bridges live in the event-source repo. This would create a circular dependency here: `connector-backend` needs qhorus runtime beans, so it cannot live in `casehub-connectors`. Update the protocol with: **when the bridge requires the consuming repo's runtime (not just its api module), it lives in the consumer's repo.**
+Update `cross-foundation-bridge-module-placement.md` (PP-20260528-6b1d80). Add after the existing rule paragraph:
+
+> **Exception — runtime coupling:** If the bridge requires the consuming repo's runtime beans (not just its api module), placing it in the event-source repo creates a circular dependency. In this case the bridge lives in the consumer's repo. `casehub-qhorus/connector-backend` is the canonical example: it depends on `ChannelGateway`, `ChannelService`, and `ChannelBindingStore` from qhorus runtime; moving it to `casehub-connectors` would require qhorus runtime as a dep of connectors, which already depends on connectors.
+
+---
+
+## Gap 9 — `create_channel` MCP tool scope note
+
+`create_channel` does not expose connector binding fields (4 optional params: `inboundConnectorId`, `externalKey`, `outboundConnectorId`, `outboundDestination`). MCP clients cannot create connector-bound channels. This is intentional — that scope is **deferred to casehubio/qhorus#217** ("MCP tools for creating and updating channels with connector bindings"). No action in this issue.
 
 ---
 
@@ -191,13 +197,16 @@ Extend the build-order comment for `casehub-qhorus` to mention `connector-backen
 | `OutboundTitleTest` | Pure unit | Complete ✅ |
 | `ConnectorChannelBackendTest` | Unit (Mockito) | Complete ✅ |
 | `InMemoryChannelBindingStoreTest` | Contract runner | Complete ✅ |
-| `ChannelBindingStoreContractTest` | Abstract base | Add `findAll` test case |
-| `ConnectorChannelBackendIntegrationTest` | `@QuarkusTest` | Fix: drop `inboundConnectorService`, call `backend.onInboundMessage()` directly, remove sleeps |
+| `ChannelBindingStoreContractTest` | Abstract base | Add 4 `findAll` test cases |
+| `ConnectorChannelBackendIntegrationTest` | `@QuarkusTest` | Remove `InboundConnectorService`; call backend directly; remove sleeps and wrong timeouts; remove redundant routing block in fanOut test |
+| CDI async wiring | — | Untested — tracked as #221 |
 
 ---
 
 ## Out of Scope (separate issues)
 
-- `#218` — consolidate `ChannelService.create()` overloads: old overloads remain; `create(ChannelCreateRequest)` added ✅
-- `#215` — fire `ChannelInitialisedEvent` on binding update: disabled test `cacheRefreshesAfterBindingUpdate` is the regression harness
-- `#214`, `#216`, `#217` — v2 connector features: tracked separately
+- `#217` — MCP tools for connector-bound channel create/update
+- `#218` — consolidate `ChannelService.create()` overloads; old overloads remain
+- `#215` — fire `ChannelInitialisedEvent` on binding update; disabled test is regression harness
+- `#214`, `#216` — v2 connector features
+- `#221` — CDI async wiring test coverage for `@ObservesAsync InboundMessage`
