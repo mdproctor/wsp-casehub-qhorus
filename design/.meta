@@ -1,0 +1,8 @@
+branch: issue-224-fix-design-md-messagetype
+project-sha: 0aa327c11ce1cf0adabee0e5d7fe923621094c20
+date: 2026-05-31
+issue: 224
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: project
+design-section-hashes:
