@@ -1,0 +1,8 @@
+branch: issue-220-221-connector-backend-cleanup
+project-sha: 5f8529c9d5cac70b19d4ca462d77287d3eca5390
+date: 2026-05-31
+issue: 220
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: project
+design-section-hashes:
