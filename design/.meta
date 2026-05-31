@@ -1,0 +1,8 @@
+branch: issue-214-auto-channel-creation
+project-sha: 2c4edec
+date: 2026-05-31
+issue: 214
+issue-repo: casehubio/qhorus
+flyway-next-v: 15
+design-repo: workspace
+design-section-hashes:
