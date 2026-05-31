@@ -307,20 +307,27 @@ constraint:
 @Override
 public void put(ChannelConnectorBinding binding) {
     String newKey = compoundKey(binding.inboundConnectorId, binding.externalKey);
-    ChannelConnectorBinding existingById = byChannelId.get(binding.channelId);
-    if (existingById != null) {
-        byKey.remove(compoundKey(existingById.inboundConnectorId, existingById.externalKey));
+    synchronized (this) {
+        ChannelConnectorBinding existingById = byChannelId.get(binding.channelId);
+        if (existingById != null) {
+            byKey.remove(compoundKey(existingById.inboundConnectorId, existingById.externalKey));
+        }
+        ChannelConnectorBinding existingByKey = byKey.get(newKey);
+        if (existingByKey != null && !existingByKey.channelId.equals(binding.channelId)) {
+            throw new PersistenceException(
+                new SQLIntegrityConstraintViolationException(
+                    "Duplicate entry for uq_binding_key: " + newKey));
+        }
+        byChannelId.put(binding.channelId, binding);
+        byKey.put(newKey, binding);
     }
-    ChannelConnectorBinding existingByKey = byKey.get(newKey);
-    if (existingByKey != null && !existingByKey.channelId.equals(binding.channelId)) {
-        throw new PersistenceException(
-            new SQLIntegrityConstraintViolationException(
-                "Duplicate entry for uq_binding_key: " + newKey));
-    }
-    byChannelId.put(binding.channelId, binding);
-    byKey.put(newKey, binding);
 }
 ```
+
+The entire check-and-put must be inside `synchronized (this)`. Without it, two threads can
+both execute `byKey.get(newKey) → null`, both pass the guard, and both insert — the race
+test would then see two channels created and fail with a false negative rather than exercising
+the loser path.
 
 This fix is in `testing/` and is prerequisite work for this feature's tests.
 
