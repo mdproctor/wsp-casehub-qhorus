@@ -28,7 +28,7 @@
 |---|-------------|-------|------------|-------|
 | parent#125 | Protocol ref path fixes + deep-dive enrichment | S | Low | Python script ready in issue body |
 | qhorus#216 | Per-connector InboundNormaliser | S | Med | Unblocked |
-| qhorus#214 | Auto-channel creation on first contact | S | High | Needs #215/#217 ✅ |
+| qhorus#214 | Auto-channel creation on first contact | M | High | Needs #215/#217 ✅ |
 | qhorus#132 | Delivery guarantees (retry + dead-letter) | L | High | Main feature item |
 
 ## References
