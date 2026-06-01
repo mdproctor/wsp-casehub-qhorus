@@ -11,12 +11,10 @@
 
 ## Immediate Next Step
 
-**casehubio/parent#125** — 17 protocol ref path-depth fixes + deep-dive enrichment + 2 new protocols + skill update. Python script ready in issue body. S · Low.
+Run `/work` to pick up **qhorus#216** (per-connector InboundNormaliser) or batch **qhorus#225-227** (minor #214 follow-ons). Both unblocked.
 
 ## What's Left
 
-- **casehubio/parent#125** — 17 path-depth fixes + deep-dive enrichment + 2 protocols + skill update · S · Low
-- **casehubio/parent#124** — tracking; tick off as sub-issues resolve
 - **casehubio/ledger#105** — reactive LedgerAttestation persistence · S · Med
 - **casehubio/ledger#106** — `Uni<Boolean> TrustGateService.meetsThreshold()` · S · Low
 - **qhorus#225, #226, #227** — minor code review findings from #214 · XS · Low (batch)
@@ -25,7 +23,6 @@
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| parent#125 | Protocol ref path fixes + deep-dive enrichment | S | Low | Python script ready in issue body |
 | qhorus#216 | Per-connector InboundNormaliser | S | Med | Unblocked |
 | qhorus#225-227 | Minor #214 follow-ons (log+discard, ConfigMapping test, literal) | XS | Low | Batch in one branch |
 | qhorus#132 | Delivery guarantees (retry + dead-letter) | L | High | Main feature item |
@@ -38,5 +35,4 @@
 | Auto-channel design spec | `docs/specs/2026-05-31-auto-channel-creation-design.md` (project) |
 | Garden: PSQLException instanceof miss | GE-20260601-17fa50 |
 | Protocol: bridge-module SPI placement | PP-20260601-c43112 |
-| Platform coherence tracking | casehubio/parent#124 |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
