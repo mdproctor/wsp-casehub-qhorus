@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-01-mdp01-first-contact.md](2026-06-01-mdp01-first-contact.md) | 2026-06-01 | Auto-channel creation on first contact — AutoChannelPolicy SPI, convention table, REQUIRES_NEW race handling, PSQLException instanceof miss |
 | [2026-05-30-mdp06-clearing-the-queue.md](2026-05-30-mdp06-clearing-the-queue.md) | 2026-05-30 | ObligorTrustPolicy SPI, JTA ROLLBACK_ONLY gotcha, CDI observer that wouldn't, 50 test files updated with Python parser |
 | [2026-05-28-mdp01-teaching-watchdog-to-reach-outside.md](2026-05-28-mdp01-teaching-watchdog-to-reach-outside.md) | 2026-05-28 | WatchdogAlertEvent + ConnectorAlertBridge — sealed AlertContext, SPI router, fireAsync ordering |
 | [2026-05-24-mdp02-branch-hygiene-archaeology.md](2026-05-24-mdp02-branch-hygiene-archaeology.md) | 2026-05-24 | 22 branches audited and stamped; recovered a missing blog entry from a closed epic; git diff direction trap |
