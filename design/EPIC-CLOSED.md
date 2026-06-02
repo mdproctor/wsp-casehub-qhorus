@@ -1,4 +1,4 @@
-# Branch Closed — issue-200-watchdog-alert-event
-**Date:** 2026-05-28
-**Issue:** #200
-**Scheduled for deletion:** 2026-06-11
+# Branch Closed — issue-230-channel-projection-spi
+**Date:** 2026-06-02
+**Issue:** #230 (also #231)
+**Scheduled for deletion:** 2026-06-16
