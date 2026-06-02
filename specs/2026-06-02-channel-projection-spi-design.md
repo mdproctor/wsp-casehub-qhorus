@@ -107,6 +107,13 @@ future registry will use a `@ChannelBound` qualifier annotation or a
  *
  * <p>Pass this as {@code previous} to the incremental {@code project()} overload
  * to resume folding from the cursor without re-reading earlier messages.
+ *
+ * <p><strong>Contract:</strong> only pass results obtained from
+ * {@code ProjectionService.project()} — never construct manually. A manually
+ * constructed instance with a non-null {@code state} and a null {@code lastMessageId}
+ * has undefined behaviour in the incremental overload: the service treats
+ * {@code lastMessageId == null} as "channel was empty, start from identity()"
+ * and will silently ignore the provided {@code state}.
  */
 public record ProjectionResult<S>(S state, Long lastMessageId) {
 
@@ -178,7 +185,11 @@ public class ProjectionService {
      * {@code id > previous.lastMessageId()} are folded.
      *
      * <p>If {@code previous.isEmpty()} (channel was empty at last projection),
-     * a full scan is performed starting from {@code identity()}.
+     * a full scan is performed starting from {@code identity()} — {@code previous.state()}
+     * is ignored. {@code lastMessageId == null} unambiguously means "fold from scratch":
+     * the service enforces this regardless of what is in {@code state}, so that a
+     * manually constructed {@code ProjectionResult} with inconsistent fields cannot
+     * silently corrupt the fold.
      */
     public <S> ProjectionResult<S> project(UUID channelId,
                                             ProjectionResult<S> previous,
@@ -186,11 +197,13 @@ public class ProjectionService {
         Objects.requireNonNull(channelId, "channelId");
         Objects.requireNonNull(previous, "previous");
         Objects.requireNonNull(projection, "projection");
+        // When isEmpty(), start from identity() regardless of previous.state().
+        var initialState = previous.isEmpty() ? projection.identity() : previous.state();
         var query = MessageQuery.builder()
                 .channelId(channelId)
                 .afterId(previous.lastMessageId())   // null = full scan (empty channel)
                 .build();
-        return fold(query, previous.state(), previous.lastMessageId(), projection);
+        return fold(query, initialState, previous.lastMessageId(), projection);
     }
 
     /** Scoped incremental — scope rules same as the scoped-full overload. */
@@ -203,11 +216,12 @@ public class ProjectionService {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(projection, "projection");
         validateScope(channelId, scope);
+        var initialState = previous.isEmpty() ? projection.identity() : previous.state();
         var query = scope.toBuilder()
                 .channelId(channelId)
                 .afterId(previous.lastMessageId())
                 .build();
-        return fold(query, previous.state(), previous.lastMessageId(), projection);
+        return fold(query, initialState, previous.lastMessageId(), projection);
     }
 
     private <S> ProjectionResult<S> fold(MessageQuery query, S initialState,
@@ -247,16 +261,29 @@ meaningfully reactive. The reactive service requires a new streaming method:
 Multi<Message> stream(MessageQuery query);
 ```
 
-Implemented in `ReactiveJpaMessageStore` using Panache's `PanacheQuery.stream()`.
-Must also be added to `InMemoryReactiveMessageStore` (testing module) and
-`StubReactiveMessageStore` (test-profile stub).
+**Implementation semantics by store type:**
+
+- `ReactiveJpaMessageStore.stream()` — backed by `PanacheQuery.stream()`, which uses a
+  Hibernate Reactive scrollable cursor. Messages are fetched from the database
+  row-by-row (or in small fetch-size batches), not materialised as a full
+  `List<Message>` before the fold starts. This is genuinely cursor-backed streaming
+  with bounded memory.
+
+- `InMemoryReactiveMessageStore.stream()` — wraps the in-memory list as
+  `Multi.createFrom().iterable(list)`. Not lazy, but functionally correct for tests.
+  Consumers of the testing module are not using it for large-channel performance.
+
+- `StubReactiveMessageStore.stream()` — throws `UnsupportedOperationException`
+  (same contract as other stub methods).
+
+Must be added to `ReactiveMessageStore` interface and all three implementations.
 
 ---
 
 ### Reactive service — `runtime/message/ReactiveProjectionService.java`
 
 Build-gated on `casehub.qhorus.reactive.enabled`. Uses `stream()` for a genuine
-streaming fold — one message at a time, bounded memory.
+streaming fold — one message fetched and processed at a time, bounded memory.
 
 ```java
 @IfBuildProperty(name = "casehub.qhorus.reactive.enabled", stringValue = "true")
@@ -283,29 +310,44 @@ public class ReactiveProjectionService {
 }
 ```
 
-Internal fold uses `Multi.scan()` over `stream()`:
+The incremental overloads apply the same `isEmpty()` guard as the blocking service:
+`previous.isEmpty() ? projection.identity() : previous.state()`.
+
+**Internal fold operator:** `Multi.collect().in()` with a private mutable
+accumulator class. `collect().in()` takes `Supplier<C>` (container factory) and
+`BiConsumer<C, T>` (mutation), so the container must be mutable — a `FoldAcc<S>`
+class with mutable fields, not a record.
 
 ```java
-// Private record to carry (state, lastId) through the scan
-private record FoldAcc<S>(S state, Long lastId) {}
+// Private mutable accumulator — never exposed outside ReactiveProjectionService
+private static final class FoldAcc<S> {
+    S state;
+    Long lastId;
+    FoldAcc(S state, Long lastId) { this.state = state; this.lastId = lastId; }
+}
 
-private <S> Uni<ProjectionResult<S>> reactivefold(MessageQuery query, S initialState,
+private <S> Uni<ProjectionResult<S>> reactiveFold(MessageQuery query,
+                                                    S initialState,
                                                     Long cursorIn,
                                                     ChannelProjection<S> projection) {
     return reactiveMessageStore.stream(query)
-        .scan(() -> new FoldAcc<>(initialState, cursorIn),
-              (acc, msg) -> new FoldAcc<>(
-                  projection.apply(acc.state(), mapper.toMessageView(msg)),
-                  msg.id))
-        .collect().last()
-        .map(opt -> opt
-            .map(acc -> new ProjectionResult<>(acc.state(), acc.lastId()))
-            .orElseGet(() -> new ProjectionResult<>(initialState, cursorIn)));
+        .collect().in(
+            () -> new FoldAcc<>(initialState, cursorIn),
+            (acc, msg) -> {
+                acc.state = projection.apply(acc.state, mapper.toMessageView(msg));
+                acc.lastId = msg.id;
+            })
+        .map(acc -> new ProjectionResult<>(acc.state, acc.lastId));
 }
 ```
 
-The same scope validation applies (`validateScope` extracted to a shared static
-utility or duplicated — no cross-module sharing needed).
+`collect().in()` is the correct Mutiny operator for a stateful fold over a `Multi`
+with a mutable accumulator. It is NOT `Multi.scan()` (which emits intermediate
+running states, not a single final result) and NOT `collect().in(projection::identity,
+projection::apply)` (which would not compile — `apply` returns `S`, but `collect().in()`
+requires a `BiConsumer<C, T>` with a void mutation, not a `BiFunction`).
+
+The same scope validation applies (duplicated or shared static utility).
 
 ---
 
