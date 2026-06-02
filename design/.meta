@@ -1,0 +1,8 @@
+branch: issue-234-reactive-ledger-parity
+project-sha: 3745b1245d363ae3d2f3570fa2a0c383150cd8ab
+date: 2026-06-02
+issue: 234
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
