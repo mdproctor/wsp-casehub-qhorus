@@ -1,0 +1,8 @@
+branch: issue-230-channel-projection-spi
+project-sha: d2726c6
+date: 2026-06-02
+issue: 230
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
