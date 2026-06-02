@@ -273,10 +273,82 @@ authored in `casehub/garden/docs/protocols/universal/` during this session.
 
 ---
 
+## Incremental/cursor projection (#231)
+
+The v1 overloads always fold from the beginning of a channel's history. For
+long-lived channels, consumers want to fold only messages that arrived after a
+known point — re-projecting from a cached `currentState` with `id > afterId`.
+
+### New overloads on `ProjectionService`
+
+```java
+/** Resume a fold from a known state at a known cursor. */
+public <S> S project(UUID channelId, S currentState, Long afterId,
+                     ChannelProjection<S> projection) {
+    var scope = MessageQuery.builder().afterId(afterId).build();
+    var query = scope.toBuilder().channelId(channelId).build();
+    var state = currentState;
+    for (var msg : messageStore.scan(query)) {
+        state = projection.apply(state, mapper.toMessageView(msg));
+    }
+    return state;
+}
+```
+
+Same pattern on `ReactiveProjectionService`:
+
+```java
+public <S> Uni<S> project(UUID channelId, S currentState, Long afterId,
+                           ChannelProjection<S> projection) {
+    var query = MessageQuery.builder().channelId(channelId).afterId(afterId).build();
+    return reactiveMessageStore.scan(query)
+        .map(messages -> {
+            var state = currentState;
+            for (var msg : messages) {
+                state = projection.apply(state, mapper.toMessageView(msg));
+            }
+            return state;
+        });
+}
+```
+
+### Caller contract
+
+The caller owns the cache: `currentState` from the last projection call, and the
+`id` of the last message that was folded (pass as `afterId`). If `afterId` is
+`null`, the call is equivalent to `project(channelId, projection)` starting from
+`identity()` — not a valid use of this overload. Document as requiring non-null
+`afterId`.
+
+### Testing
+
+```java
+@Test
+@TestTransaction
+void incrementalProjectionOnlyFoldsNewMessages() {
+    var channelId = createChannel();
+    var id1 = sendMessage(channelId, "alice", MessageType.COMMAND, "approve").id;
+    var id2 = sendMessage(channelId, "bob", MessageType.COMMAND, "approve").id;
+
+    // Full projection
+    var state1 = projectionService.project(channelId, new VoteTallyProjection());
+    assertThat(state1.approvalCount()).isEqualTo(2);
+
+    // New message arrives
+    sendMessage(channelId, "carol", MessageType.DECLINE, "not yet");
+
+    // Incremental — resume from state1, afterId = id2
+    var state2 = projectionService.project(channelId, state1, id2,
+                                            new VoteTallyProjection());
+    assertThat(state2.approvalCount()).isEqualTo(2);
+    assertThat(state2.declineCount()).isEqualTo(1);
+}
+```
+
+---
+
 ## Out of scope — filed as follow-on issues
 
-- **Incremental/cursor projection** (re-project from `afterId` without full
-  replay) — drives live SSE updates. Filed as casehubio/qhorus#231.
 - **MCP tool `project_channel`** — requires named-projection registry + render;
   not possible with generic `<S>`. Filed as casehubio/qhorus#232.
 - **DraftHouse migration** (replace local file-parser with `DebateChannelProjection`)
