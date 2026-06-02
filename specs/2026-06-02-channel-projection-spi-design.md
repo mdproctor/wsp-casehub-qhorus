@@ -1,8 +1,8 @@
 # ChannelProjection SPI Design
 
-**Issue:** casehubio/qhorus#230  
+**Issue:** casehubio/qhorus#230 + casehubio/qhorus#231
 **Date:** 2026-06-02  
-**Status:** Approved
+**Status:** Approved (rev 2 — post code review)
 
 ---
 
@@ -22,8 +22,12 @@ should own the infrastructure; consumers own the domain logic.
 
 A `ChannelProjection<S>` is a pure left-fold: an identity element and a step
 function. Qhorus reads the message history, folds it via the projection, and returns
-the materialised state `<S>`. What the consumer does with `<S>` — render to markdown,
-serve via REST, compare counts — is not Qhorus's concern.
+a `ProjectionResult<S>` containing the materialised state and the last message ID
+seen (needed as a cursor for incremental re-projection). What the consumer does with
+the state — render to markdown, serve via REST, compare counts — is not Qhorus's
+concern.
+
+---
 
 ### New types in `api/`
 
@@ -34,7 +38,7 @@ public record MessageView(
     Long id,
     UUID channelId,
     String sender,
-    MessageType type,
+    MessageType type,           // field is type, not messageType — see Mapper section
     String content,
     String correlationId,
     Long inReplyTo,
@@ -49,52 +53,88 @@ public record MessageView(
 
 Fields included: everything a reasonably sophisticated projection needs.  
 Fields excluded: `commitmentId` (internal infrastructure UUID),
-`acknowledgedAt` (always null in v1 — add when v2 ACK mechanism ships).
+`acknowledgedAt` (always null in v1).
+
+Note: the entity field is `messageType`; the DTO field is `type` — consistent with
+`DispatchResult.type`. The mapper method must document this rename explicitly to
+avoid confusion.
 
 `MessageView` is not projection-specific — it is the canonical read-side
-representation of a message. Future uses (timeline REST endpoints, dashboard
-read models) may consume it directly.
+representation of a message. Future uses (timeline REST endpoints) may consume it
+directly.
 
-**`api/spi/ChannelProjection.java`** — the SPI.
+---
+
+**`api/spi/ChannelProjection.java`**
 
 ```java
+/**
+ * A pure left-fold over a channel's message history.
+ *
+ * <p><strong>Contract:</strong>
+ * <ul>
+ *   <li>{@code identity()} must return a <em>fresh</em> instance on every call.
+ *       If {@code S} is mutable (e.g., a HashMap accumulator), returning a cached
+ *       singleton creates shared state across concurrent {@code project()} calls.</li>
+ *   <li>{@code apply()} must be pure: no external state reads or writes, no side
+ *       effects, no thread-local access. Return {@code state} unchanged for messages
+ *       this projection does not handle.</li>
+ *   <li>{@code apply()} must not throw. If it does (unchecked), the exception
+ *       propagates from {@code project()} — partial state is not returned.</li>
+ * </ul>
+ */
 public interface ChannelProjection<S> {
     /** The neutral element — empty initial state before any messages are folded. */
     S identity();
 
-    /**
-     * Pure fold step. Must not throw or mutate external state.
-     * Return {@code state} unchanged for messages this projection ignores.
-     */
+    /** Pure fold step. Return {@code state} unchanged for ignored messages. */
     S apply(S state, MessageView message);
-
-    /**
-     * Channel type tag. Currently informational — reserved for a future
-     * registry that dispatches projections by channel name/pattern.
-     * Return a channel name prefix (e.g. {@code "work."}) or {@code "*"} for all.
-     */
-    String channelType();
 }
 ```
 
-Not `@FunctionalInterface` — three abstract methods.
+Two abstract methods — not `@FunctionalInterface`. No `channelType()` in v1; a
+future registry will use a `@ChannelBound` qualifier annotation or a
+`ChannelBoundProjection` subinterface so the return type is not locked to `String`.
 
-**`api/spi/ProjectionRenderer.java`** — consumer-side convention.
+---
+
+**`api/spi/ProjectionResult.java`**
 
 ```java
-@FunctionalInterface
-public interface ProjectionRenderer<S> {
-    String render(S state);
+/**
+ * The result of a projection fold: materialised state plus the ID of the last
+ * message folded. {@code lastMessageId} is null if the channel was empty.
+ *
+ * <p>Pass this as {@code previous} to the incremental {@code project()} overload
+ * to resume folding from the cursor without re-reading earlier messages.
+ */
+public record ProjectionResult<S>(S state, Long lastMessageId) {
+
+    /** True when the channel was empty — no messages folded. */
+    public boolean isEmpty() {
+        return lastMessageId == null;
+    }
 }
 ```
 
-The service never calls this. It names the "turns state into a string" pattern so
-DraftHouse and Claudony have a first-class abstraction to implement. Consumers call
-`renderer.render(service.project(channelId, projection))` themselves.
+`ProjectionResult` belongs in `api/spi/` — it is the result type of the SPI,
+not a general message type.
 
-### Runtime service
+---
 
-**`runtime/message/ProjectionService.java`**
+**No `ProjectionRenderer<S>` in `api/spi/`.** The pattern of "turns state into a
+string" is documented in the Javadoc on `ChannelProjection<S>` and in consumer
+guides. `Function<S, String>` from the JDK is already named, typed, and composable.
+Putting a `@FunctionalInterface` in `api/spi/` that Qhorus never calls gives the
+false impression of a managed extension point. Consumers use `Function<S, String>`
+or a local `@FunctionalInterface` if they want a named abstraction.
+
+---
+
+### Runtime service — `runtime/message/ProjectionService.java`
+
+Four overloads: full, scoped-full, incremental, scoped-incremental. All return
+`ProjectionResult<S>`.
 
 ```java
 @ApplicationScoped
@@ -103,31 +143,120 @@ public class ProjectionService {
     @Inject MessageStore messageStore;
     @Inject QhorusEntityMapper mapper;
 
-    /** Project all messages in the channel. */
-    public <S> S project(UUID channelId, ChannelProjection<S> projection) {
-        return project(channelId, MessageQuery.builder().build(), projection);
+    /** Project all messages in the channel from the beginning. */
+    public <S> ProjectionResult<S> project(UUID channelId,
+                                            ChannelProjection<S> projection) {
+        Objects.requireNonNull(channelId, "channelId");
+        Objects.requireNonNull(projection, "projection");
+        return fold(MessageQuery.builder().channelId(channelId).build(),
+                    projection.identity(), null, projection);
     }
 
     /**
-     * Project messages matching {@code scope} within the channel.
-     * The service always enforces {@code channelId} — scope adds orthogonal
-     * filters (type exclusions, sender filter, afterId cursor, etc.).
-     * The channelId in scope, if set, is overridden.
+     * Project messages in the channel matching {@code scope}.
+     *
+     * <p>Scope rules:
+     * <ul>
+     *   <li>If {@code scope.channelId()} is non-null and differs from
+     *       {@code channelId}, {@link IllegalArgumentException} is thrown.</li>
+     *   <li>{@code scope.descending(true)} throws — projections always fold
+     *       ascending (insertion order). Strip the flag before passing scope.</li>
+     * </ul>
      */
-    public <S> S project(UUID channelId, MessageQuery scope,
-                          ChannelProjection<S> projection) {
+    public <S> ProjectionResult<S> project(UUID channelId, MessageQuery scope,
+                                            ChannelProjection<S> projection) {
+        Objects.requireNonNull(channelId, "channelId");
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(projection, "projection");
+        validateScope(channelId, scope);
         var query = scope.toBuilder().channelId(channelId).build();
-        var state = projection.identity();
-        for (var msg : messageStore.scan(query)) {
+        return fold(query, projection.identity(), null, projection);
+    }
+
+    /**
+     * Resume a fold from a previous result. Only messages with
+     * {@code id > previous.lastMessageId()} are folded.
+     *
+     * <p>If {@code previous.isEmpty()} (channel was empty at last projection),
+     * a full scan is performed starting from {@code identity()}.
+     */
+    public <S> ProjectionResult<S> project(UUID channelId,
+                                            ProjectionResult<S> previous,
+                                            ChannelProjection<S> projection) {
+        Objects.requireNonNull(channelId, "channelId");
+        Objects.requireNonNull(previous, "previous");
+        Objects.requireNonNull(projection, "projection");
+        var query = MessageQuery.builder()
+                .channelId(channelId)
+                .afterId(previous.lastMessageId())   // null = full scan (empty channel)
+                .build();
+        return fold(query, previous.state(), previous.lastMessageId(), projection);
+    }
+
+    /** Scoped incremental — scope rules same as the scoped-full overload. */
+    public <S> ProjectionResult<S> project(UUID channelId,
+                                            ProjectionResult<S> previous,
+                                            MessageQuery scope,
+                                            ChannelProjection<S> projection) {
+        Objects.requireNonNull(channelId, "channelId");
+        Objects.requireNonNull(previous, "previous");
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(projection, "projection");
+        validateScope(channelId, scope);
+        var query = scope.toBuilder()
+                .channelId(channelId)
+                .afterId(previous.lastMessageId())
+                .build();
+        return fold(query, previous.state(), previous.lastMessageId(), projection);
+    }
+
+    private <S> ProjectionResult<S> fold(MessageQuery query, S initialState,
+                                          Long cursorIn, ChannelProjection<S> projection) {
+        var messages = messageStore.scan(query);
+        var state = initialState;
+        var lastId = cursorIn;
+        for (var msg : messages) {
             state = projection.apply(state, mapper.toMessageView(msg));
+            lastId = msg.id;
         }
-        return state;
+        return new ProjectionResult<>(state, lastId);
+    }
+
+    private void validateScope(UUID channelId, MessageQuery scope) {
+        if (scope.channelId() != null && !scope.channelId().equals(channelId)) {
+            throw new IllegalArgumentException(
+                "scope.channelId() conflicts with channelId parameter — remove it from scope");
+        }
+        if (scope.descending()) {
+            throw new IllegalArgumentException(
+                "scope.descending(true) breaks fold order — projections always fold ascending");
+        }
     }
 }
 ```
 
-**`runtime/message/ReactiveProjectionService.java`** — reactive parity
-(build-gated on `casehub.qhorus.reactive.enabled`).
+---
+
+### Reactive store extension — `ReactiveMessageStore`
+
+`Uni<List<Message>>` from `scan()` materialises everything in memory — that is not
+meaningfully reactive. The reactive service requires a new streaming method:
+
+```java
+// New method on ReactiveMessageStore
+Multi<Message> stream(MessageQuery query);
+```
+
+Implemented in `ReactiveJpaMessageStore` using Panache's `PanacheQuery.stream()`.
+Must also be added to `InMemoryReactiveMessageStore` (testing module) and
+`StubReactiveMessageStore` (test-profile stub).
+
+---
+
+### Reactive service — `runtime/message/ReactiveProjectionService.java`
+
+Build-gated on `casehub.qhorus.reactive.enabled`. Uses `stream()` for a genuine
+streaming fold — one message at a time, bounded memory.
 
 ```java
 @IfBuildProperty(name = "casehub.qhorus.reactive.enabled", stringValue = "true")
@@ -137,65 +266,140 @@ public class ReactiveProjectionService {
     @Inject ReactiveMessageStore reactiveMessageStore;
     @Inject QhorusEntityMapper mapper;
 
-    public <S> Uni<S> project(UUID channelId, ChannelProjection<S> projection) {
-        return project(channelId, MessageQuery.builder().build(), projection);
-    }
+    public <S> Uni<ProjectionResult<S>> project(UUID channelId,
+                                                  ChannelProjection<S> projection) { ... }
 
-    public <S> Uni<S> project(UUID channelId, MessageQuery scope,
-                               ChannelProjection<S> projection) {
-        var query = scope.toBuilder().channelId(channelId).build();
-        return reactiveMessageStore.scan(query)
-            .map(messages -> {
-                var state = projection.identity();
-                for (var msg : messages) {
-                    state = projection.apply(state, mapper.toMessageView(msg));
-                }
-                return state;
-            });
-    }
+    public <S> Uni<ProjectionResult<S>> project(UUID channelId, MessageQuery scope,
+                                                  ChannelProjection<S> projection) { ... }
+
+    public <S> Uni<ProjectionResult<S>> project(UUID channelId,
+                                                  ProjectionResult<S> previous,
+                                                  ChannelProjection<S> projection) { ... }
+
+    public <S> Uni<ProjectionResult<S>> project(UUID channelId,
+                                                  ProjectionResult<S> previous,
+                                                  MessageQuery scope,
+                                                  ChannelProjection<S> projection) { ... }
 }
 ```
 
-### Mapper extension
+Internal fold uses `Multi.scan()` over `stream()`:
 
-`QhorusEntityMapper.toMessageView(Message)` — new method on the existing mapper.
-Consistent with `toChannelDetail(Channel, long)` and `toTimelineEntry(Message)`
-already there. No new mapper class.
+```java
+// Private record to carry (state, lastId) through the scan
+private record FoldAcc<S>(S state, Long lastId) {}
+
+private <S> Uni<ProjectionResult<S>> reactivefold(MessageQuery query, S initialState,
+                                                    Long cursorIn,
+                                                    ChannelProjection<S> projection) {
+    return reactiveMessageStore.stream(query)
+        .scan(() -> new FoldAcc<>(initialState, cursorIn),
+              (acc, msg) -> new FoldAcc<>(
+                  projection.apply(acc.state(), mapper.toMessageView(msg)),
+                  msg.id))
+        .collect().last()
+        .map(opt -> opt
+            .map(acc -> new ProjectionResult<>(acc.state(), acc.lastId()))
+            .orElseGet(() -> new ProjectionResult<>(initialState, cursorIn)));
+}
+```
+
+The same scope validation applies (`validateScope` extracted to a shared static
+utility or duplicated — no cross-module sharing needed).
+
+---
+
+### Mapper extension — `QhorusEntityMapper.toMessageView(Message)`
+
+New method on the existing `@ApplicationScoped` mapper. Consistent with
+`toChannelDetail(Channel, long, Optional<ChannelConnectorBinding>)` (three params —
+the two-param variant no longer exists) and `toTimelineEntry(Message)` already there.
+
+```java
+// toMessageView: Message.messageType → MessageView.type
+// The field rename is intentional — matches DispatchResult.type convention.
+// Do not write msg.messageType() in callers; always go through the mapper.
+public MessageView toMessageView(Message msg) { ... }
+```
+
+The rename `messageType → type` must be called out in the method comment to prevent
+callers from accidentally accessing `msg.messageType` and confusing consumers reading
+the mapped result.
+
+---
 
 ### Scope overload semantics
 
-The two-parameter overload (`channelId, scope, projection`) allows consumers to
-exclude noise from the fold:
+Consumers use the scoped overload to exclude noise from the fold:
 
 ```java
-// Exclude EVENT telemetry from a vote-tally projection
 var scope = MessageQuery.builder()
     .excludeTypes(List.of(MessageType.EVENT))
     .build();
-var tally = projectionService.project(channelId, scope, new VoteTallyProjection());
+var result = projectionService.project(channelId, scope, new VoteTallyProjection());
 ```
 
-The service always enforces channelId — scope cannot project a different channel.
-Scope's `channelId` field, if set, is silently overridden. This is consistent
-with how `MessageQuery` is used elsewhere.
+**What scope must NOT contain:**
+- `channelId` — enforced by the service (throws if different from the parameter)
+- `descending(true)` — throws; fold is always ascending by insertion order
 
 ---
 
-## Error handling
+### Behavioural invariants to document in Javadoc
 
-`apply()` must not throw. If it does (unchecked), the exception propagates from
-`project()` — no catch-and-continue. Partial state is not returned. The contract
-is: implement `apply()` defensively; return `state` unchanged for messages you
-cannot handle.
+**LAST_WRITE channels:** On a LAST_WRITE channel, `messageStore.scan()` returns at
+most one message per sender (the current value — history is overwritten in place).
+A projection over a LAST_WRITE channel folds the current snapshot only, not history.
+This is useful for "who has checked in?" projections; it silently produces wrong
+results for "vote tally over time" projections. Consumers must select channel
+semantics that match their projection's assumptions.
 
-No timeout or result-count guard in v1. Very large channels are a future concern
-(tracked in #231 — incremental/cursor projection).
+**Unknown channelId:** A `project()` call on a non-existent `channelId` returns
+`new ProjectionResult<>(projection.identity(), null)` — identical to an empty
+channel. If the consumer needs to distinguish "channel does not exist" from "channel
+has no messages", they must call `ChannelStore.find(channelId)` separately. No
+special exception is thrown.
+
+**Threading:** `identity()` must return a fresh instance on every invocation.
+`apply()` must be pure — no external state reads or writes. Both constraints are
+documented in the `ChannelProjection<S>` Javadoc (see above).
 
 ---
 
-## Testing
+### Incremental projection (#231)
 
-### Unit test pattern (no CDI)
+The cursor-based overloads (`project(channelId, previous, projection)`) allow a
+consumer to resume from a cached result without re-reading earlier messages.
+
+**Usage:**
+
+```java
+// First projection — full scan
+var result = projectionService.project(channelId, new VoteTallyProjection());
+var state = result.state();
+var cursor = result.lastMessageId(); // null if channel was empty
+
+// ... later, after new messages arrive ...
+var updated = projectionService.project(channelId, result, new VoteTallyProjection());
+```
+
+**replyCount staleness warning:** `Message.replyCount` is updated in-place when
+replies arrive. An incremental projection that skips earlier messages (via `afterId`)
+does not see updated `replyCount` values for those messages. Projections that derive
+meaning from `replyCount` (thread depth, participation metrics) must always do a
+full scan — not an incremental one — to get accurate counts.
+
+**Empty-channel case:** If `previous.isEmpty()` (the channel had no messages at
+last projection), the incremental overload performs a full scan from `identity()`.
+This is safe — `MessageQuery.builder().afterId(null)` produces an unbounded query.
+
+---
+
+### Testing
+
+**Unit test — fold logic only (no CDI, no store)**
+
+The fold function is a pure function. Test it directly:
 
 ```java
 ChannelProjection<VoteState> proj = new VoteTallyProjection();
@@ -206,159 +410,103 @@ state = proj.apply(state, new MessageView(1L, channelId, "alice",
 assertThat(state.approvalCount()).isEqualTo(1);
 ```
 
-The fold logic is a pure function — no framework, no CDI, no store needed.
+No framework, no store, no CDI. This is the primary test vector for projection logic.
 
-### Integration test pattern (`@QuarkusTest`)
+**Integration test — `@QuarkusTest` against H2/JPA**
+
+Runtime `@QuarkusTest` tests use `JpaMessageStore` against H2 (`MODE=PostgreSQL`)
+via `application.properties`. The `InMemoryMessageStore` alternative lives in the
+`casehub-qhorus-testing` module — that is a consumer dependency (DraftHouse,
+Claudony) and is NOT on the runtime test classpath. Runtime integration tests write
+messages via `messageStore.put()` or `MessageService.dispatch()` and read back via
+`ProjectionService.project()` against the same H2 database.
 
 ```java
 @QuarkusTest
 class ProjectionServiceIT {
     @Inject ProjectionService projectionService;
-    @Inject QhorusMcpTools tools;  // or messageService.dispatch() directly
+    @Inject MessageStore messageStore;
 
     @Test
     @TestTransaction
     void projectsApprovalCount() {
         var channelId = createChannel();
-        sendMessage(channelId, "alice", MessageType.COMMAND, "approve");
-        sendMessage(channelId, "bob",   MessageType.COMMAND, "approve");
-        sendMessage(channelId, "carol", MessageType.DECLINE, "not yet");
+        var m1 = dispatchAndGet(channelId, "alice", MessageType.COMMAND, "approve");
+        var m2 = dispatchAndGet(channelId, "bob",   MessageType.COMMAND, "approve");
+        dispatchAndGet(channelId,           "carol", MessageType.DECLINE, "not yet");
 
-        var state = projectionService.project(channelId, new VoteTallyProjection());
+        var result = projectionService.project(channelId, new VoteTallyProjection());
 
-        assertThat(state.approvalCount()).isEqualTo(2);
-        assertThat(state.declineCount()).isEqualTo(1);
+        assertThat(result.state().approvalCount()).isEqualTo(2);
+        assertThat(result.state().declineCount()).isEqualTo(1);
+        assertThat(result.lastMessageId()).isNotNull();
+    }
+
+    @Test
+    @TestTransaction
+    void incrementalProjectionOnlyFoldsNewMessages() {
+        var channelId = createChannel();
+        dispatchAndGet(channelId, "alice", MessageType.COMMAND, "approve");
+        dispatchAndGet(channelId, "bob",   MessageType.COMMAND, "approve");
+
+        var result1 = projectionService.project(channelId, new VoteTallyProjection());
+        assertThat(result1.state().approvalCount()).isEqualTo(2);
+
+        dispatchAndGet(channelId, "carol", MessageType.DECLINE, "not yet");
+
+        var result2 = projectionService.project(channelId, result1,
+                                                  new VoteTallyProjection());
+        assertThat(result2.state().approvalCount()).isEqualTo(2);
+        assertThat(result2.state().declineCount()).isEqualTo(1);
     }
 }
 ```
 
-Uses `InMemoryMessageStore` (`@Alternative @Priority(1)`) automatically in
-`@QuarkusTest`. No test-specific store wiring needed.
-
-### Testing the scoped overload
-
-```java
-var scope = MessageQuery.builder()
-    .excludeTypes(List.of(MessageType.EVENT))
-    .build();
-var state = projectionService.project(channelId, scope, new VoteTallyProjection());
-// Only QUERYs/COMMANDs/etc. folded — EVENTs excluded
-```
-
 ---
 
-## Placement summary
+### Placement summary
 
 | Type | Module | Package |
 |------|--------|---------|
 | `MessageView` | `api` | `io.casehub.qhorus.api.message` |
 | `ChannelProjection<S>` | `api` | `io.casehub.qhorus.api.spi` |
-| `ProjectionRenderer<S>` | `api` | `io.casehub.qhorus.api.spi` |
+| `ProjectionResult<S>` | `api` | `io.casehub.qhorus.api.spi` |
 | `ProjectionService` | `runtime` | `io.casehub.qhorus.runtime.message` |
 | `ReactiveProjectionService` | `runtime` | `io.casehub.qhorus.runtime.message` |
 | `toMessageView()` | `runtime` | `QhorusEntityMapper` (existing) |
+| `stream(MessageQuery)` | `runtime` | `ReactiveMessageStore` + impls |
 
 ---
 
-## Platform coherence
+### Platform coherence
 
 **PLATFORM.md** — add to capability ownership table:
-> Channel read-model projection (left-fold over message history) | `casehub-qhorus` | `ChannelProjection<S>` SPI + `ProjectionService` in runtime
+> Channel read-model projection (left-fold over message history) | `casehub-qhorus` | `ChannelProjection<S>` SPI + `ProjectionService` in runtime; incremental via `ProjectionResult<S>` cursor
 
 **casehub-qhorus.md deep-dive** — add `MessageView`, `ChannelProjection<S>`,
-`ProjectionRenderer<S>`, `ProjectionService` to Key Abstractions.
+`ProjectionResult<S>`, `ProjectionService` to Key Abstractions.
 
 **Protocol PP-20260602-b748c9** (`event-log-left-fold-projection`) — to be
 authored in `casehub/garden/docs/protocols/universal/` during this session.
 
 ---
 
-## Incremental/cursor projection (#231)
+### What is NOT here
 
-The v1 overloads always fold from the beginning of a channel's history. For
-long-lived channels, consumers want to fold only messages that arrived after a
-known point — re-projecting from a cached `currentState` with `id > afterId`.
-
-### New overloads on `ProjectionService`
-
-```java
-/** Resume a fold from a known state at a known cursor. */
-public <S> S project(UUID channelId, S currentState, Long afterId,
-                     ChannelProjection<S> projection) {
-    var scope = MessageQuery.builder().afterId(afterId).build();
-    var query = scope.toBuilder().channelId(channelId).build();
-    var state = currentState;
-    for (var msg : messageStore.scan(query)) {
-        state = projection.apply(state, mapper.toMessageView(msg));
-    }
-    return state;
-}
-```
-
-Same pattern on `ReactiveProjectionService`:
-
-```java
-public <S> Uni<S> project(UUID channelId, S currentState, Long afterId,
-                           ChannelProjection<S> projection) {
-    var query = MessageQuery.builder().channelId(channelId).afterId(afterId).build();
-    return reactiveMessageStore.scan(query)
-        .map(messages -> {
-            var state = currentState;
-            for (var msg : messages) {
-                state = projection.apply(state, mapper.toMessageView(msg));
-            }
-            return state;
-        });
-}
-```
-
-### Caller contract
-
-The caller owns the cache: `currentState` from the last projection call, and the
-`id` of the last message that was folded (pass as `afterId`). If `afterId` is
-`null`, the call is equivalent to `project(channelId, projection)` starting from
-`identity()` — not a valid use of this overload. Document as requiring non-null
-`afterId`.
-
-### Testing
-
-```java
-@Test
-@TestTransaction
-void incrementalProjectionOnlyFoldsNewMessages() {
-    var channelId = createChannel();
-    var id1 = sendMessage(channelId, "alice", MessageType.COMMAND, "approve").id;
-    var id2 = sendMessage(channelId, "bob", MessageType.COMMAND, "approve").id;
-
-    // Full projection
-    var state1 = projectionService.project(channelId, new VoteTallyProjection());
-    assertThat(state1.approvalCount()).isEqualTo(2);
-
-    // New message arrives
-    sendMessage(channelId, "carol", MessageType.DECLINE, "not yet");
-
-    // Incremental — resume from state1, afterId = id2
-    var state2 = projectionService.project(channelId, state1, id2,
-                                            new VoteTallyProjection());
-    assertThat(state2.approvalCount()).isEqualTo(2);
-    assertThat(state2.declineCount()).isEqualTo(1);
-}
-```
-
----
-
-## Out of scope — filed as follow-on issues
-
-- **MCP tool `project_channel`** — requires named-projection registry + render;
-  not possible with generic `<S>`. Filed as casehubio/qhorus#232.
-- **DraftHouse migration** (replace local file-parser with `DebateChannelProjection`)
-  — consume this SPI. Filed as casehubio/drafthouse#31.
-
----
-
-## What is NOT here
-
-- No registry — caller always passes the projection explicitly.
-- No service-side render — `ProjectionRenderer<S>` is consumer-side only.
+- No `channelType()` on `ChannelProjection<S>` — removed; future registry uses
+  a `@ChannelBound` qualifier annotation or `ChannelBoundProjection` subinterface
+  so the return type is not locked to `String`.
+- No `ProjectionRenderer<S>` in `api/spi/` — not a managed extension point;
+  pattern documented in Javadoc; consumers use `Function<S, String>`.
+- No MCP tool — requires named-projection registry + render (filed as #232).
 - No new Flyway migration — pure computation over existing messages.
-- No new MCP tools in this issue.
+- CDI-injected projections (registry layer) deferred to #232 — caller-passed
+  and CDI-discovered are complementary; adding CDI discovery later does not
+  require changing `ChannelProjection<S>`.
+
+---
+
+### Out of scope — filed issues
+
+- **MCP tool `project_channel`** — casehubio/qhorus#232 (after this branch wraps)
+- **DraftHouse migration** — casehubio/drafthouse#31
