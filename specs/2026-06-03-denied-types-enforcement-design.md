@@ -1,5 +1,5 @@
 # Denied Types Enforcement — Design Spec
-**Date:** 2026-06-03 (rev 2 — post-review)
+**Date:** 2026-06-03 (rev 3 — post-review 2)
 **Issue:** casehubio/qhorus#243
 **Context:** claudony#142 — oversight channel requires EVENT denial, not allowedTypes restriction
 
@@ -204,6 +204,8 @@ public Channel create(String name, String description, ChannelSemantic semantic,
 channel.deniedTypes = blankToNull(req.deniedTypes());
 ```
 
+Shorter overloads (4/5/6-arg) are unchanged — they already cascade to 8-arg → 9-arg → new 10-arg → `create(ChannelCreateRequest)`. No edits needed to their bodies.
+
 ### 5. `runtime/.../channel/ReactiveChannelService.java`
 
 Add `create(ChannelCreateRequest)` primary method and `populateChannel()` helper (structural parity with ChannelService). Add 10-arg named overload; 9-arg delegates to it with null:
@@ -211,6 +213,9 @@ Add `create(ChannelCreateRequest)` primary method and `populateChannel()` helper
 ```java
 /** Primary creation path — all named-param overloads funnel here via the 10-arg overload. */
 public Uni<Channel> create(ChannelCreateRequest req) {
+    // populateChannel() is pure (no IO) — entity construction happens outside the transaction.
+    // A JPA entity is a transient POJO until persist() is called inside the session;
+    // it becomes managed when channelStore.put(channel) runs. Do NOT move this inside the lambda.
     Channel channel = populateChannel(req);
     return Panache.withTransaction("qhorus", () -> channelStore.put(channel));
 }
@@ -283,11 +288,23 @@ Channel ch = channelService.create(new ChannelCreateRequest(
         inboundConnectorId, externalKey, outboundConnectorId, outboundDestination));
 ```
 
-Update `@Tool` description to mention `denied_types`.
+Update `@Tool` description — replace existing text with:
+
+```java
+@Tool(name = "create_channel", description = "Create a named channel with declared semantic. "
+        + "Semantic defaults to APPEND if not specified. "
+        + "Use allowed_types to restrict which MessageType values may be sent to this channel "
+        + "(enforced at both MCP and service layers). "
+        + "Use denied_types to explicitly block specific types regardless of allowed_types — "
+        + "denial wins if a type appears in both. "
+        + "Example: denied_types=\"EVENT\" for an oversight channel open to all agent messages "
+        + "but not telemetry. "
+        + "Optionally attach a connector binding by supplying all four connector fields together.")
+```
 
 ### 7. `runtime/.../mcp/ReactiveQhorusMcpTools.java` — `create_channel`
 
-Same `denied_types` ToolArg addition. After adding `deniedTypes` to the ChannelCreateRequest construction (position 10), pass `req` directly to the reactive service — no destructuring:
+Same `denied_types` ToolArg addition and same `@Tool` description update (identical text). After adding `deniedTypes` to the ChannelCreateRequest construction (position 10), pass `req` directly to the reactive service — no destructuring:
 
 ```java
 ChannelCreateRequest req = new ChannelCreateRequest(name, description, sem, barrierContributors,
@@ -341,7 +358,14 @@ ChannelCreateRequest req = new ChannelCreateRequest(
         spec.outboundDestination());
 ```
 
-Existing `AutoChannelPolicy` implementors that construct `AutoChannelSpec` will break at compile time. All known sites pass `null` for `allowedTypes` (no type restriction) — add `null` for `deniedTypes` at the same position. Correct behaviour: no change, channels remain open on both dimensions.
+Adding `deniedTypes` at position 5 breaks all existing `AutoChannelSpec` construction sites at compile time. Known sites (separate from the `ChannelCreateRequest` table):
+
+| File | Type | Fix |
+|------|------|-----|
+| `connector-backend/.../ConfiguredAutoChannelPolicy.java:71` | production | insert `null` at position 5 (between existing `null`/allowedTypes and `outboundConnectorId`) |
+| `connector-backend/test/.../ConnectorAutoChannelBackendTest.java:76` | test | same — insert `null` at position 5 |
+
+`ConfiguredAutoChannelPolicy.java:71` is production code — an implementer who only touches `ConnectorChannelBackend.java` and the two test files will hit a compile failure there unexpectedly. Fix: `new AutoChannelSpec(channelName, description, semantic, null, null, outboundConnectorId, outboundDestination)`. Correct behaviour is unchanged — channels remain open on both dimensions.
 
 ---
 
