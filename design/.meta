@@ -1,0 +1,8 @@
+branch: issue-243-denied-types-enforcement
+project-sha: 3843f20a05499cc3cab678253e54305e425ac9a2
+date: 2026-06-03
+issue: 243
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
