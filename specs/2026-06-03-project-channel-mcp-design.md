@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-03
 **Issue:** qhorus#232
-**Status:** Approved for implementation
+**Status:** Approved for implementation (v2 — post review)
 
 ---
 
@@ -14,167 +14,223 @@
 
 ## Design
 
-### 1. `ProjectionBundle<S>` SPI — `api/spi/`
+### 1. `RenderableProjection<S>` SPI — `api/spi/`
 
-A composite interface that extends `ChannelProjection<S>` with a render step:
+A composite interface that extends `ChannelProjection<S>` with a name and a render step:
 
 ```java
 package io.casehub.qhorus.api.spi;
 
-public interface ProjectionBundle<S> extends ChannelProjection<S> {
+public interface RenderableProjection<S> extends ChannelProjection<S> {
 
     /**
-     * Converts the materialised projection state to a String suitable for
-     * return from an MCP tool. Called once per {@code project_channel} invocation,
-     * after the fold completes.
+     * The name under which this projection is registered. Must be unique across
+     * all {@code RenderableProjection} beans in the CDI context; a duplicate
+     * detected at startup by {@code ProjectionRegistry} fails fast.
      *
-     * <p>Must handle the empty-channel case: when the channel has no messages,
-     * {@code state} equals {@code identity()} — implementations must not assume
-     * {@code state} contains real data.
+     * <p>Use a stable, meaningful identifier — callers reference this by name
+     * from MCP tool arguments.
+     */
+    String projectionName();
+
+    /**
+     * Converts the projection result to a String suitable for return from an
+     * MCP tool.
+     *
+     * <p>Receives the full {@link ProjectionResult} so the renderer can
+     * distinguish between an empty channel ({@code result.isEmpty() == true})
+     * and a channel whose fold produced {@code identity()} because no messages
+     * matched the projection's criteria. These are not equivalent; callers
+     * must not treat them the same.
+     *
+     * <p>Must return a non-null, non-empty String even when
+     * {@code result.isEmpty()} — a human-readable "channel is empty" message
+     * is appropriate.
      *
      * <p>Must be pure and non-blocking — called on the MCP dispatch thread.
+     * Must not throw — unchecked exceptions propagate from {@code project_channel}.
      *
-     * @param state the materialised state from a completed fold
+     * @param result the completed fold result, including cursor and empty-channel signal
      * @return a human-readable or structured string representation
      */
-    String render(S state);
+    String render(ProjectionResult<S> result);
 }
 ```
 
-**Placement rationale:** `api/spi/` per `consumer-spi-placement` protocol — external consumers (Claudony, application repos) will implement `ProjectionBundle<S>` and they depend only on the lightweight `api/` module.
+**Name over annotation:** `projectionName()` is introspectable without CDI machinery — it follows the existing `ChannelBackend.backendId()` pattern already in the codebase. No `@ProjectionName` qualifier annotation and no `AnnotationLiteral` subclass are needed, keeping `api/` free of CDI annotation dependencies.
 
-**Single responsibility:** `ProjectionBundle<S>` is "a projection that knows how to render itself." The fold (`identity`, `apply`) and the render are the bundle's cohesive concern. Consumers cannot register a projection that is renderable without providing the render — correct by construction.
+**`render(ProjectionResult<S>)` not `render(S)`:** The full `ProjectionResult<S>` is passed rather than just `state` because `state == identity()` is ambiguous — it means either the channel is empty OR the fold produced no output for that projection's criteria (e.g., a COMMAND counter on a channel with only EVENTs). Only `result.isEmpty()` gives the definitive empty-channel signal.
 
-`ProjectionService` requires no changes: it accepts `ChannelProjection<S>`, and `ProjectionBundle<S>` is a `ChannelProjection<S>`.
+**Multi-format:** A consumer needing markdown and JSON renders registers two `RenderableProjection` beans — `"summary-markdown"` and `"summary-json"` — both delegating their fold to a shared implementation. Adding a `format` parameter to `render()` preemptively is rejected: no current use case, harder to implement, worse naming at the MCP boundary.
+
+**Placement:** `api/spi/` per `consumer-spi-placement` protocol — external consumers will implement `RenderableProjection<S>` and they depend only on the lightweight `api/` module.
+
+**Recommended CDI scope:** `@ApplicationScoped`. Projections must be stateless (fold state is in `ProjectionResult`, not in the bean); `@Dependent` is legal but callers must note the registry holds the bean reference for the application lifetime.
+
+**Update to `ChannelProjection<S>` javadoc:** The existing javadoc refers to a future `@ChannelBound` qualifier for automatic routing by channel name. That remains a separate future registry (auto-route: "this channel always uses this projection"). `RenderableProjection<S>` with `projectionName()` is the explicit-selection registry (tool-call: "project this channel using the summary projection"). The two coexist; update the javadoc to document both.
 
 ---
 
-### 2. `@ProjectionName` CDI qualifier — `api/spi/`
+### 2. `ProjectionRegistry` — `runtime/message/`
+
+An `@ApplicationScoped` bean that builds the name→projection map at construction and detects duplicates at startup:
 
 ```java
-package io.casehub.qhorus.api.spi;
+package io.casehub.qhorus.runtime.message;
 
-@Qualifier
-@Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.TYPE, ElementType.FIELD, ElementType.PARAMETER, ElementType.METHOD})
-public @interface ProjectionName {
-    String value();
-}
-```
-
-Consumers annotate their beans:
-
-```java
-@ProjectionName("channel-summary")
 @ApplicationScoped
-public class ChannelSummaryBundle implements ProjectionBundle<SummaryState> { ... }
-```
+public class ProjectionRegistry {
 
-No registration call — CDI discovers the bean automatically at startup. Projections activate by being on the classpath.
+    private final Map<String, RenderableProjection<?>> registry;
 
----
+    @Inject
+    ProjectionRegistry(@Any Instance<RenderableProjection<?>> bundles) {
+        Map<String, RenderableProjection<?>> map = new HashMap<>();
+        bundles.forEach(b -> {
+            String name = b.projectionName();
+            if (map.put(name, b) != null) {
+                throw new IllegalStateException(
+                    "Duplicate RenderableProjection name '" + name + "' — " +
+                    "each projection must have a unique projectionName()");
+            }
+        });
+        this.registry = Collections.unmodifiableMap(map);
+    }
 
-### 3. `ProjectionNameLiteral` — `api/spi/`
+    public RenderableProjection<?> get(String name) {
+        RenderableProjection<?> p = registry.get(name);
+        if (p == null) {
+            throw new IllegalArgumentException(
+                "No RenderableProjection registered with name '" + name + "'");
+        }
+        return p;
+    }
 
-An `AnnotationLiteral` subclass so the tool can select projections dynamically:
-
-```java
-package io.casehub.qhorus.api.spi;
-
-import jakarta.enterprise.util.AnnotationLiteral;
-
-public final class ProjectionNameLiteral extends AnnotationLiteral<ProjectionName>
-        implements ProjectionName {
-
-    private final String value;
-
-    public ProjectionNameLiteral(String value) { this.value = value; }
-
-    @Override public String value() { return value; }
+    public Set<String> names() {
+        return registry.keySet();
+    }
 }
 ```
 
-Placed in `api/spi/` alongside `@ProjectionName` — consumers need it if they write tests that select projections programmatically.
+**Startup collision detection:** `map.put()` returning non-null means two beans share a name — detected at CDI bootstrap, not at first tool call.
+
+**Lifecycle:** The registry holds direct bean references. For `@ApplicationScoped` projections (the recommended scope) this is correct. For `@Dependent` projections, the registry acts as the owning scope — beans live as long as the registry, which is application lifetime. This is acceptable; `@Dependent` projections that require `@PreDestroy` cleanup should not be used with this registry.
 
 ---
 
-### 4. `project_channel` MCP tool — `QhorusMcpTools`
+### 3. `project_channel` MCP tool — `QhorusMcpTools` (tool method) + `QhorusMcpToolsBase` (shared logic)
+
+**New injections in `QhorusMcpTools`:**
+
+```java
+@Inject
+ProjectionRegistry projectionRegistry;
+
+@Inject
+ProjectionService projectionService;
+```
+
+**Tool method:**
 
 ```java
 @Tool(name = "project_channel",
-      description = "Project a channel's message history through a named projection and return the rendered result. ...")
+      description = "Project a channel's message history through a named " +
+          "RenderableProjection and return the rendered result as a String. " +
+          "On LAST_WRITE channels, only the current value per sender is visible — " +
+          "the full message history has been overwritten in place. " +
+          "Reads proceed on paused channels.")
 public String projectChannel(
         @ToolArg(name = "channel",
                  description = "Channel name or UUID") String channel,
         @ToolArg(name = "projection_name",
-                 description = "Name of the registered ProjectionBundle (e.g. 'channel-summary')") String projectionName) {
+                 description = "Name matching RenderableProjection.projectionName() " +
+                     "(e.g. 'channel-summary')") String projectionName) {
 
-    UUID channelId = resolveChannel(channel);
-
-    Instance<ProjectionBundle<?>> found = projectionBundles.select(
-            new ProjectionNameLiteral(projectionName));
-    if (found.isUnsatisfied()) {
-        throw new IllegalArgumentException(
-                "No projection registered with name '" + projectionName + "'");
-    }
-
-    return projectAndRender(channelId, found.get());
-}
-
-// package-private — not @Tool, avoids ToolOverloadDiscoverabilityTest violation
-<S> String projectAndRender(UUID channelId, ProjectionBundle<S> bundle) {
-    ProjectionResult<S> result = projectionService.project(channelId, bundle);
-    return bundle.render(result.state());
+    UUID channelId = resolveChannelId(channel);
+    RenderableProjection<?> projection = projectionRegistry.get(projectionName);
+    return projectAndRender(channelId, projection);
 }
 ```
 
-**Channel resolution** (`resolveChannel`) — reuses the existing pattern:
+**`resolveChannelId` in `QhorusMcpToolsBase`:**
 
 ```java
-private UUID resolveChannel(String channel) {
+// package-private — shared by QhorusMcpTools and ReactiveQhorusMcpTools
+UUID resolveChannelId(String channel) {
     try {
-        return UUID.fromString(channel);
+        UUID id = UUID.fromString(channel);
+        // Validate existence — UUID parse succeeds for non-existent channels;
+        // ProjectionService would silently return render(identity()) without this check.
+        channelStore.find(id)
+            .orElseThrow(() -> new IllegalArgumentException(
+                "Channel not found: " + channel));
+        return id;
     } catch (IllegalArgumentException e) {
+        if (e.getMessage().startsWith("Channel not found")) throw e;
+        // Not a UUID — treat as name
         return channelService.findByName(channel)
-                .orElseThrow(() -> new IllegalArgumentException("Channel not found: " + channel))
-                .id;
+            .orElseThrow(() -> new IllegalArgumentException(
+                "Channel not found: " + channel))
+            .id;
     }
 }
 ```
 
-**`projectionBundles` field:**
+Note: `channelService` and `channelStore` are not currently in `QhorusMcpToolsBase` — both need to be added as injections there (or `resolveChannelId` accesses them via the concrete subclass; see architecture note below).
+
+**`projectAndRender` in `QhorusMcpToolsBase`:**
 
 ```java
-@Inject
-@Any
-Instance<ProjectionBundle<?>> projectionBundles;
+// package-private — not @Tool; avoids ToolOverloadDiscoverabilityTest violation
+// shared by QhorusMcpTools and ReactiveQhorusMcpTools
+<S> String projectAndRender(UUID channelId, RenderableProjection<S> projection) {
+    ProjectionResult<S> result = projectionService.project(channelId, projection);
+    return projection.render(result);
+}
 ```
 
-**`projectionService` field:** already present in the tool class (injected alongside `channelService`).
+**Architecture note on `QhorusMcpToolsBase` injections:**
 
-**`projectAndRender` is package-private** — captures `<S>` to preserve type safety between the wildcard `ProjectionBundle<?>` and the typed `render(S)` call. Per `ToolOverloadDiscoverabilityTest` convention, never `public`.
+`channelService`, `channelStore`, `projectionService`, and `projectionRegistry` are not currently in the base class — they live in `QhorusMcpTools`. Two options:
+
+- Move them to `QhorusMcpToolsBase` (clean, avoids duplication with reactive tool)
+- Keep them in the concrete classes and have `resolveChannelId` / `projectAndRender` accept them as parameters
+
+Recommended: move `channelService`, `channelStore`, `projectionService`, and `projectionRegistry` to `QhorusMcpToolsBase`. Both concrete tools need them; the base class is the right home. This is an additional scope expansion captured in the Changed Files table.
 
 ---
 
-### 5. Reactive variant — `ReactiveQhorusMcpTools`
-
-Mirrors the blocking tool. `ReactiveProjectionService.project()` is called instead:
+### 4. Reactive variant — `ReactiveQhorusMcpTools`
 
 ```java
-@Tool(name = "project_channel", ...)
-@Blocking  // ProjectionService read is blocking; reactive tool needs worker-thread annotation
-public String projectChannel(String channel, String projectionName) { ... }
+@Tool(name = "project_channel", description = "...")
+@Blocking  // full channel scan is I/O-intensive; @Blocking follows the existing
+            // get_instance / get_message convention in ReactiveQhorusMcpTools
+public String projectChannel(String channel, String projectionName) {
+    UUID channelId = resolveChannelId(channel);
+    RenderableProjection<?> projection = projectionRegistry.get(projectionName);
+    return projectAndRender(channelId, projection);  // calls blocking ProjectionService
+}
 ```
 
-`ReactiveProjectionService` is not yet implemented for all overloads — the reactive tool delegates to the blocking `ProjectionService` via `@Blocking` rather than introducing a reactive-only path. This is consistent with the existing `get_instance` and `get_message` tools in `ReactiveQhorusMcpTools` which are already annotated `@Blocking`.
+`ReactiveProjectionService` has all four overloads implemented but the blocking `ProjectionService` is used here for consistency with the existing `@Blocking` pattern in the reactive tool class, avoiding a reactive pipeline for a synchronous read.
+
+---
+
+## Known Gaps
+
+- **Output size:** `render()` can produce arbitrarily large output for channels with many messages. The spec does not bound it. Filed as qhorus#239. Options for a future fix: `max_messages` param on the tool, or a contract that `render()` is responsible for truncating its own output.
+
+- **`list_projections` tool:** An LLM calling `project_channel` with an unknown name gets an error with no recovery path. `names()` on `ProjectionRegistry` makes this trivial to implement. Filed as qhorus#240.
 
 ---
 
 ## What Is NOT in Scope
 
-- `list_projections` tool — useful but not required for #232; projections are named by convention, callers know their names.
-- Scoped/incremental projection via MCP — `project_channel` always does a full scan. Incremental projection requires the caller to manage `ProjectionResult` cursors, which is not practical over MCP.
-- `ProjectionBundle` validation (e.g., assert `render(identity())` returns non-null) — convention only.
+- `list_projections` — filed as #240.
+- Scoped/incremental projection via MCP — `project_channel` always does a full scan. Incremental projection requires the caller to manage `ProjectionResult` cursors across tool calls, which is not practical over stateless MCP.
+- Multi-format `render(ProjectionResult<S>, String format)` — use two `RenderableProjection` beans with different names instead.
+- `@ChannelBound` auto-routing registry — separate future design.
 
 ---
 
@@ -182,53 +238,71 @@ public String projectChannel(String channel, String projectionName) { ... }
 
 | Type | Module | Purpose |
 |------|--------|---------|
-| `ProjectionBundle<S>` | `api/spi/` | Consumer SPI: fold + render |
-| `@ProjectionName` | `api/spi/` | CDI qualifier for registry lookup |
-| `ProjectionNameLiteral` | `api/spi/` | `AnnotationLiteral` for `Instance.select()` |
+| `RenderableProjection<S>` | `api/spi/` | Consumer SPI: fold + name + render |
+| `ProjectionRegistry` | `runtime/message/` | Startup-validated name→projection map |
 
 ## Changed Files
 
 | File | Change |
 |------|--------|
-| `QhorusMcpTools` | new `project_channel` tool + `projectAndRender` helper + `projectionBundles` injection |
-| `ReactiveQhorusMcpTools` | same, with `@Blocking` |
+| `QhorusMcpToolsBase` | Add `@Inject` for `ChannelService`, `ChannelStore`, `ProjectionService`, `ProjectionRegistry`; add `resolveChannelId()` and `projectAndRender()` helpers (package-private) |
+| `QhorusMcpTools` | New `project_channel` tool; move channel/projection injections to base class |
+| `ReactiveQhorusMcpTools` | New `project_channel @Blocking` tool |
+| `ChannelProjection.java` | Update javadoc: document both `@ChannelBound` (future auto-routing) and `RenderableProjection`/`ProjectionRegistry` (explicit selection); remove stale `@ProjectionName` reference |
 
 ## No Changes
 
 | File | Reason |
 |------|--------|
-| `ChannelProjection<S>` | `ProjectionBundle<S>` extends it — no modification needed |
-| `ProjectionService` | already accepts `ChannelProjection<S>` |
+| `ChannelProjection<S>` (interface) | `RenderableProjection<S>` extends it — no modification to the interface |
+| `ProjectionService` | accepts `ChannelProjection<S>`; `RenderableProjection<S>` satisfies this |
 | `ProjectionResult<S>` | unchanged |
 
 ---
 
 ## Testing
 
-**Unit — `ProjectionBundleTest` (no CDI, no Quarkus):**
-- `render(identity())` returns non-null for a sample bundle
-- `apply` + `render` produce expected output for a known message sequence
+**Unit — `RenderableProjectionTest` (no CDI, no Quarkus):**
+- `render(emptyResult)` returns non-null String (enforces the contract that `identity()` has a render)
+- `render(result)` produces expected output for a known message sequence
+- `render(partialResult)` where no messages matched — distinguishes "fold returned identity because no match" from `isEmpty()`
 
-**Integration — `ProjectChannelToolTest` (@QuarkusTest + @TestTransaction):**
-- Register a `@ProjectionName("test-proj") @ApplicationScoped` bundle as a CDI `@Alternative @Priority(1)` (test-only bean)
-- Write messages via `messageStore.put()` (not `MessageService.dispatch()`)
-- Call `tools.projectChannel("channel-name", "test-proj")`
-- Assert rendered string matches expected output
-- Assert `project_channel` with unknown projection name throws `ToolCallException` (via `@WrapBusinessError`)
+**Unit — `ProjectionRegistryTest` (no CDI, instantiate directly):**
+- Duplicate `projectionName()` throws `IllegalStateException` at construction
+- `get("unknown")` throws `IllegalArgumentException`
+- `names()` returns all registered names
+
+**Integration — `ProjectChannelToolIT` (`@QuarkusTest`, `@TestTransaction`):**
+- Register a `@ApplicationScoped` test bundle in test source set (no `@Alternative @Priority(1)` needed — no production bundle with the same name exists, so no ambiguity)
+- Write messages via `messageStore.put()` (not `MessageService.dispatch()` — keeps test focused on projection correctness, not dispatch enforcement)
+- `tools.projectChannel("channel-name", "test-proj")` → assert rendered string matches expected
+- `tools.projectChannel(channelUUID.toString(), "test-proj")` → assert same result (UUID path)
+- Unknown projection name → `ToolCallException` (via `@WrapBusinessError`)
+- Non-existent UUID → `ToolCallException` (channel existence check)
+- Non-existent channel name → `ToolCallException`
+- LAST_WRITE channel: two messages from same sender → projection folds one, not two
+- `render()` that throws → exception propagates (verify `@WrapBusinessError` wraps it)
+- Empty channel → `render()` called with `result.isEmpty() == true`; verify non-null return
+
+**`ToolOverloadDiscoverabilityTest`:** `projectChannel` in both `QhorusMcpTools` and `ReactiveQhorusMcpTools` must be `@Tool`-annotated; `projectAndRender` and `resolveChannelId` must be package-private in `QhorusMcpToolsBase`.
 
 ---
 
-## Platform Coherence
+## Platform Coherence Review
 
-- **`consumer-spi-placement`** — `ProjectionBundle<S>`, `@ProjectionName`, `ProjectionNameLiteral` all in `api/spi/` ✓
-- **`event-log-left-fold-projection`** — `ProjectionBundle<S>` extends `ChannelProjection<S>`, preserving the left-fold contract ✓
+- **`consumer-spi-placement`** — `RenderableProjection<S>` in `api/spi/` ✓; `ProjectionRegistry` in `runtime/` (not consumer-facing) ✓
+- **`event-log-left-fold-projection`** — `RenderableProjection<S>` extends `ChannelProjection<S>` ✓
 - **`qhorus-entity-mapper-pure-transformer`** — `render()` is pure, no side effects ✓
-- **`ToolOverloadDiscoverabilityTest`** — `projectAndRender` is package-private ✓
-- **Deferred issues** — qhorus#236 (slug enforcement), qhorus#237 (MCP UUID migration), qhorus#238 (dual-identity protocol) ✓
+- **`qhorus-service-store-seam`** — `ProjectionService` reads via `MessageStore` seam ✓
+- **`ToolOverloadDiscoverabilityTest`** — `projectAndRender` and `resolveChannelId` package-private ✓
+- **`backendId()` pattern** — `projectionName()` follows existing `ChannelBackend.backendId()` convention ✓
 
----
+## Deferred Issues Filed
 
-## Open Questions (deferred)
-
-- Should `project_channel` return the channel name/id alongside the rendered string (e.g. a structured result record)? Decision: return plain `String` for now — simpler for LLM consumption.
-- Should `render(identity())` have a sentinel contract ("return empty-channel message")? Decision: by convention only — not enforced at the SPI level.
+| Issue | Description |
+|-------|-------------|
+| qhorus#236 | Slug enforcement on channel names |
+| qhorus#237 | MCP tool migration from channel_name to UUID-or-slug |
+| qhorus#238 | Protocol: channel dual identity (UUID + slug) |
+| qhorus#239 | Bound output size for `project_channel` render |
+| qhorus#240 | `list_projections` MCP tool |
