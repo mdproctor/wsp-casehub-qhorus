@@ -1,6 +1,7 @@
 ---
 title: "The seam that was half-closed"
 date: 2026-05-29
+entry_type: note
 series: casehub-qhorus-dev
 entry: mdp01
 tags: [casehub, qhorus, store-pattern, panache, testing]
