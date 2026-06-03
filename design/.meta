@@ -1,0 +1,8 @@
+branch: issue-232-project-channel
+project-sha: 9a559560055b43ff1fd0cfd212ac466eead2364e
+date: 2026-06-03
+issue: 232
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
