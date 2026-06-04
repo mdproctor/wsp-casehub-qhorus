@@ -34,14 +34,12 @@ Start `qhorus#244`-related work for Claudony (claudony#142 oversight channel fix
 - **qhorus#240** — closed (list_projections shipped)
 - **qhorus#244** — closed (set_channel_type_constraints shipped)
 - **qhorus#248** — closed (FindOrCreateResult shipped)
-- **ledger#114** — lightweight mode (paused, stack depth 1) · L · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | qhorus#236 | Slug enforcement on channel names | M | Low | V17 migration + ChannelService validation |
-| ledger#114 | Lightweight outcome-tracking mode | L | Med | Paused — resume from stack |
 
 ## References
 
