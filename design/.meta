@@ -1,0 +1,8 @@
+branch: issue-236-channel-slug-enforcement
+project-sha: 1669bf8b9520567533ae7e30aa0d73a25698e4d3
+date: 2026-06-04
+issue: 236
+issue-repo: casehubio/qhorus
+covers: 236
+flyway-next-v: 17
+design-repo: project
