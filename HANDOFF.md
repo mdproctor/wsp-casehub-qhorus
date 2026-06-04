@@ -18,16 +18,12 @@ Also: garden entry GE-20260604-96d82a (`@Blocking` gotcha on `resolveChannel()`)
 
 ## Immediate Next Step
 
-Publish the updated `0.2-SNAPSHOT` to GitHub Packages so Claudony can consume the new tools:
-```bash
-JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn deploy
-```
-Then start `qhorus#244`-related work for Claudony (claudony#142 oversight channel fix may now unblock).
+Start `qhorus#244`-related work for Claudony (claudony#142 oversight channel fix may now unblock once CI publishes the 0.2-SNAPSHOT).
 
 ## Cross-Module
 
 **We're blocking (less urgent now):**
-- `claudony` — `0.2-SNAPSHOT` still needs deploying to GitHub Packages for claudony#142. Code ships; snapshot not yet published. Also needs `set_channel_type_constraints` to update oversight channel config.
+- `claudony` — waiting on CI to publish `0.2-SNAPSHOT` to GitHub Packages (claudony#142). Also needs `set_channel_type_constraints` to update oversight channel config.
 
 ## What's Left
 
@@ -44,7 +40,6 @@ Then start `qhorus#244`-related work for Claudony (claudony#142 oversight channe
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | `mvn deploy` → publish 0.2-SNAPSHOT | XS | Low | Blocking claudony#142 |
 | qhorus#236 | Slug enforcement on channel names | M | Low | V17 migration + ChannelService validation |
 | ledger#114 | Lightweight outcome-tracking mode | L | Med | Paused — resume from stack |
 
