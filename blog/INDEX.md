@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-04-mdp02-finding-and-blocking.md](2026-06-04-mdp02-finding-and-blocking.md) | 2026-06-04 | Batch S/XS fixes: FindOrCreateResult wasCreated flag, set_channel_type_constraints full-replacement design, max_messages "oldest first" semantics, @Blocking gotcha on resolveChannel() |
 | [2026-06-04-mdp01-the-gate-and-two-holes.md](2026-06-04-mdp01-the-gate-and-two-holes.md) | 2026-06-04 | denied_types enforcement — compact constructor as D1 gate, two reactive bypass holes found in review, concurrent counter bug root cause |
 | [2026-06-03-mdp03-registry-by-name.md](2026-06-03-mdp03-registry-by-name.md) | 2026-06-03 | project_channel MCP tool — channel identity question, RenderableProjection registry, Java nested wildcard trap, two real code review bugs |
 | [2026-06-02-mdp02-the-fold.md](2026-06-02-mdp02-the-fold.md) | 2026-06-02 | ChannelProjection SPI — pure left-fold read-models, ProjectionResult cursor, MessageView DTO constraint, PanacheQuery.stream() gap, Mutiny BiConsumer surprise |
