@@ -1,0 +1,8 @@
+branch: issue-248-batch-s-xs
+project-sha: b28a67af5dba837a657a06e5dc18d9f4945ab7a1
+date: 2026-06-04
+issue: 248
+issue-repo: casehubio/qhorus
+flyway-next-v: none
+design-repo: project
+design-section-hashes:
