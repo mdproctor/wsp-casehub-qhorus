@@ -1,53 +1,51 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-04 — batch S/XS fixes shipped (#248, #244, #240, #239, #238, parent#163)
+**Date:** 2026-06-05 — channel slug enforcement (#236) shipped
 
 ---
 
 ## What Was Done This Session
 
-**Shipped 6 S/XS issues on `issue-248-batch-s-xs`:**
+**Shipped qhorus#236 — channel slug enforcement:**
 
-- **qhorus#248** — `FindOrCreateResult(channel, wasCreated)` return type on `ChannelService.findOrCreateWithBinding()`; counter in `ConnectorChannelBackend.tryAutoCreate()` only fires when `wasCreated == true`. Fixes concurrent first-contact counter double-increment.
-- **qhorus#244** — `set_channel_type_constraints(channel, allowed_types?, denied_types?)` MCP tool; full-replacement semantics; validation via `MessageType.parseTypes()` + overlap check; `@Blocking` on reactive path (calls `resolveChannel()`).
-- **qhorus#240** — `list_projections()` MCP tool exposes `ProjectionRegistry.registeredNames()` (sorted).
-- **qhorus#239** — `project_channel` gains optional `max_messages` param; folds first N messages in insertion order (not most-recent).
-- **qhorus#238** — Protocol doc `PP-20260604-dualid` (qhorus channel dual identity) written to parent/docs/protocols/casehub/.
-- **parent#163** — `docs/repos/casehub-qhorus.md` oversight channel corrected: `deniedTypes=EVENT` not `allowedTypes=COMMAND,RESPONSE`.
+- `ChannelSlugValidator` — public class owning all slug validation (`validateSlugPath`, `isValidSegment`, `tryParseUuid`); UUID-shaped names explicitly rejected; `SEGMENT_PATTERN = [a-z][a-z0-9]*(-[a-z0-9]+)*`
+- `ChannelCreateRequest` compact constructor — slug validation as first gate, before connector binding and type checks; `Channel.name` gets `@Column(updatable = false)` for ORM immutability
+- `QhorusMcpToolsBase.resolveChannel()` — flipped to name-first; private `tryParseUuid()` replaced by `ChannelSlugValidator.tryParseUuid()`; `create_channel` and reactive counterpart both have slug-rules description
+- `ConfiguredAutoChannelPolicy` — `sanitiseSegment()` (8-hex SHA-256 hash, unconditional, for external keys), `slugifyConnectorId()` (hash-free, for developer IDs), `validatePattern()` startup gate via `{...}` → `a` substitution
+- V17 Flyway migration — `chk_channel_name_slug` CHECK constraint via `REGEXP_LIKE` (H2 + PostgreSQL compatible)
+- `FlywayMigrationSchemaTest` — verifies V17 constraint exists
+- Test fixes across runtime and connector-backend for sanitised name format
 
-Also: garden entry GE-20260604-96d82a (`@Blocking` gotcha on `resolveChannel()`) and protocol PP-20260604-995096 (reactive MCP tool @Blocking rule).
+Garden: GE-20260605-9636fd (self-catching exception), GE-20260605-0ffc19 (H2 SIMILAR TO in CHECK)
+Protocol: PP-20260605-8013d4 (auto-channel key sanitisation)
 
 ## Immediate Next Step
 
-Start `qhorus#244`-related work for Claudony (claudony#142 oversight channel fix may now unblock once CI publishes the 0.2-SNAPSHOT).
+Run `mvn deploy` via CI to publish updated `0.2-SNAPSHOT` to GitHub Packages (Claudony is waiting for `set_channel_type_constraints` and the new slug-conformant channel names).
+
+Then: claudony#142 oversight channel config fix (now unblocked by `set_channel_type_constraints`).
 
 ## Cross-Module
 
-**We're blocking (less urgent now):**
-- `claudony` — waiting on CI to publish `0.2-SNAPSHOT` to GitHub Packages (claudony#142). Also needs `set_channel_type_constraints` to update oversight channel config.
+**We're blocking:**
+- `claudony` — CI needs to publish `0.2-SNAPSHOT` first; then claudony#142 can proceed
 
 ## What's Left
 
-- **qhorus#236** — slug enforcement on channel names · M · Low
-- **qhorus#237** — MCP tool migration from channel_name to UUID-or-slug · L · Low
-- **qhorus#238** — closed (protocol written this session)
-- **qhorus#239** — closed (max_messages shipped)
-- **qhorus#240** — closed (list_projections shipped)
-- **qhorus#244** — closed (set_channel_type_constraints shipped)
-- **qhorus#248** — closed (FindOrCreateResult shipped)
+- **qhorus#237** — MCP tool migration from channel_name to UUID-or-slug parameter name · L · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| qhorus#236 | Slug enforcement on channel names | M | Low | V17 migration + ChannelService validation |
+| qhorus#237 | MCP tool parameter migration: channel_name → channel | L | Low | PP-20260604-dualid compliance |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-04-mdp02-finding-and-blocking.md` |
-| Batch spec | `docs/specs/2026-06-04-batch-sx-fixes-design.md` (project) |
-| Garden: @Blocking gotcha | GE-20260604-96d82a |
-| Protocol: reactive @Blocking rule | PP-20260604-995096 |
-| Protocol: channel dual identity | PP-20260604-dualid |
+| Latest blog | `blog/2026-06-05-mdp03-names-that-mean-something.md` |
+| Design spec | `docs/specs/2026-06-04-channel-slug-enforcement-design.md` (project) |
+| Garden: self-catching exception | GE-20260605-9636fd |
+| Garden: H2 SIMILAR TO in CHECK | GE-20260605-0ffc19 |
+| Protocol: auto-channel key sanitisation | PP-20260605-8013d4 |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
