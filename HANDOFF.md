@@ -1,51 +1,49 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-05 — channel slug enforcement (#236) shipped
+**Date:** 2026-06-06 — channel param rename (#237) shipped
 
 ---
 
 ## What Was Done This Session
 
-**Shipped qhorus#236 — channel slug enforcement:**
+**Shipped qhorus#237 — `channel_name` → `channel` across all 53 MCP tool parameters:**
 
-- `ChannelSlugValidator` — public class owning all slug validation (`validateSlugPath`, `isValidSegment`, `tryParseUuid`); UUID-shaped names explicitly rejected; `SEGMENT_PATTERN = [a-z][a-z0-9]*(-[a-z0-9]+)*`
-- `ChannelCreateRequest` compact constructor — slug validation as first gate, before connector binding and type checks; `Channel.name` gets `@Column(updatable = false)` for ORM immutability
-- `QhorusMcpToolsBase.resolveChannel()` — flipped to name-first; private `tryParseUuid()` replaced by `ChannelSlugValidator.tryParseUuid()`; `create_channel` and reactive counterpart both have slug-rules description
-- `ConfiguredAutoChannelPolicy` — `sanitiseSegment()` (8-hex SHA-256 hash, unconditional, for external keys), `slugifyConnectorId()` (hash-free, for developer IDs), `validatePattern()` startup gate via `{...}` → `a` substitution
-- V17 Flyway migration — `chk_channel_name_slug` CHECK constraint via `REGEXP_LIKE` (H2 + PostgreSQL compatible)
-- `FlywayMigrationSchemaTest` — verifies V17 constraint exists
-- Test fixes across runtime and connector-backend for sanitised name format
+- `QhorusMcpToolsBase.resolveChannel()` now returns `Channel` (not UUID) — one lookup, entity in hand
+- `resolveChannelAsync(String) → Uni<Channel>` added to `ReactiveQhorusMcpTools` for Category A tools
+- All 27 `@ToolArg(name = "channel_name")` in `QhorusMcpTools` renamed + structural changes (entity pattern)
+- All 26 in `ReactiveQhorusMcpTools` renamed; Category A use `resolveChannelAsync`; Category B resolve at `@Tool` boundary
+- `set_channel_type_constraints` drops `@Blocking` (sole reason was blocking `resolveChannel()`)
+- `delete_channel` reactive: terminal `.map()` nested inside `.flatMap()` to keep `ch` in scope
+- `request_approval`: resolve-once pattern — `ch.name` threaded into private helpers
+- V17 confirmed shipped (#236); next domain migration V18
 
-Garden: GE-20260605-9636fd (self-catching exception), GE-20260605-0ffc19 (H2 SIMILAR TO in CHECK)
-Protocol: PP-20260605-8013d4 (auto-channel key sanitisation)
+Garden: GE-20260606-1c0f7d (Mutiny flatMap scope — terminal map out-of-scope after type change)
+Protocol: PP-20260606-f899bc (resolve at @Tool boundary; private helpers receive resolved name)
 
 ## Immediate Next Step
 
-Run `mvn deploy` via CI to publish updated `0.2-SNAPSHOT` to GitHub Packages (Claudony is waiting for `set_channel_type_constraints` and the new slug-conformant channel names).
-
-Then: claudony#142 oversight channel config fix (now unblocked by `set_channel_type_constraints`).
-
-## Cross-Module
-
-**We're blocking:**
-- `claudony` — CI needs to publish `0.2-SNAPSHOT` first; then claudony#142 can proceed
+Pick up qhorus#252 — `ReactiveChannelService` UUID-first refactor: service methods (`setRateLimits`, `setAllowedWriters`, `setAdminInstances`, `pause`, `resume`) currently take `String name` internally; after resolveChannelAsync resolves the entity, the service does its own `findByName` again. Add UUID-based overloads to eliminate the double lookup.
 
 ## What's Left
 
-- **qhorus#237** — MCP tool migration from channel_name to UUID-or-slug parameter name · L · Low
+- **qhorus#252** — ReactiveChannelService UUID-first methods (double-lookup elimination from resolveChannelAsync) · M · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| qhorus#237 | MCP tool parameter migration: channel_name → channel | L | Low | PP-20260604-dualid compliance |
+| qhorus#252 | ReactiveChannelService UUID-first service methods — eliminate double lookup | M | Low | Follow-up from #237; service layer still calls findByName internally after resolve |
+
+## Hygiene Note
+
+4 stale workspace branches (no EPIC-CLOSED.md, 3+ weeks old):
+`epic-142-flyway-versioning`, `epic-153-cdi-message-event`, `epic-154-inbound-correlationid`, `epic-a2a-lifecycle-cleanup`
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-05-mdp03-names-that-mean-something.md` |
-| Design spec | `docs/specs/2026-06-04-channel-slug-enforcement-design.md` (project) |
-| Garden: self-catching exception | GE-20260605-9636fd |
-| Garden: H2 SIMILAR TO in CHECK | GE-20260605-0ffc19 |
-| Protocol: auto-channel key sanitisation | PP-20260605-8013d4 |
+| Latest blog | `blog/2026-06-06-mdp01-the-rename-with-teeth.md` |
+| Design spec | `docs/specs/2026-06-05-channel-param-rename-design.md` (project) |
+| Garden: Mutiny flatMap scope | GE-20260606-1c0f7d |
+| Protocol: resolve-at-boundary | PP-20260606-f899bc |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
