@@ -1,0 +1,9 @@
+branch: issue-257-event-observer-fixes
+project-sha: 59fea0a38ccbcb8b8497c5749fb25b7806f7f6f4
+date: 2026-06-07
+issue: 257
+issue-repo: casehubio/qhorus
+covers: 257,258,259
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
