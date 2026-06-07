@@ -1,49 +1,51 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-06 — channel param rename (#237) shipped
+**Date:** 2026-06-07 — #253 ledger dtype re-arch and #252 UUID-first channels shipped
 
 ---
 
 ## What Was Done This Session
 
-**Shipped qhorus#237 — `channel_name` → `channel` across all 53 MCP tool parameters:**
+Shipped two issues on branch `issue-253-ledger-seq-dtype-fix`:
 
-- `QhorusMcpToolsBase.resolveChannel()` now returns `Channel` (not UUID) — one lookup, entity in hand
-- `resolveChannelAsync(String) → Uni<Channel>` added to `ReactiveQhorusMcpTools` for Category A tools
-- All 27 `@ToolArg(name = "channel_name")` in `QhorusMcpTools` renamed + structural changes (entity pattern)
-- All 26 in `ReactiveQhorusMcpTools` renamed; Category A use `resolveChannelAsync`; Category B resolve at `@Tool` boundary
-- `set_channel_type_constraints` drops `@Blocking` (sole reason was blocking `resolveChannel()`)
-- `delete_channel` reactive: terminal `.map()` nested inside `.flatMap()` to keep `ch` in scope
-- `request_approval`: resolve-once pattern — `ch.name` threaded into private helpers
-- V17 confirmed shipped (#236); next domain migration V18
+**#253 — Ledger dtype scope re-architecture (bug fix):**
+- Root cause: `MessageLedgerEntryRepository` implemented `LedgerEntryRepository` with `FROM MessageLedgerEntry` JPQL, causing `IDX_LEDGER_ENTRY_SUBJECT_SEQ` constraint violations when domain entries shared a subject.
+- Fix: split into `LedgerEntryJpaRepository` (cross-dtype, `FROM LedgerEntry`) and `MessageLedgerEntryRepository` (qhorus-scoped). Both write services now use two injections. Unsafe `(MessageLedgerEntry)` cast replaced with instanceof guard.
+- New protocols: PP-20260607-d83ba5 (cross-dtype JPQL invariant); PP-20260606-f899bc updated.
 
-Garden: GE-20260606-1c0f7d (Mutiny flatMap scope — terminal map out-of-scope after type change)
-Protocol: PP-20260606-f899bc (resolve at @Tool boundary; private helpers receive resolved name)
+**#252 — UUID-first channel service:**
+- Six methods (`setRateLimits`, `setAllowedWriters`, `setAdminInstances`, `pause`, `resume`, `delete`) in both `ChannelService` and `ReactiveChannelService` now take `UUID channelId`. All 12 MCP call sites updated.
+
+Both issues closed. 2 commits landed on `origin/main` (mdproctor/qhorus).
 
 ## Immediate Next Step
 
-Pick up qhorus#252 — `ReactiveChannelService` UUID-first refactor: service methods (`setRateLimits`, `setAllowedWriters`, `setAdminInstances`, `pause`, `resume`) currently take `String name` internally; after resolveChannelAsync resolves the entity, the service does its own `findByName` again. Add UUID-based overloads to eliminate the double lookup.
+Both #253 and #252 are closed and on main. Pick up the next issue from the backlog — run `/work` to start.
 
 ## What's Left
 
-- **qhorus#252** — ReactiveChannelService UUID-first methods (double-lookup elimination from resolveChannelAsync) · M · Low
+- **#255** — Use `JpaLedgerEntryRepository` from casehub-ledger directly (prereq: #256) · S · Low
+- **#256** — Move sequence assignment from `LedgerWriteService` to `LedgerSequenceAllocator` · M · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| qhorus#252 | ReactiveChannelService UUID-first service methods — eliminate double lookup | M | Low | Follow-up from #237; service layer still calls findByName internally after resolve |
+| #256 | Move sequence assignment to LedgerSequenceAllocator — enables direct use of library JpaLedgerEntryRepository | M | Med | Prereq for #255; requires casehub-ledger team coordination |
+| #255 | Use JpaLedgerEntryRepository from casehub-ledger — drop LedgerEntryJpaRepository from qhorus | S | Low | Blocked by #256 |
 
 ## Hygiene Note
 
-4 stale workspace branches (no EPIC-CLOSED.md, 3+ weeks old):
+4 stale workspace branches still pending (no EPIC-CLOSED.md, 3+ weeks old):
 `epic-142-flyway-versioning`, `epic-153-cdi-message-event`, `epic-154-inbound-correlationid`, `epic-a2a-lifecycle-cleanup`
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-06-mdp01-the-rename-with-teeth.md` |
-| Design spec | `docs/specs/2026-06-05-channel-param-rename-design.md` (project) |
-| Garden: Mutiny flatMap scope | GE-20260606-1c0f7d |
-| Protocol: resolve-at-boundary | PP-20260606-f899bc |
+| Latest blog | `blog/2026-06-07-mdp01-the-split-that-fixed-the-seam.md` |
+| Design spec | `docs/specs/2026-06-07-ledger-dtype-scope-and-uuid-first-channels.md` (project) |
+| Protocol: cross-dtype JPQL | PP-20260607-d83ba5 |
+| Garden: replace_all variant | GE-20260520-7fb7a8 (revised) |
+| Garden: git SHA typo | GE-20260607-536227 |
+| Garden: shared-list stubs | GE-20260607-58c683 |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
