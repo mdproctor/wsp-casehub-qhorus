@@ -1,4 +1,4 @@
-# Branch Closed — issue-200-watchdog-alert-event
-**Date:** 2026-05-28
-**Issue:** #200
-**Scheduled for deletion:** 2026-06-11
+# Branch Closed — issue-257-event-observer-fixes
+**Date:** 2026-06-08
+**Issue:** #257
+**Covers:** 257,258,259
