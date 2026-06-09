@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-09-mdp01-when-the-scheduler-has-no-principal.md](2026-06-09-mdp01-when-the-scheduler-has-no-principal.md) | 2026-06-09 | Multi-tenancy (#260): explicit tenancyId on dispatch and updateLastActivity() for scheduler/no-context paths; ledger SNAPSHOT interface surprise; Flyway table name correction |
 | [2026-06-08-mdp01-the-guard-that-revealed-the-callers.md](2026-06-08-mdp01-the-guard-that-revealed-the-callers.md) | 2026-06-08 | Three quarkmind integration bugs: EVENT telemetry field split, Builder guard cascade across 15+ callers, ChannelSlugValidator dot error, @Any CDI qualifier fix |
 | [2026-06-07-mdp01-the-split-that-fixed-the-seam.md](2026-06-07-mdp01-the-split-that-fixed-the-seam.md) | 2026-06-07 | #253 ledger dtype scope re-architecture (LedgerEntryJpaRepository cross-dtype split), #252 UUID-first channel service methods |
 | [2026-06-06-mdp01-the-rename-with-teeth.md](2026-06-06-mdp01-the-rename-with-teeth.md) | 2026-06-06 | Renaming 53 MCP channel params: resolveChannel() returning Channel, delete_channel flatMap scope bug, resolve-at-boundary pattern |
