@@ -1,0 +1,9 @@
+branch: issue-256-ledger-sequence-allocator
+project-sha: 2adf14508584b27c72556025185b543491d26236
+date: 2026-06-09
+issue: 256
+issue-repo: casehubio/qhorus
+covers: 256,255,262
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
