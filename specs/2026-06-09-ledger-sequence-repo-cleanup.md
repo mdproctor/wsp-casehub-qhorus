@@ -96,15 +96,21 @@ public Uni<LedgerEntry> save(final LedgerEntry entry, final String tenancyId) {
             .setParameter(1, entry.subjectId).getSingleResultOrNull())
         .flatMap(seq -> {
             entry.sequenceNumber = seq != null ? seq : 1;
-            // Step 2: compute digest (pure Java — must be after sequence is set)
+            // Step 2: tokenise actorId (matching JpaLedgerEntryRepository.save() order)
+            // so both stacks produce identical canonical bytes for LedgerMerkleTree.leafHash().
+            // actorIdentityProvider is already injected in this class (pre-existing field).
+            if (entry.actorId != null) {
+                entry.actorId = actorIdentityProvider.tokenise(entry.actorId);
+            }
+            // Step 3: compute digest (pure Java — must be after sequence AND tokenisation)
             if (ledgerConfig.hashChain().enabled()) {
                 entry.digest = LedgerMerkleTree.leafHash(entry);
             }
-            // Step 3: persist entry
+            // Step 4: persist entry
             return session.persist(entry).replaceWith(entry);
         })
         .flatMap(e -> {
-            // Step 4: Merkle frontier update (conditional)
+            // Step 5: Merkle frontier update (conditional)
             if (!ledgerConfig.hashChain().enabled()) {
                 return Uni.createFrom().item(e);
             }
@@ -118,10 +124,12 @@ public Uni<LedgerEntry> save(final LedgerEntry entry, final String tenancyId) {
                         LedgerMerkleTree.append(e.digest, currentFrontier, e.subjectId);
                     final Set<Integer> newLevels = newFrontier.stream()
                         .map(n -> n.level).collect(java.util.stream.Collectors.toSet());
-                    // Mirror JpaLedgerMerkleFrontierRepository.replace() semantics
+                    // Mirror JpaLedgerMerkleFrontierRepository.replace() semantics.
+                    // createMutationQuery() is required for JPQL DELETE — createQuery(String)
+                    // without a result type is @Deprecated in Hibernate Reactive 3.2.5.Final.
                     Uni<Integer> deleteOld = newLevels.isEmpty()
                         ? Uni.createFrom().item(0)
-                        : session.createQuery(
+                        : session.createMutationQuery(
                             "DELETE FROM LedgerMerkleFrontier f WHERE f.subjectId = :sid AND f.level NOT IN :levels")
                           .setParameter("sid", e.subjectId)
                           .setParameter("levels", newLevels)
@@ -225,7 +233,7 @@ Update imports in `LedgerWriteServiceTest` and `LedgerWritePropagationTest`. Nam
 
 All activate based on config; no change to qhorus defaults required.
 
-1. **actorId tokenisation** — `actorIdentityProvider.tokenise(entry.actorId)` runs. Defaults to false (`casehub.ledger.identity.tokenisation.enabled=false`), so no-op in tests. With tokenisation on, the resolved persona ID is pseudonymised. This is additive and correct — qhorus's `InstanceActorIdProvider` maps instance→persona; the ledger's `ActorIdentityProvider` pseudonymises for privacy.
+1. **actorId tokenisation** — `actorIdentityProvider.tokenise(entry.actorId)` runs. Defaults to false (`casehub.ledger.identity.tokenisation.enabled=false`), so no-op in tests. With tokenisation on, the resolved persona ID is pseudonymised. This is additive and correct — qhorus's `InstanceActorIdProvider` maps instance→persona; the ledger's `ActorIdentityProvider` pseudonymises for privacy. **Note:** the reactive path (`ReactiveLedgerEntryJpaRepository.save()`, revised in #256) now also calls `actorIdentityProvider.tokenise()` before computing `entry.digest`, ensuring both stacks produce identical canonical bytes for `LedgerMerkleTree.leafHash()` when tokenisation is enabled. This is a correctness requirement — without it, the same message written via different stacks would produce different digest values, making `LedgerVerificationService.verify()` inconsistent.
 
 2. **Merkle hash chain** — when `casehub.ledger.hash-chain.enabled=true` (set in test `application.properties`), every `save()` call: (a) computes `entry.digest = LedgerMerkleTree.leafHash(entry)`, (b) calls `updateMerkleFrontier()` via `JpaLedgerMerkleFrontierRepository` (~2 DB queries), (c) fires `LedgerMerklePublisher.publish()` (async HTTP, no-op when url not configured). This is expected and correct — qhorus is a normative accountability layer. `casehub.ledger.hash-chain.enabled=false` is NOT added to `application.properties`; disabling tamper evidence would break `LedgerVerificationService.verify()`. Note: `LedgerMerklePublisher.publish()` checks `casehub.ledger.merkle.publish.url` — tests don't set this, so it is always a no-op in tests.
 
@@ -309,6 +317,7 @@ return messages.stream()
 | `runtime/src/test/java/.../ledger/StubLedgerEntryJpaRepository.java` | #255 | **Rename** → `StubLedgerEntryRepository` |
 | `runtime/src/test/java/.../ledger/LedgerWriteServiceTest.java` | #255 | Modify: update import after rename |
 | `runtime/src/test/java/.../ledger/LedgerWritePropagationTest.java` | #255 | Modify: update import after rename |
+| `runtime/src/test/java/.../ledger/ReactiveChannelTimelineTest.java` | #262 | **Create**: `@Disabled` reactive timeline test asserting EVENT telemetry fields |
 
 ---
 
@@ -316,9 +325,10 @@ return messages.stream()
 
 - `LedgerWriteServiceTest` — existing sequence tests (`record_firstEntry_sequenceNumberIsOne`, `record_threeEntries_sequenceNumbersIncrement`) verify the stub's new counter logic. All attestation, causal chain, and telemetry tests unchanged.
 - `LedgerEntryJpaRepositoryTest` — `makePlain()` cleaned up in #256, test deleted in #255.
-- `ChannelTimelineTest` — existing `timeline_events_haveToolName`, `timeline_events_haveDurationMsAndTokenCount` etc. implicitly verify both the batch fetch path (blocking) and the newly-added ledger lookup path (reactive). No new tests needed.
+- `ChannelTimelineTest` — existing `timeline_events_haveToolName`, `timeline_events_haveDurationMsAndTokenCount` etc. verify the **blocking** batch fetch path. These tests inject `QhorusMcpTools` (the blocking tool exclusively) and do not exercise `ReactiveQhorusMcpTools.blockingGetChannelTimeline()`.
 - `@QuarkusTest` integration suite — full run verifies H2 schema (including `ledger_subject_sequence` via SQL init) and `JpaLedgerEntryRepository` integration with Merkle chain writes.
-- `ReactiveMessageServiceTest` — enabled; exercises the reactive `save()` with MERGE sequence and Merkle chain against PostgreSQL DevServices.
+- `ReactiveMessageServiceTest` — currently `@Disabled` (requires PostgreSQL DevServices); exercises `ReactiveMessageService.dispatch()` → `ReactiveLedgerWriteService.record()` → `ReactiveLedgerEntryJpaRepository.save()` (MERGE sequence + Merkle chain). Does NOT call `getChannelTimeline()`.
+- **Gap:** the reactive timeline fix (`blockingGetChannelTimeline()` batch fetch) has no direct test. `blockingGetChannelTimeline()` is gated by `@IfBuildProperty(casehub.qhorus.reactive.enabled=true)`, which requires the reactive build profile (PostgreSQL DevServices). A `ReactiveChannelTimelineTest` asserting EVENT `tool_name`/`duration_ms`/`token_count` fields is added as a new `@Disabled` test class, matching the pattern of `ReactiveMessageServiceTest`. It will run when DevServices tests are re-enabled for CI.
 
 ---
 
