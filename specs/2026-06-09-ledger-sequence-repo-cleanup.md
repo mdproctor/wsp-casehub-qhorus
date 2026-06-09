@@ -158,7 +158,7 @@ public Uni<LedgerEntry> save(final LedgerEntry entry, final String tenancyId) {
 
 ### `LedgerWriteService.record()` — remove sequence computation
 
-Delete lines 161–165 (the `findLatestBySubjectId` call and `sequenceNumber` local variable). Delete `entry.sequenceNumber = sequenceNumber` (line 182). The `save()` call assigns the sequence.
+Delete lines 164–165 (the `findLatestBySubjectId` call and `sequenceNumber` local variable — confirmed from source: 161–163 is the `tenancyId` declaration which remains, used on lines 170, 199, 202, 207). Delete `entry.sequenceNumber = sequenceNumber` (line 182). Also retitle or remove the section comment at lines 157–160 ("Sequence number") since sequence assignment moves to `save()` — `tenancyId` stays but is no longer a sequence-specific concern. The `save()` call assigns the sequence.
 
 ### `ReactiveLedgerWriteService.record()` — remove sequence from reactive chain
 
@@ -312,7 +312,8 @@ return messages.stream()
 | `runtime/src/main/resources/application.properties` | #255 | Modify: add `casehub.ledger.datasource=qhorus` + `selected-alternatives` |
 | `runtime/src/test/resources/application.properties` | #256/#255 | Modify: add `casehub.ledger.datasource=qhorus` + SQL load script; delete redundant `%reactive-pg.casehub.ledger.datasource=qhorus` |
 | `runtime/src/test/resources/import-qhorus-test.sql` | #256 | **Create**: `ledger_subject_sequence` DDL |
-| `runtime/src/test/java/.../ledger/StubLedgerEntryJpaRepository.java` | #256 | Modify: add `sequenceCounters` HashMap + assign in `save()`; remove `e.sequenceNumber = seq` from `LedgerEntryJpaRepositoryTest.makePlain()` |
+| `runtime/src/test/java/.../ledger/StubLedgerEntryJpaRepository.java` | #256 | Modify: add `sequenceCounters` HashMap + sequence assignment in `save()` |
+| `runtime/src/test/java/.../ledger/LedgerEntryJpaRepositoryTest.java` | #256 | Modify: remove `e.sequenceNumber = seq` from `makePlain()` |
 | `runtime/src/test/java/.../ledger/LedgerEntryJpaRepositoryTest.java` | #255 | **Delete** |
 | `runtime/src/test/java/.../ledger/StubLedgerEntryJpaRepository.java` | #255 | **Rename** → `StubLedgerEntryRepository` |
 | `runtime/src/test/java/.../ledger/LedgerWriteServiceTest.java` | #255 | Modify: update import after rename |
