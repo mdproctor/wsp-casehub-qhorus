@@ -1,53 +1,44 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-08 — #257 #258 #259 shipped (quarkmind Layer 3 integration bugs)
+**Date:** 2026-06-09 — #256, #255, #262 shipped (ledger sequence refactor + batch timeline fix)
 
 ---
 
 ## What Was Done This Session
 
-Shipped three bugs from quarkmind Layer 3 integration on branch `issue-257-event-observer-fixes`:
+**#256/#255/#262 — Ledger sequence refactor + repository cleanup + batch timeline:**
 
-**#257 — MessageDispatch.telemetry field + EVENT content fail-fast:**
-- Root cause: EVENT content silently nulled by `MessageObserverDispatcher`; real fix required decoupling ledger telemetry from `message.content`. Partial fix: add `String telemetry` (13th field) to `MessageDispatch`; `Builder.build()` throws on EVENT+content; `LedgerWriteService.populateTelemetry()` reads `dispatch.telemetry()` not `dispatch.content()`. Follow-up: `casehub-ledger#126` for full decoupling.
-- 57 files changed (all production callers, test callers, examples migrated); `QhorusEntityMapper.toTimelineEntry()` gained a ledger-first overload (N+1 tracking: #262).
-- Protocol: PP-20260608-054090 (EVENT content-free rule).
-
-**#258 — ChannelSlugValidator dot-notation error:**
-- `segment.contains(".")` branch produces actionable error with hyphen and slash suggestions.
-
-**#259 — @Any on Instance<MessageObserver>:**
-- Added `@Any` to both `MessageService` and `ReactiveMessageService` — qualified observer beans were silently excluded.
-- Protocol: PP-20260608-07daa6 (observer test transaction discipline).
-- Garden: GE-20260608-038af4 (@TestTransaction silently skips observers; use `QuarkusTransaction.requiringNew()`).
-
-4 stale workspace branches stamped `chore: branch closed`. All 3 issues closed. CLAUDE.md updated.
+- `QhorusSequenceAllocator` (`@REQUIRES_NEW` CDI bean): MERGE SQL commits atomically before concurrent callers can race the H2 INSERT — eliminates TOCTOU race. `QhorusLedgerEntryRepository.save()` holds `synchronized(this)` across the REQUIRES_NEW call so T2 blocks until T1's commit is visible.
+- `QhorusLedgerEntryRepository` (implements `LedgerEntryRepository`, non-`@Alternative`): replaces deleted `LedgerEntryJpaRepository`. Full Merkle chain, actorId tokenisation, null-safe tenancyId. `quarkus.arc.selected-alternatives` is unreliable for library beans in Quarkus extension test augmentation — subclass pattern is the correct CDI solution.
+- `QhorusLedgerMerkleFrontierRepository`: thin non-`@Alternative` subclass of `JpaLedgerMerkleFrontierRepository`.
+- `ReactiveLedgerEntryJpaRepository.save()`: first reactive Merkle chain. MERGE sequence + actorId tokenisation before `leafHash` + frontier update via `createMutationQuery`.
+- `LedgerWriteService` + `ReactiveLedgerWriteService`: `findLatestBySubjectId` + `sequenceNumber` computation removed.
+- `LedgerEntryJpaRepository.java` + `LedgerEntryJpaRepositoryTest.java` deleted.
+- `StubLedgerEntryJpaRepository` → `StubLedgerEntryRepository`.
+- `MessageLedgerEntryRepository.findByMessageIds(Collection<Long>)`: batch IN query.
+- `getChannelTimeline()` (blocking): N+1 eliminated. Reactive path was returning null telemetry for all EVENTs — fixed with same batch pattern.
+- Protocol PP-20260609-e5ac14 (ledger_subject_sequence SQL init required in all test modules with ledger enabled + Flyway disabled).
+- Garden: GE-20260609-62a1a7 (H2 concurrent MERGE race + synchronized+REQUIRES_NEW fix); REVISE on GE-20260417-c59817 (extension test caveat); REVISE on GE-20260607-ad3d62 (sql-load-script alternative fix).
 
 ## Immediate Next Step
 
-On main, clean. Run `/work` to pick up next issue — natural start is **#256** (move sequence assignment to `LedgerSequenceAllocator`, prereq for #255).
+On main, clean. Run `/work` to pick up next issue.
 
 ## What's Left
 
-- **#255** — Use `JpaLedgerEntryRepository` from casehub-ledger directly (blocked by #256) · S · Low
-- **#256** — Move sequence assignment to `LedgerSequenceAllocator` · M · Med
-- **#262** — Batch `findByMessageIds()` for `getChannelTimeline()` N+1 fix · S · Low
+None — #256, #255, #262 all closed and shipped.
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #256 | Move sequence assignment to LedgerSequenceAllocator | M | Med | Prereq for #255; casehub-ledger coordination |
-| #255 | Use JpaLedgerEntryRepository from casehub-ledger — drop LedgerEntryJpaRepository | S | Low | Blocked by #256 |
-| #262 | Batch findByMessageIds() to fix N+1 in getChannelTimeline() | S | Low | Performance, not blocking |
+| casehub-ledger#126 | Full EVENT telemetry decoupling from message.content | M | Med | Follow-up from #257; not blocking anything |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-08-mdp01-the-guard-that-revealed-the-callers.md` |
-| Design spec | `docs/specs/2026-06-07-observer-fixes-257-258-259.md` (project) |
-| Protocol: EVENT content-free | PP-20260608-054090 |
-| Protocol: observer test discipline | PP-20260608-07daa6 |
-| Garden: @TestTransaction observer | GE-20260608-038af4 |
-| Ledger follow-up | casehub-ledger#126 |
+| Latest blog | `blog/2026-06-09-mdp02-the-row-that-wouldnt-lock.md` |
+| Design spec | `specs/2026-06-09-ledger-sequence-repo-cleanup.md` (workspace); `docs/specs/` (project) |
+| Protocol: ledger sequence SQL init | PP-20260609-e5ac14 |
+| Garden: H2 concurrent MERGE race | GE-20260609-62a1a7 |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
