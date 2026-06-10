@@ -121,7 +121,7 @@ Note: `@DefaultBean` is a CDI suppression qualifier, not a numeric priority — 
 
 #### getTask() tenancy requirement
 
-`GET /a2a/tasks/{id}` calls `messageService.findAllByCorrelationId(taskId)` which filters by tenant via `CurrentPrincipal`. A task submitted with `X-Tenancy-ID: tenant-a` but retrieved without the header will resolve to `DEFAULT_TENANT_ID` and return HTTP 404, even though the task exists. **A2A orchestrators must include `X-Tenancy-ID` consistently on both `sendMessage` and `getTask` calls for the same task.** This should be documented in the A2A endpoint's Javadoc and any client-facing documentation.
+`GET /a2a/tasks/{id}` calls `messageService.findAllByCorrelationId(taskId)` which filters by tenant via `CurrentPrincipal`. A task submitted with `X-Tenancy-ID: tenant-a` but retrieved without the header will resolve to `DEFAULT_TENANT_ID` and return HTTP 404, even though the task exists. **A2A orchestrators must include `X-Tenancy-ID` consistently on both `sendMessage` and `getTask` calls for the same task.** Document this hazard in the `A2AResource.getTask()` and `ReactiveA2AResource.getTask()` Javadoc — these are the authoritative source for callers.
 
 ---
 
@@ -163,7 +163,7 @@ Add `String tenancyId` as the final parameter to every query method that current
 | Method | Tenant predicate added |
 |--------|----------------------|
 | `findByChannelId(channelId, tenancyId)` | `AND e.tenancyId = :tid` |
-| `listEntries(..., tenancyId)` (both 6-param and 8-param overloads) | `AND e.tenancyId = :tid` |
+| `listEntries(..., tenancyId)` (6-param and 8-param overloads become 7-param and 9-param) | `AND e.tenancyId = :tid` in the 9-param JPQL; 7-param delegates to 9-param and must thread `tenancyId` through the call explicitly — `return listEntries(channelId, messageTypes, afterSequence, agentId, since, null, false, limit, tenancyId)` |
 | `findAllByCorrelationId(channelId, corrId, tenancyId)` | `AND e.tenancyId = :tid` |
 | `findAncestorChain(channelId, entryId, tenancyId)` | guard: `!tenancyId.equals(entry.tenancyId)` added to loop break condition |
 | `findStalledCommands(channelId, olderThan, tenancyId)` | `AND c.tenancyId = :tid` on both outer and correlated subquery |
@@ -204,7 +204,10 @@ The reactive repo has 4 methods. Three get tenancyId:
 | `ReactiveQhorusMcpTools` | same |
 | `ReactiveLedgerWriteService.record()` | `dispatch.tenancyId()` |
 
-**`StubMessageLedgerEntryRepository`** (test stub, `runtime/src/test/`) — update all overriding methods to match the new signatures.
+**Files with `@Override` methods that must have signatures updated:**
+
+- `StubMessageLedgerEntryRepository` (`runtime/src/test/.../ledger/`) — stub used across many tests; all overriding methods gain `tenancyId`.
+- `LedgerQueryRepoTest.CapturingRepo` (`runtime/src/test/.../ledger/LedgerQueryRepoTest.java`, line 43) — package-private static inner class; not a stub, a pure in-memory capture device for CDI-free unit tests. Has 7 `@Override` methods that all change signature: `findAllByCorrelationId`, `findAncestorChain`, `findStalledCommands`, `countByOutcome`, `findByActorIdInChannel`, `findEventsSince`, `listEntries` (the 8-param overload, which becomes 9-param). The `save()` and `findLatestBySubjectId()` helpers in `CapturingRepo` are NOT `@Override` — they don't change.
 
 **Test call sites** that directly call repo methods pass `TenancyConstants.DEFAULT_TENANT_ID`. No new tables or migrations.
 
@@ -227,7 +230,8 @@ The reactive repo has 4 methods. Three get tenancyId:
 - **`A2ATenantScopingTest @QuarkusTest`** — `POST /a2a/message:send` with `X-Tenancy-ID: test-tenant`; assert message's `tenancyId = "test-tenant"` in the store; assert `GET /a2a/tasks/{id}` with same header returns the task; assert `GET /a2a/tasks/{id}` without header returns 404 (tenancy asymmetry).
 - **`A2ATenantScopingTest` — no-header case** — `POST /a2a/message:send` without `X-Tenancy-ID`; assert message lands in `DEFAULT_TENANT_ID`.
 - **`AgentCardTenantTest @QuarkusTest`** — `GET /.well-known/agent-card.json` with `X-Tenancy-ID: tenant-a`; assert `tenancyId = "tenant-a"` in response. Without header: assert `tenancyId = DEFAULT_TENANT_ID`.
-- **`BackgroundContextSafetyTest @QuarkusTest`** — invoke `messageService.dispatch()` from a `@Scheduled` method with explicit `tenancyId` on the dispatch; assert no `ContextNotActiveException` and message lands in correct tenant. Confirms the `ContextNotActiveException` catch in `QhorusInboundCurrentPrincipal` works when the per-tenant stores are accidentally reached from background threads.
+- **`QhorusInboundCurrentPrincipalTest` (CDI-free `@Test`)** — directly instantiate `QhorusInboundCurrentPrincipal` wiring a stub `InboundTenancyContext` that throws `ContextNotActiveException` on `tenancyId()`; call `.tenancyId()` on the principal; assert `DEFAULT_TENANT_ID` is returned and no exception propagates. This is the definitive test of the catch: no `@QuarkusTest`, no CDI container, no HTTP stack — it directly exercises the safety net code path that would otherwise require a background thread race to trigger.
+- **`BackgroundDispatchTenancyTest @QuarkusTest`** — invoke `messageService.dispatch()` from a `@Scheduled` method with explicit `tenancyId` set on `MessageDispatch.builder()`; assert the message lands in the correct tenant. This tests that background dispatch with explicit tenancyId is not broken by the new bean. Note: this test does NOT reach `currentPrincipal.tenancyId()` (dispatch short-circuits when `dispatch.tenancyId()` is non-null); it confirms the background path is tenant-correct, not that the catch works.
 
 ### #263
 
