@@ -16,6 +16,16 @@ Every HTTP request to Qhorus — A2A, MCP REST tools, AgentCard — runs with `M
 
 ---
 
+## Security boundary
+
+**`X-Tenancy-ID` is not a security boundary.** Any HTTP caller can claim any tenant by including this header. The mechanism is appropriate only for deployments where network isolation (firewall, mTLS, gateway policy) enforces tenant trust — a caller inside the network boundary is trusted. This is consistent with the Qhorus trust posture documented in PLATFORM.md: internal foundation services carry no auth annotations and rely on network policy.
+
+**Production multi-tenant deployments that require cross-tenant isolation must use `casehub-platform-oidc`**, which provides `OidcCurrentPrincipal @Priority(100)` that displaces `QhorusInboundCurrentPrincipal`. With OIDC active, `X-Tenancy-ID` has no effect — the tenant is set from the JWT claim.
+
+This distinction must be understood before deploying Qhorus in a multi-tenant environment: `X-Tenancy-ID` routes, it does not authenticate.
+
+---
+
 ## Design
 
 ### Foundation — Inbound HTTP Tenant Principal (addresses #265)
@@ -24,23 +34,24 @@ Three new classes in `runtime/src/main/java/io/casehub/qhorus/runtime/identity/`
 
 #### `InboundTenancyContext` — `@RequestScoped`
 
-Plain CDI holder populated by the JAX-RS filter and read by the principal bean.
+Plain CDI holder populated by the JAX-RS filter and read by the principal bean. Scoped to the HTTP request lifetime.
 
 ```java
 @RequestScoped
 public class InboundTenancyContext {
     private String tenancyId = TenancyConstants.DEFAULT_TENANT_ID;
     public String tenancyId() { return tenancyId; }
-    public void set(String t) { this.tenancyId = t != null ? t : TenancyConstants.DEFAULT_TENANT_ID; }
+    public void set(String t) { this.tenancyId = t != null && !t.isBlank() ? t : TenancyConstants.DEFAULT_TENANT_ID; }
 }
 ```
 
-#### `TenancyContextFilter` — `@Provider @Priority(100)`
+#### `TenancyContextFilter` — `@Provider @PreMatching @Priority(100)`
 
-Standard JAX-RS `ContainerRequestFilter`. Runs before resource method dispatch, inside active request scope.
+Standard JAX-RS `ContainerRequestFilter`. `@PreMatching` ensures it runs before resource matching, guaranteeing tenant context is set for all requests including those that may not match a resource method. Runs inside an active CDI request scope.
 
 ```java
 @Provider
+@PreMatching
 @Priority(100)
 public class TenancyContextFilter implements ContainerRequestFilter {
     @Inject InboundTenancyContext ctx;
@@ -56,7 +67,7 @@ Fallback: `InboundTenancyContext.set(null)` resolves to `DEFAULT_TENANT_ID`.
 
 #### `QhorusInboundCurrentPrincipal` — `@RequestScoped @Alternative @Priority(1)`
 
-Reads from `InboundTenancyContext`. Implements `CurrentPrincipal`.
+Implements `CurrentPrincipal`. Reads from `InboundTenancyContext`.
 
 ```java
 @RequestScoped
@@ -65,24 +76,54 @@ Reads from `InboundTenancyContext`. Implements `CurrentPrincipal`.
 public class QhorusInboundCurrentPrincipal implements CurrentPrincipal {
     @Inject InboundTenancyContext ctx;
 
-    @Override public String actorId()           { return "anonymous"; }
-    @Override public Set<String> groups()       { return Set.of(); }
-    @Override public String tenancyId()         { return ctx.tenancyId(); }
-    @Override public boolean isCrossTenantAdmin() { return false; }
+    @Override
+    public String actorId() { return "anonymous"; }
+
+    @Override
+    public Set<String> groups() { return Set.of(); }
+
+    @Override
+    public String tenancyId() {
+        try {
+            return ctx.tenancyId();
+        } catch (ContextNotActiveException e) {
+            // Background threads (Scheduled, ObservesAsync, StartupEvent) have no request
+            // scope. Per PP-20260609-scheduled-service-cross-tenant-stores, background code
+            // should use @CrossTenant stores and never reach here through per-tenant stores.
+            // This catch is a safety net for any code that accidentally calls a per-tenant
+            // store from a non-HTTP context — DEFAULT_TENANT_ID is the correct fallback.
+            return TenancyConstants.DEFAULT_TENANT_ID;
+        }
+    }
+
+    @Override
+    public boolean isCrossTenantAdmin() { return false; }
 }
 ```
 
-**CDI priority ladder** (highest wins):
+**Why `ContextNotActiveException` catch is needed:** Introducing `@RequestScoped @Alternative @Priority(1)` changes the `CurrentPrincipal` CDI proxy resolution behaviour. Previously, `MockCurrentPrincipal @ApplicationScoped @DefaultBean` resolved safely from any thread (application scope is always active). With `QhorusInboundCurrentPrincipal @RequestScoped` winning, any background thread that holds a reference to a per-tenant store (`JpaChannelStore`, `JpaMessageStore`, `JpaCommitmentStore`, `JpaWatchdogStore`) and calls a method that reads `currentPrincipal.tenancyId()` will throw `ContextNotActiveException`. The existing protocol (`scheduled-service-cross-tenant-stores.md`) requires background code to use `@CrossTenant`-qualified stores instead — Watchdog and ChannelGateway startup already comply. The `catch` is a safety net for future code that doesn't follow the protocol.
 
-| Bean | Priority | When active |
-|------|----------|-------------|
-| `OidcCurrentPrincipal` | 100 | When `casehub-platform-oidc` on classpath |
-| `QhorusInboundCurrentPrincipal` | 1 | All HTTP requests, no OIDC |
-| `MockCurrentPrincipal @DefaultBean` | -1 | CDI-free tests, background tasks |
+**Behavioural delta from `MockCurrentPrincipal`:** `MockCurrentPrincipal.actorId()` defaults to `"system"` (via `casehub.platform.principal.actorId`), making `isAuthenticated()` return `true`. `QhorusInboundCurrentPrincipal.actorId()` returns `"anonymous"`, making `isAuthenticated()` return `false`. This is semantically correct — an HTTP caller with no auth token is genuinely anonymous. No qhorus code currently gates on `isAuthenticated()`. Consumers that do gate on it will observe this change when they add qhorus to the classpath.
 
-**No changes required** to `A2AResource`, `A2AChannelBackend`, `MessageService`, or any store. Every tenant-scoped path already reads `CurrentPrincipal`; the new bean provides the correct value.
+**CDI principal resolution:**
 
-**No build-time gating** (`@IfBuildProperty`/`@UnlessBuildProperty`). `@RequestScoped` CDI beans and JAX-RS `@Provider` filters work in both blocking and reactive stacks. Background tasks (Watchdog, Quartz) use `@CrossTenant` stores and/or set `tenancyId` explicitly on `MessageDispatch` — they do not depend on `CurrentPrincipal`.
+| Bean | How it's selected | When active |
+|------|------------------|-------------|
+| `OidcCurrentPrincipal` from `casehub-platform-oidc` | `@Alternative @Priority(100)` — highest priority; wins over all others | OIDC configured |
+| `QhorusInboundCurrentPrincipal` | `@Alternative @Priority(1)` — beats the `@DefaultBean`; displaced by OIDC | Any HTTP request, no OIDC |
+| `MockCurrentPrincipal @DefaultBean` | Suppressed by any `@Alternative` bean; active only when no `@Alternative` is present | CDI-free unit tests, non-HTTP CDI contexts |
+
+Note: `@DefaultBean` is a CDI suppression qualifier, not a numeric priority — it loses to any non-default bean regardless of priority value.
+
+**No build-time gating** (`@IfBuildProperty`/`@UnlessBuildProperty`). `@RequestScoped` CDI beans and JAX-RS `@Provider @PreMatching` filters work in both blocking and reactive stacks.
+
+**No changes required** to `A2AResource`, `ReactiveA2AResource`, `A2AChannelBackend`, `MessageService`, or any store. Every tenant-scoped path already reads `CurrentPrincipal`; the new bean provides the correct value.
+
+#### getTask() tenancy requirement
+
+`GET /a2a/tasks/{id}` calls `messageService.findAllByCorrelationId(taskId)` which filters by tenant via `CurrentPrincipal`. A task submitted with `X-Tenancy-ID: tenant-a` but retrieved without the header will resolve to `DEFAULT_TENANT_ID` and return HTTP 404, even though the task exists. **A2A orchestrators must include `X-Tenancy-ID` consistently on both `sendMessage` and `getTask` calls for the same task.** This should be documented in the A2A endpoint's Javadoc and any client-facing documentation.
+
+---
 
 ### #264 — AgentCard per-tenant
 
@@ -92,31 +133,40 @@ public class QhorusInboundCurrentPrincipal implements CurrentPrincipal {
 public record AgentCard(
         String name, String description, String url, String version,
         List<AgentSkill> skills, AgentCapabilities capabilities,
-        String tenancyId)  // reflects CurrentPrincipal.tenancyId()
+        String tenancyId)  // Qhorus extension — not in A2A spec; reflects CurrentPrincipal.tenancyId()
 ```
 
 Both `AgentCardResource` and `ReactiveAgentCardResource` inject `CurrentPrincipal` and pass `currentPrincipal.tenancyId()` when constructing the card.
 
+**Conformance note:** `tenancyId` is a Qhorus-specific extension to the A2A AgentCard schema. It is not defined in the Google A2A spec. A top-level field (rather than an `extensions` wrapper) is used because:
+1. The A2A spec does not define an `extensions` map either — wrapping in an undefined `extensions` field solves no conformance problem.
+2. Top-level access is simpler for consumers (`card.tenancyId` vs `card.extensions().get("casehub:tenancyId")`).
+3. Qhorus's card already contains `mcp: true` in capabilities, also non-standard.
+
+Most A2A validators tolerate unknown fields. Strict schema validators that reject unknown top-level fields will also reject an unknown `extensions` object. The conformance implication is the same either way.
+
 **Behaviour:**
 - Request with `X-Tenancy-ID: tenant-a` → `AgentCard.tenancyId = "tenant-a"`
 - Request without header → `AgentCard.tenancyId = DEFAULT_TENANT_ID`
-- OIDC request → `AgentCard.tenancyId` reflects the JWT claim
+- OIDC request → `AgentCard.tenancyId` reflects the JWT-provided tenancyId
 
 This makes the card self-describing: an A2A orchestrator reads the card, notes `tenancyId`, then sends messages with `X-Tenancy-ID: <tenancyId>`.
+
+---
 
 ### #263 — `MessageLedgerEntryRepository` tenant scoping
 
 Add `String tenancyId` as the final parameter to every query method that currently lacks it, and append `AND e.tenancyId = :tenancyId` to the JPQL predicate.
 
-**Methods updated (blocking + reactive mirrors):**
+#### Blocking `MessageLedgerEntryRepository` — methods updated
 
 | Method | Tenant predicate added |
 |--------|----------------------|
 | `findByChannelId(channelId, tenancyId)` | `AND e.tenancyId = :tid` |
-| `listEntries(..., tenancyId)` (both overloads) | `AND e.tenancyId = :tid` |
+| `listEntries(..., tenancyId)` (both 6-param and 8-param overloads) | `AND e.tenancyId = :tid` |
 | `findAllByCorrelationId(channelId, corrId, tenancyId)` | `AND e.tenancyId = :tid` |
-| `findAncestorChain(channelId, entryId, tenancyId)` | per-entry `e.tenancyId` check in loop |
-| `findStalledCommands(channelId, olderThan, tenancyId)` | `AND c.tenancyId = :tid` (both subqueries) |
+| `findAncestorChain(channelId, entryId, tenancyId)` | guard: `!tenancyId.equals(entry.tenancyId)` added to loop break condition |
+| `findStalledCommands(channelId, olderThan, tenancyId)` | `AND c.tenancyId = :tid` on both outer and correlated subquery |
 | `countByOutcome(channelId, tenancyId)` | `AND e.tenancyId = :tid` |
 | `findByActorIdInChannel(channelId, actorId, limit, tenancyId)` | `AND e.tenancyId = :tid` |
 | `findEventsSince(channelId, since, tenancyId)` | `AND e.tenancyId = :tid` |
@@ -124,22 +174,39 @@ Add `String tenancyId` as the final parameter to every query method that current
 | `findEarliestWithSubjectByCorrelationId(corrId, tenancyId)` | `AND e.tenancyId = :tid` |
 | `findByCorrelationIdAcrossChannels(corrId, limit, tenancyId)` | `AND e.tenancyId = :tid` |
 
-**Unchanged (by surrogate PK — unique within datasource):**
+**Unchanged (surrogate PK — unique within datasource, no tenant ambiguity):**
 - `findByMessageId(messageId)`
 - `findByMessageIds(messageIds)`
 
-**Callers — source of `tenancyId`:**
+#### Reactive `ReactiveMessageLedgerEntryRepository` — methods updated
+
+The reactive repo has 4 methods. Three get tenancyId:
+
+| Reactive method | Change |
+|----------------|--------|
+| `findByChannelId(channelId, tenancyId)` | `AND subjectId = ?1 AND tenancyId = ?2` |
+| `findLatestByCorrelationId(channelId, corrId, tenancyId)` | add `AND tenancyId = ?3` |
+| `findEarliestWithSubjectByCorrelationId(corrId, tenancyId)` | add `AND tenancyId = ?2` |
+| `findByMessageId(messageId)` | **unchanged** — PK-based |
+
+#### Known limitations — cross-tenant delegation
+
+**`findEarliestWithSubjectByCorrelationId`:** Adding tenant scoping here means a HANDOFF that delegates an obligation to an agent in a **different tenant** will silently fail to propagate `subjectId` to the child correlation thread. The child's `LedgerWriteService.record()` call will not find a matching seed entry across the tenant boundary and will fall back to using `channelId` as the `subjectId`. This is acceptable for current use cases (cross-tenant delegation is not yet a use case) but is now an explicit architectural constraint baked into the implementation. Any future cross-tenant delegation feature must revisit this method and either make it cross-tenant or introduce an explicit cross-tenant subjectId propagation path.
+
+**`findByCorrelationIdAcrossChannels`:** Same constraint. `get_obligation_activity` will show only the originating tenant's entries for a correlationId. If an obligation is delegated via HANDOFF to an agent in a different tenant, the cross-channel trace breaks at the tenant boundary. State as a known limitation in the MCP tool's documentation.
+
+#### Callers — source of `tenancyId`
 
 | Caller | Source |
 |--------|--------|
-| `LedgerWriteService.record()` | `dispatch.tenancyId()` — non-null by this point (set by `MessageService.dispatch()`) |
-| `QhorusMcpTools` (ledger query tools) | `currentPrincipal.tenancyId()` — already injected since #260 |
+| `LedgerWriteService.record()` | `dispatch.tenancyId()` — guaranteed non-null at this point (set by `MessageService.dispatch()` before calling `record()`) |
+| `QhorusMcpTools` (ledger query tools: `list_ledger_entries`, `get_obligation_chain`, `get_causal_chain`, `get_channel_timeline`, `list_stalled_obligations`, etc.) | `currentPrincipal.tenancyId()` — already injected since #260 |
 | `ReactiveQhorusMcpTools` | same |
 | `ReactiveLedgerWriteService.record()` | `dispatch.tenancyId()` |
 
 **`StubMessageLedgerEntryRepository`** (test stub, `runtime/src/test/`) — update all overriding methods to match the new signatures.
 
-**Test call sites** that directly call repo methods pass `TenancyConstants.DEFAULT_TENANT_ID`. Test setup does not change — no new tables, no new migrations.
+**Test call sites** that directly call repo methods pass `TenancyConstants.DEFAULT_TENANT_ID`. No new tables or migrations.
 
 ---
 
@@ -149,27 +216,31 @@ Add `String tenancyId` as the final parameter to every query method that current
 - `MessageService`, `JpaMessageStore`, `JpaChannelStore`, `JpaCommitmentStore` — already inject `CurrentPrincipal`; no changes
 - `QhorusLedgerEntryRepository` — already has full tenancy; no changes
 - Flyway migrations — no new columns; `tenancyId` columns exist from #260
-- `@CrossTenant` stores used by Watchdog/background — unaffected
+- `@CrossTenant` stores used by Watchdog/ChannelGateway startup — unaffected
 
 ---
 
 ## Testing
 
 ### #265 / #264
-- `A2ATenantScopingTest @QuarkusTest` — sends `POST /a2a/message:send` with `X-Tenancy-ID: test-tenant`; asserts message's `tenancyId = "test-tenant"` in the store
-- `AgentCardTenantTest @QuarkusTest` — `GET /.well-known/agent-card.json` with and without `X-Tenancy-ID` header; asserts `tenancyId` field in response
-- Without header: `tenancyId = DEFAULT_TENANT_ID` in both
+
+- **`A2ATenantScopingTest @QuarkusTest`** — `POST /a2a/message:send` with `X-Tenancy-ID: test-tenant`; assert message's `tenancyId = "test-tenant"` in the store; assert `GET /a2a/tasks/{id}` with same header returns the task; assert `GET /a2a/tasks/{id}` without header returns 404 (tenancy asymmetry).
+- **`A2ATenantScopingTest` — no-header case** — `POST /a2a/message:send` without `X-Tenancy-ID`; assert message lands in `DEFAULT_TENANT_ID`.
+- **`AgentCardTenantTest @QuarkusTest`** — `GET /.well-known/agent-card.json` with `X-Tenancy-ID: tenant-a`; assert `tenancyId = "tenant-a"` in response. Without header: assert `tenancyId = DEFAULT_TENANT_ID`.
+- **`BackgroundContextSafetyTest @QuarkusTest`** — invoke `messageService.dispatch()` from a `@Scheduled` method with explicit `tenancyId` on the dispatch; assert no `ContextNotActiveException` and message lands in correct tenant. Confirms the `ContextNotActiveException` catch in `QhorusInboundCurrentPrincipal` works when the per-tenant stores are accidentally reached from background threads.
 
 ### #263
-- `MessageLedgerEntryRepositoryTest` — extend existing tests to call all methods with explicit `tenancyId` parameter; assert cross-tenant data is not returned
-- `LedgerWriteService` integration test — dispatch a message, verify ledger entry lands in correct tenant bucket
-- `StubMessageLedgerEntryRepository` — updated signatures, all override methods pass through or no-op
+
+- **`MessageLedgerEntryRepositoryTest`** — extend existing tests: call all updated methods with explicit `tenancyId`; dispatch two messages in different tenants on the same channel; assert that each tenant's query returns only its own entries.
+- **`LedgerWriteService` integration test** — dispatch a message; verify the ledger entry's `tenancyId` matches the dispatch's `tenancyId`.
+- **`StubMessageLedgerEntryRepository`** — updated signatures compile cleanly.
 
 ---
 
 ## Protocol coherence
 
-- Follows `unconditional-tenancy-filtering` (PP-20260520-439daf) — all queries now filter by `tenancyId`
-- Follows `tenancyId-in-data-access-only` (PP-20260520-e6a5f0) — tenancyId not in domain model, only in persistence layer
-- `QhorusInboundCurrentPrincipal @Alternative @Priority(1)` follows `persistence-backend-cdi-priority` pattern — activates by presence, displaced by higher-priority impl
-- No `@CrossTenant` queries in `MessageLedgerEntryRepository` — all are per-tenant (contrast with `CrossTenantLedgerEntryRepository` in casehub-ledger which is an explicit separate interface)
+- Follows `unconditional-tenancy-filtering` (PP-20260520-439daf) — all queries now filter by `tenancyId`.
+- Follows `tenancyId-in-data-access-only` (PP-20260520-e6a5f0) — tenancyId is in persistence layer, not domain model.
+- Follows `scheduled-service-cross-tenant-stores` (PP-20260609) — `ContextNotActiveException` catch is the safety net; background code should use `@CrossTenant` stores as the primary pattern.
+- `QhorusInboundCurrentPrincipal @Alternative @Priority(1)` follows `persistence-backend-cdi-priority` pattern — activates by presence, displaced by higher-priority impl.
+- No `@CrossTenant` queries in `MessageLedgerEntryRepository` — all per-tenant (contrast with `CrossTenantLedgerEntryRepository` in casehub-ledger which is an explicit separate interface for tools that need cross-tenant access).
