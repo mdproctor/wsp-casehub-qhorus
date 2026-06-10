@@ -200,22 +200,39 @@ The reactive repo has 4 methods. Three get tenancyId:
 | Caller | Source |
 |--------|--------|
 | `LedgerWriteService.record()` | `dispatch.tenancyId()` — guaranteed non-null at this point (set by `MessageService.dispatch()` before calling `record()`) |
-| `QhorusMcpTools` (ledger query tools: `list_ledger_entries`, `get_obligation_chain`, `get_causal_chain`, `get_channel_timeline`, `list_stalled_obligations`, etc.) | `currentPrincipal.tenancyId()` — already injected since #260 |
-| `ReactiveQhorusMcpTools` | same |
 | `ReactiveLedgerWriteService.record()` | `dispatch.tenancyId()` |
+| `QhorusMcpTools.listLedgerEntries` | `currentPrincipal.tenancyId()` |
+| `QhorusMcpTools.getObligationChain` | `currentPrincipal.tenancyId()` |
+| `QhorusMcpTools.getCausalChain` | `currentPrincipal.tenancyId()` |
+| `QhorusMcpTools.getChannelTimeline` | `currentPrincipal.tenancyId()` |
+| `QhorusMcpTools.listStalledObligations` | `currentPrincipal.tenancyId()` — calls `findStalledCommands` |
+| `QhorusMcpTools.getObligationStats` | `currentPrincipal.tenancyId()` — calls `countByOutcome` + `findStalledCommands` |
+| `QhorusMcpTools.getTelemetrySummary` | `currentPrincipal.tenancyId()` — calls `findEventsSince` |
+| `ReactiveQhorusMcpTools` (blocking mirrors of all above) | `currentPrincipal.tenancyId()` |
 
 **Files with `@Override` methods that must have signatures updated:**
 
 - `StubMessageLedgerEntryRepository` (`runtime/src/test/.../ledger/`) — stub used across many tests; all overriding methods gain `tenancyId`.
 - `LedgerQueryRepoTest.CapturingRepo` (`runtime/src/test/.../ledger/LedgerQueryRepoTest.java`, line 43) — package-private static inner class; not a stub, a pure in-memory capture device for CDI-free unit tests. Has 7 `@Override` methods that all change signature: `findAllByCorrelationId`, `findAncestorChain`, `findStalledCommands`, `countByOutcome`, `findByActorIdInChannel`, `findEventsSince`, `listEntries` (the 8-param overload, which becomes 9-param). The `save()` and `findLatestBySubjectId()` helpers in `CapturingRepo` are NOT `@Override` — they don't change.
 
-**Test call sites** that directly call repo methods pass `TenancyConstants.DEFAULT_TENANT_ID`. No new tables or migrations.
+**Test and example files with direct call sites that will fail to compile — all pass `TenancyConstants.DEFAULT_TENANT_ID`:**
+
+| File | Methods called (that change signature) | CI? |
+|------|---------------------------------------|-----|
+| `runtime/src/test/.../ledger/MessageLedgerEntryRepositoryTest.java` (pkg `io.casehub.qhorus.ledger`) | `findByChannelId`, `listEntries` (6-param), `findLatestByCorrelationId` | ✅ |
+| `runtime/src/test/.../runtime/ledger/MessageLedgerEntryRepositoryTest.java` (pkg `io.casehub.qhorus.runtime.ledger`) | `findEarliestWithSubjectByCorrelationId` | ✅ |
+| `runtime/src/test/.../ledger/MessageLedgerCaptureTest.java` | `findByChannelId` (26 call sites across all 9 message-type test methods) | ✅ |
+| `examples/type-system/src/test/.../LedgerCaptureExampleTest.java` | `findByChannelId` (lines 94, 123) | ✅ runs without flags |
+| `examples/agent-communication/src/test/.../LedgerObligationTrailTest.java` | unknown — injects `MessageLedgerEntryRepository`; audit required | ⚠️ behind `-Pwith-llm-examples` |
+
+No new tables or migrations.
 
 ---
 
 ## What Doesn't Change
 
-- `A2AResource`, `ReactiveA2AResource`, `A2AChannelBackend` — no code changes (tenant flows through `CurrentPrincipal` automatically)
+- `A2AResource`, `A2AChannelBackend` — no code changes (tenant flows through `CurrentPrincipal` automatically)
+- `ReactiveA2AResource` — source logic unchanged; Javadoc addition required on `getTask()` (see getTask() tenancy requirement above)
 - `MessageService`, `JpaMessageStore`, `JpaChannelStore`, `JpaCommitmentStore` — already inject `CurrentPrincipal`; no changes
 - `QhorusLedgerEntryRepository` — already has full tenancy; no changes
 - Flyway migrations — no new columns; `tenancyId` columns exist from #260
@@ -235,9 +252,13 @@ The reactive repo has 4 methods. Three get tenancyId:
 
 ### #263
 
-- **`MessageLedgerEntryRepositoryTest`** — extend existing tests: call all updated methods with explicit `tenancyId`; dispatch two messages in different tenants on the same channel; assert that each tenant's query returns only its own entries.
+- **`io.casehub.qhorus.ledger.MessageLedgerEntryRepositoryTest`** (`runtime/src/test/.../ledger/`) — extend `listEntries`, `findByChannelId`, `findLatestByCorrelationId` tests: call with explicit `tenancyId`; add a cross-tenant isolation case (dispatch two messages in different tenants on the same channel; assert each tenant's query returns only its own entries).
+- **`io.casehub.qhorus.runtime.ledger.MessageLedgerEntryRepositoryTest`** (`runtime/src/test/.../runtime/ledger/`) — update `findEarliestWithSubjectByCorrelationId` call sites to pass `tenancyId`.
 - **`LedgerWriteService` integration test** — dispatch a message; verify the ledger entry's `tenancyId` matches the dispatch's `tenancyId`.
 - **`StubMessageLedgerEntryRepository`** — updated signatures compile cleanly.
+- **`LedgerQueryRepoTest.CapturingRepo`** — all 7 `@Override` methods updated; tests pass `DEFAULT_TENANT_ID`.
+- **`MessageLedgerCaptureTest`** — 26 `findByChannelId` call sites updated; all pass `DEFAULT_TENANT_ID`.
+- **`LedgerCaptureExampleTest`** (`examples/type-system/`) — 2 `findByChannelId` call sites updated; pass `DEFAULT_TENANT_ID`.
 
 ---
 
