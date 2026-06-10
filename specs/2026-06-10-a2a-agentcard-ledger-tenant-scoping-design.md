@@ -117,7 +117,7 @@ Note: `@DefaultBean` is a CDI suppression qualifier, not a numeric priority — 
 
 **No build-time gating** (`@IfBuildProperty`/`@UnlessBuildProperty`). `@RequestScoped` CDI beans and JAX-RS `@Provider @PreMatching` filters work in both blocking and reactive stacks.
 
-**No changes required** to `A2AResource`, `ReactiveA2AResource`, `A2AChannelBackend`, `MessageService`, or any store. Every tenant-scoped path already reads `CurrentPrincipal`; the new bean provides the correct value.
+**Source logic unchanged** for `A2AResource`, `ReactiveA2AResource`, `A2AChannelBackend`, `MessageService`, and all stores. Every tenant-scoped path already reads `CurrentPrincipal`; the new bean provides the correct value. (`A2AResource.getTask()` and `ReactiveA2AResource.getTask()` require Javadoc additions — see getTask() tenancy requirement below.)
 
 #### getTask() tenancy requirement
 
@@ -223,6 +223,7 @@ The reactive repo has 4 methods. Three get tenancyId:
 | `runtime/src/test/.../runtime/ledger/MessageLedgerEntryRepositoryTest.java` (pkg `io.casehub.qhorus.runtime.ledger`) | `findEarliestWithSubjectByCorrelationId` | ✅ |
 | `runtime/src/test/.../ledger/MessageLedgerCaptureTest.java` | `findByChannelId` (26 call sites across all 9 message-type test methods) + `listEntries` 6-param (4 call sites: lines 318, 331, 344, 356) | ✅ |
 | `examples/type-system/src/test/.../LedgerCaptureExampleTest.java` | `findByChannelId` (lines 94, 123) | ✅ runs without flags |
+| `runtime/src/test/.../ledger/LedgerAttestationIntegrationTest.java` (pkg `io.casehub.qhorus.ledger`) | `findByActorIdInChannel` (line 210) | ✅ |
 | `examples/agent-communication/src/test/.../LedgerObligationTrailTest.java` | unknown — injects `MessageLedgerEntryRepository`; audit required | ⚠️ behind `-Pwith-llm-examples` |
 
 No new tables or migrations.
@@ -258,7 +259,7 @@ No new tables or migrations.
 - **`LedgerWriteService` integration test** — dispatch a message; verify the ledger entry's `tenancyId` matches the dispatch's `tenancyId`.
 - **`StubMessageLedgerEntryRepository`** — updated signatures compile cleanly.
 - **`LedgerQueryRepoTest.CapturingRepo`** — all 7 `@Override` methods updated; tests pass `DEFAULT_TENANT_ID`.
-- **`MessageLedgerCaptureTest`** — 26 `findByChannelId` call sites updated; all pass `DEFAULT_TENANT_ID`.
+- **`MessageLedgerCaptureTest`** — 26 `findByChannelId` call sites updated + 4 `listEntries` 6-param call sites (lines 318, 331, 344, 356) updated; all pass `DEFAULT_TENANT_ID`.
 - **`LedgerCaptureExampleTest`** (`examples/type-system/`) — 2 `findByChannelId` call sites updated; pass `DEFAULT_TENANT_ID`.
 
 ---
