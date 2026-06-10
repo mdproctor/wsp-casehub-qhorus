@@ -223,7 +223,8 @@ The reactive repo has 4 methods. Three get tenancyId:
 | `runtime/src/test/.../runtime/ledger/MessageLedgerEntryRepositoryTest.java` (pkg `io.casehub.qhorus.runtime.ledger`) | `findEarliestWithSubjectByCorrelationId` | ✅ |
 | `runtime/src/test/.../ledger/MessageLedgerCaptureTest.java` | `findByChannelId` (26 call sites across all 9 message-type test methods) + `listEntries` 6-param (4 call sites: lines 318, 331, 344, 356) | ✅ |
 | `examples/type-system/src/test/.../LedgerCaptureExampleTest.java` | `findByChannelId` (lines 94, 123) | ✅ runs without flags |
-| `runtime/src/test/.../ledger/LedgerAttestationIntegrationTest.java` (pkg `io.casehub.qhorus.ledger`) | `findByActorIdInChannel` (line 210) | ✅ |
+| `runtime/src/test/.../ledger/LedgerAttestationIntegrationTest.java` (pkg `io.casehub.qhorus.ledger`) | `findAllByCorrelationId` (lines 68, 96, 117, 135, 159, 177, 196) + `findByActorIdInChannel` (line 210) | ✅ |
+| `runtime/src/test/.../ledger/LedgerQueryRepoTest.java` (plain `@Test`, no Quarkus) | test-body call sites for all 7 methods that CapturingRepo overrides: `findAllByCorrelationId`, `findAncestorChain`, `findStalledCommands`, `countByOutcome`, `findByActorIdInChannel`, `findEventsSince`, `listEntries` (both 6-param and 8-param overloads called from test bodies) | ✅ |
 | `examples/agent-communication/src/test/.../LedgerObligationTrailTest.java` | unknown — injects `MessageLedgerEntryRepository`; audit required | ⚠️ behind `-Pwith-llm-examples` |
 
 No new tables or migrations.
