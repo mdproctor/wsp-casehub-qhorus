@@ -1,4 +1,4 @@
-# Branch Closed — issue-200-watchdog-alert-event
-**Date:** 2026-05-28
-**Issue:** #200
-**Scheduled for deletion:** 2026-06-11
+# Branch Closed — issue-265-a2a-tenant-scoping
+**Date:** 2026-06-10
+**Issue:** #265
+**Covers:** 265,264,263
