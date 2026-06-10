@@ -28,7 +28,6 @@ None — #265, #264, #263 all closed and shipped. GitHub issues #267 and #268 fi
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | casehub-ledger#126 | Full EVENT telemetry decoupling from message.content | M | Med | Follow-up from #257; not blocking anything |
-| casehubio/parent#221 | Sync PLATFORM.md — add HTTP tenant routing to Capability Ownership | XS | Low | Filed this session; peer-repo |
 
 ## References
 
