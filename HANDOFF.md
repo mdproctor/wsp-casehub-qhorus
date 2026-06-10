@@ -1,44 +1,42 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-09 — #256, #255, #262 shipped (ledger sequence refactor + batch timeline fix)
+**Date:** 2026-06-10 — #265, #264, #263 shipped (HTTP tenant scoping + ledger query isolation)
 
 ---
 
 ## What Was Done This Session
 
-**#256/#255/#262 — Ledger sequence refactor + repository cleanup + batch timeline:**
+**#265/#264/#263 — Three-issue tenant scoping, closed and landed:**
 
-- `QhorusSequenceAllocator` (`@REQUIRES_NEW` CDI bean): MERGE SQL commits atomically before concurrent callers can race the H2 INSERT — eliminates TOCTOU race. `QhorusLedgerEntryRepository.save()` holds `synchronized(this)` across the REQUIRES_NEW call so T2 blocks until T1's commit is visible.
-- `QhorusLedgerEntryRepository` (implements `LedgerEntryRepository`, non-`@Alternative`): replaces deleted `LedgerEntryJpaRepository`. Full Merkle chain, actorId tokenisation, null-safe tenancyId. `quarkus.arc.selected-alternatives` is unreliable for library beans in Quarkus extension test augmentation — subclass pattern is the correct CDI solution.
-- `QhorusLedgerMerkleFrontierRepository`: thin non-`@Alternative` subclass of `JpaLedgerMerkleFrontierRepository`.
-- `ReactiveLedgerEntryJpaRepository.save()`: first reactive Merkle chain. MERGE sequence + actorId tokenisation before `leafHash` + frontier update via `createMutationQuery`.
-- `LedgerWriteService` + `ReactiveLedgerWriteService`: `findLatestBySubjectId` + `sequenceNumber` computation removed.
-- `LedgerEntryJpaRepository.java` + `LedgerEntryJpaRepositoryTest.java` deleted.
-- `StubLedgerEntryJpaRepository` → `StubLedgerEntryRepository`.
-- `MessageLedgerEntryRepository.findByMessageIds(Collection<Long>)`: batch IN query.
-- `getChannelTimeline()` (blocking): N+1 eliminated. Reactive path was returning null telemetry for all EVENTs — fixed with same batch pattern.
-- Protocol PP-20260609-e5ac14 (ledger_subject_sequence SQL init required in all test modules with ledger enabled + Flyway disabled).
-- Garden: GE-20260609-62a1a7 (H2 concurrent MERGE race + synchronized+REQUIRES_NEW fix); REVISE on GE-20260417-c59817 (extension test caveat); REVISE on GE-20260607-ad3d62 (sql-load-script alternative fix).
+- `QhorusInboundCurrentPrincipal @ApplicationScoped @Alternative @Priority(1)`: reads `X-Tenancy-ID` header via `InboundTenancyContext @RequestScoped` + `TenancyContextFilter @PreMatching`. Key design: `@ApplicationScoped` (not `@RequestScoped`) so the `ContextNotActiveException` catch in `tenancyId()` is reachable for background threads — CDI proxy throws before method entry for narrower scopes. See GE-20260610-f1982c, PP-20260610-85e6a4.
+- `AgentCard` record: `tenancyId` field reflecting `currentPrincipal.tenancyId()`. Qhorus-specific A2A extension.
+- `MessageLedgerEntryRepository`: all 11 query methods (except PK-based `findByMessageId`, `findByMessageIds`) gain `String tenancyId`. All callers updated: `LedgerWriteService`, `ReactiveLedgerWriteService`, `QhorusMcpTools`, `ReactiveQhorusMcpTools`. `LedgerWriteService.record()` now resolves `tenancyId` before first `messageRepo` call.
+- Review feedback across 8 iterations caught: `BackgroundContextSafetyTest` not exercising the catch, `CapturingRepo` ignoring tenancyId, `LedgerAttestationIntegrationTest` missing from call-site inventory, `StubMessageLedgerEntryRepository` silently not filtering.
+- Protocols: PP-20260610-85e6a4 (`@ApplicationScoped` outer bean requirement), PP-20260610-9487d3 (`X-Tenancy-ID` security boundary documentation).
+- Garden: GE-20260610-f1982c (`@ApplicationScoped` vs `@RequestScoped` CDI proxy catch reachability).
+- Branch closed: squashed 6→2 commits, pushed to mdproctor/qhorus + casehubio/qhorus.
 
 ## Immediate Next Step
 
-On main, clean. Run `/work` to pick up next issue.
+Clean main. Run `/work` to pick up the next issue.
 
 ## What's Left
 
-None — #256, #255, #262 all closed and shipped.
+None — #265, #264, #263 all closed and shipped. GitHub issues #267 and #268 filed (minor/test followup, not blocking).
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | casehub-ledger#126 | Full EVENT telemetry decoupling from message.content | M | Med | Follow-up from #257; not blocking anything |
+| casehubio/parent#221 | Sync PLATFORM.md — add HTTP tenant routing to Capability Ownership | XS | Low | Filed this session; peer-repo |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-09-mdp02-the-row-that-wouldnt-lock.md` |
-| Design spec | `specs/2026-06-09-ledger-sequence-repo-cleanup.md` (workspace); `docs/specs/` (project) |
-| Protocol: ledger sequence SQL init | PP-20260609-e5ac14 |
-| Garden: H2 concurrent MERGE race | GE-20260609-62a1a7 |
+| Latest blog | `blog/2026-06-10-mdp01-the-catch-that-wasnt-reachable.md` |
+| Design spec | `docs/specs/2026-06-10-a2a-agentcard-ledger-tenant-scoping-design.md` (project) |
+| Protocol: HTTP principal scope | PP-20260610-85e6a4 |
+| Protocol: X-Tenancy-ID boundary | PP-20260610-9487d3 |
+| Garden: CDI proxy scope gotcha | GE-20260610-f1982c |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
