@@ -1,4 +1,4 @@
-# Branch Closed — issue-200-watchdog-alert-event
-**Date:** 2026-05-28
-**Issue:** #200
-**Scheduled for deletion:** 2026-06-11
+# Branch Closed — issue-249-connector-mesh-bridge
+**Date:** 2026-06-12
+**Issue:** #249
+**Covers:** 249
