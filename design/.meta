@@ -1,0 +1,9 @@
+branch: issue-269-sx-batch
+project-sha: 
+date: 2026-06-12
+issue: 269
+issue-repo: casehubio/qhorus
+covers: 269,268,267,274,245,241,229,254,251
+flyway-next-v: 22
+design-repo: project
+design-section-hashes: 7337f3d0:## Overview|e0533f48:## Component Structure|c2438b98:## Technology Stack|436ec511:## Domain Model|75239aae:## Services|6fdf5d79:## Persistence Abstraction|37f210b4:## Configuration|72df1e1d:## MCP Tool Surface|8c1a8ff0:## Build Roadmap|6b208727:## MCP Tool Design|7b7451c9:## Testing Strategy
