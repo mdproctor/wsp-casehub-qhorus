@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-12-mdp02-nine-fixes-two-surprises.md](2026-06-12-mdp02-nine-fixes-two-surprises.md) | 2026-06-12 | S/XS batch (#269+): @DefaultBean CDI fix, #245 already done, double-fire gotcha in #254, ChannelGateway.initChannel() two-step trap |
 | [2026-06-12-mdp01-the-observation-that-couldnt-carry-content.md](2026-06-12-mdp01-the-observation-that-couldnt-carry-content.md) | 2026-06-12 | ConnectorMeshBridge (#249): "informatory role" resolves EVENT-vs-STATUS, destination excluded from immutable ledger, stale jar masking API break during work-end |
 | [2026-06-09-mdp02-the-row-that-wouldnt-lock.md](2026-06-09-mdp02-the-row-that-wouldnt-lock.md) | 2026-06-09 | #256/#255/#262: H2 concurrent MERGE PK race, CDI subclass pattern for @Alternative library beans, reactive Merkle chain, N+1 + missing-telemetry fix |
 | [2026-06-09-mdp01-when-the-scheduler-has-no-principal.md](2026-06-09-mdp01-when-the-scheduler-has-no-principal.md) | 2026-06-09 | Multi-tenancy (#260): explicit tenancyId on dispatch and updateLastActivity() for scheduler/no-context paths; ledger SNAPSHOT interface surprise; Flyway table name correction |
