@@ -1,46 +1,48 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-12 — S/XS batch closed (#269, #268, #267, #274, #245, #241, #229, #254, #251)
+**Date:** 2026-06-13 — Large S/XS batch + A2A SSE streaming closed (#276, #275, #273, #250, #238, #247, #246, #242, #235, #234, #147)
 
 ---
 
 ## What Was Done This Session
 
-**S/XS batch (9 issues, all closed):**
+**11 issues closed in one batch (issue-276-sxs-batch):**
 
-- **#269** `QhorusInboundCurrentPrincipal` changed from `@Alternative @Priority(1)` to `@DefaultBean` — resolves CDI ambiguity when `casehub-platform-testing` (`FixedCurrentPrincipal`) is on the classpath. All four test `application.properties` updated with `quarkus.arc.exclude-types=MockCurrentPrincipal`.
-- **#254** `ChannelService.create()` now calls `channelGateway.initChannel()` — runtime-created channels visible to ChannelBackend dispatch. Earlier attempt (direct CDI event fire) caught in code review: it skipped `registry.computeIfAbsent()` step 1. Redundant `initChannel()` calls removed from MCP tools.
-- **#251** `CommitmentDeclinedEvent` CDI record in `api/`; `CommitmentService.decline()` fires it. Null guard on field (CDI-free unit tests don't wire it). Filed #275 for cleaner alternative.
-- **#229** V22 Flyway: `CREATE INDEX idx_commitment_obligor ON commitment (obligor)`.
-- **#245** Already fixed in #243 — closed without code change.
-- Remaining: #268 IOException, #241 dead glob, #274 null connectorId guard, #267 tenant isolation test — all mechanical, all closed.
+- **#276** `QhorusInboundCurrentPrincipal`: `@DefaultBean` → plain `@ApplicationScoped` — fixes CDI ambiguity in consumer apps. Removed `quarkus.arc.exclude-types=MockCurrentPrincipal` from all 4 test configs.
+- **#275** `CommitmentService.decline()` null guard removed; recording `Event<CommitmentDeclinedEvent>` wired in CDI-free tests.
+- **#247/#246** `ChannelCreateRequest.allowedTypes/deniedTypes` changed from `String` to `Set<MessageType>`; `MessageType.serializeTypes()` added; `setTypeConstraints()` typed; MCP tools parse at boundary.
+- **#250** `CommitmentService.extendDeadline()` + reactive mirror.
+- **#235** `ReactiveMessageService` trust gate now calls `ObligorTrustPolicy.permits()` via `Infrastructure.getDefaultWorkerPool()` — custom policy beans honoured in reactive path.
+- **#147** A2A SSE streaming: `GET /a2a/tasks/{id}/stream`, `Consumer<OutboundMessage>` registry in `A2AChannelBackend`, DECLINE→"cancelled" fix across all `A2ATaskState` paths, async `sink.close()` via `thenRun`.
+- **#242, #234** — already implemented; closed with comments.
+- **#273, #238** — docs/protocol; closed.
 
-**Garden:** GE-20260609-9ee2ad revised to `resolved` (the entry had predicted this exact fix).
+**ADRs:** 0013 (A2A lazy registration), 0014 (SSE consumer registry), 0015 (reactive trust gate worker-pool)
+
+**Protocols:** sse-sink-async-close, a2a-decline-maps-to-cancelled, reactive-blocking-spi-worker-pool
+
+**Garden:** 4 entries — two-@DefaultBean-ambiguity, sse-sink-close-async, fanout-pre-commit-timing, transactional-sse-void-commits
 
 ## Immediate Next Step
 
-Run `/work` to pick up the next issue. Main is clean.
+Run `/work` to pick up the next issue. Main is clean, all repos aligned.
 
 ## What's Left
 
-- `#273` — ACL operator docs for ConnectorMeshBridge delivery channel (role:system requirement) · XS · Low
-- `#275` — null guard cleanup on CommitmentService.declinedEvents · XS · Low
-- connectors#19 — ConnectorMeshBridge javadoc rewrite (EVENT→STATUS) · XS · Low
-- parent#228 — casehub-qhorus deep-dive sync (ConnectorQhorusMeshBridge, ChannelService.create()) · XS · Low
-- parent#230 — casehub-qhorus deep-dive sync (@DefaultBean, CommitmentDeclinedEvent) · XS · Low
+- `#277` — SSE live-stream integration test (COMMAND → stream → DONE → completed event) · S · Med
+- `#278` — SSE keepalive + server-side timeout for orphaned consumers in A2AChannelBackend · M · Med
+- `parent#241` — sync casehub-qhorus deep-dive in parent docs (A2A SSE, Set<MessageType>, DECLINE→cancelled, #235) · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| casehub-ledger#126 | Full EVENT telemetry decoupling | M | Med | Unblocks EVENT content-bearing; unowned backlog |
-| #271 | allowedTypes advisory enforcement (warn not hard-block) | M | Med | Informatory role concept gives theoretical grounding |
+| #271 | allowedTypes/deniedTypes advisory enforcement (warn not hard-block) | M | Med | Informatory role concept gives theoretical grounding |
+| casehub-ledger#126 | Full EVENT telemetry decoupling | M | Med | Unblocks content-bearing EVENTs; unowned backlog |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-12-mdp02-nine-fixes-two-surprises.md` |
-| Protocol: @DefaultBean + exclude-types pattern | see CLAUDE.md testing conventions |
-| Protocol: PII/credential exclusion | PP-20260612-bd6f8c |
-| Garden: initChannel resolved | GE-20260609-9ee2ad |
+| Latest blog | `blog/2026-06-13-mdp01-ten-issues-one-stream.md` |
+| Garden: 4 new entries | GE-20260613-9e0a5b, c29bb8, 6527d0, a5983e |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
