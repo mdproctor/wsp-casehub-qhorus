@@ -107,8 +107,15 @@ removed in the implementation.
 **Execution flow:**
 
 ```
+@GET
+@Path("/tasks/{id}/stream")
+@Produces("text/event-stream")
 @RunOnVirtualThread
-streamTask() [virtual thread, active for connection duration]:
+public void streamTask(@PathParam("id") final String taskId,
+                       @Context final SseEventSink sink,
+                       @Context final Sse sse) throws Exception {
+
+// [virtual thread, active for connection duration]
 
   ── outside try-finally ────────────────────────────────────────────────────────
   1. Immediate exits (no tx): A2A disabled, invalid UUID
@@ -165,6 +172,14 @@ try {                                 // outer — steps 4 + 5
     if (!sink.isClosed()) sink.close();
 }
 ```
+
+**Method signature:** `streamTask()` must declare `throws Exception`. The helpers
+(`sendStatusEvent`, `sendErrorEvent`) declare `throws Exception` and are called at steps
+1–2 (before the outer try, no surrounding catch) and step 4 (inside the outer try, which
+has no catch clause). In all three positions the checked exception is uncaught within the
+method body and must be declared on the signature. JAX-RS resource methods in RESTEasy
+Reactive may declare `throws Exception` — the VT dispatcher catches and routes it to
+JAX-RS error handling.
 
 **Try boundary:** Steps 1–2 execute before the outer try — no consumer is registered yet,
 so there is nothing to clean up. The outer try opens immediately after `registerStream()`
