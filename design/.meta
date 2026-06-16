@@ -1,0 +1,9 @@
+branch: issue-278-sse-keepalive-timeout
+project-sha: f0ac0654478c7e4d89c0b216cc837acfc30c1e60
+date: 2026-06-16
+issue: 278
+issue-repo: casehubio/qhorus
+covers: 278,277
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
