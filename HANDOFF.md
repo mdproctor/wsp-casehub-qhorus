@@ -1,48 +1,53 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-13 — Large S/XS batch + A2A SSE streaming closed (#276, #275, #273, #250, #238, #247, #246, #242, #235, #234, #147)
+**Date:** 2026-06-16 — Advisory type enforcement shipped (#266 closed (already done), #271 closed)
 
 ---
 
-## What Was Done This Session
-
-**11 issues closed in one batch (issue-276-sxs-batch):**
-
-- **#276** `QhorusInboundCurrentPrincipal`: `@DefaultBean` → plain `@ApplicationScoped` — fixes CDI ambiguity in consumer apps. Removed `quarkus.arc.exclude-types=MockCurrentPrincipal` from all 4 test configs.
-- **#275** `CommitmentService.decline()` null guard removed; recording `Event<CommitmentDeclinedEvent>` wired in CDI-free tests.
-- **#247/#246** `ChannelCreateRequest.allowedTypes/deniedTypes` changed from `String` to `Set<MessageType>`; `MessageType.serializeTypes()` added; `setTypeConstraints()` typed; MCP tools parse at boundary.
-- **#250** `CommitmentService.extendDeadline()` + reactive mirror.
-- **#235** `ReactiveMessageService` trust gate now calls `ObligorTrustPolicy.permits()` via `Infrastructure.getDefaultWorkerPool()` — custom policy beans honoured in reactive path.
-- **#147** A2A SSE streaming: `GET /a2a/tasks/{id}/stream`, `Consumer<OutboundMessage>` registry in `A2AChannelBackend`, DECLINE→"cancelled" fix across all `A2ATaskState` paths, async `sink.close()` via `thenRun`.
-- **#242, #234** — already implemented; closed with comments.
-- **#273, #238** — docs/protocol; closed.
-
-**ADRs:** 0013 (A2A lazy registration), 0014 (SSE consumer registry), 0015 (reactive trust gate worker-pool)
-
-**Protocols:** sse-sink-async-close, a2a-decline-maps-to-cancelled, reactive-blocking-spi-worker-pool
-
-**Garden:** 4 entries — two-@DefaultBean-ambiguity, sse-sink-close-async, fanout-pre-commit-timing, transactional-sse-void-commits
-
 ## Immediate Next Step
 
-Run `/work` to pick up the next issue. Main is clean, all repos aligned.
+Run `/work` to start #261 (Slack channel module). Main is clean, both repos aligned.
 
 ## What's Left
 
-- `#277` — SSE live-stream integration test (COMMAND → stream → DONE → completed event) · S · Med
-- `#278` — SSE keepalive + server-side timeout for orphaned consumers in A2AChannelBackend · M · Med
-- `parent#241` — sync casehub-qhorus deep-dive in parent docs (A2A SSE, Set<MessageType>, DECLINE→cancelled, #235) · XS · Low
+- `#261` — casehub-qhorus-slack-channel module (SlackChannelBackend) · L · Med
+  - Requires brainstorming first (per session instructions)
+  - casehub-connectors-slack-bot 0.2-SNAPSHOT already published to GitHub Packages
+- `#277` — SSE live-stream integration test · S · Med
+- `#278` — SSE keepalive + server-side timeout for orphaned consumers · M · Med
+- `parent#241` — sync casehub-qhorus deep-dive in parent docs (A2A SSE, Set<MessageType>, DECLINE→cancelled, #235, #271 advisory enforcement) · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #271 | allowedTypes/deniedTypes advisory enforcement (warn not hard-block) | M | Med | Informatory role concept gives theoretical grounding |
-| casehub-ledger#126 | Full EVENT telemetry decoupling | M | Med | Unblocks content-bearing EVENTs; unowned backlog |
+| #261 | casehub-qhorus-slack-channel module | L | Med | Next up; needs brainstorm |
+| #271 | allowedTypes/deniedTypes advisory — **CLOSED** | — | — | Shipped this session |
+| #266 | MessageReceivedEvent migration — **CLOSED** | — | — | Already complete before session |
+
+## What Was Done This Session
+
+**#271 closed — hybrid channel type enforcement:**
+
+`StoredMessageTypePolicy` now discriminates by normative weight:
+- COMMAND/QUERY violations: hard-enforced (both call `commitmentService.open()`; advisory dispatch + LLM correction creates orphan Commitments)
+- All other types: advisory (`DispatchResult.advisories()` populated; WARN logged; dispatch proceeds)
+
+Key additions:
+- `MessageTypePolicy.advisory(Channel, MessageType) → String` default method
+- `DispatchResult.advisories` field `@JsonInclude(NON_EMPTY)`
+- `MessageService` Logger + validate()-then-advisory() calling sequence
+- `ReactiveMessageService` AtomicReference advisory capture across worker-pool lambda boundaries
+- Client-side `validate()` call removed from MCP tools (MessageService is single gate)
+- ADR-0016 in `docs/adr/`; protocol PP-20260604-a7ad99 updated in garden
+- 3 garden entries: `@Tool` returns record (not Map), AtomicReference Mutiny chain, MessageService missing Logger
+
+**#266 closed:** Migration was already complete before session — just closed the issue.
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-13-mdp01-ten-issues-one-stream.md` |
-| Garden: 4 new entries | GE-20260613-9e0a5b, c29bb8, 6527d0, a5983e |
+| Latest blog | `blog/2026-06-16-mdp01-when-advisory-makes-orphans.md` |
+| ADR | `docs/adr/0016-hybrid-channel-type-enforcement.md` |
+| Spec | `docs/specs/2026-06-15-advisory-type-enforcement-design.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
