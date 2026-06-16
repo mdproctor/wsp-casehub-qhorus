@@ -53,16 +53,18 @@ mechanism. The deadline check is the natural max-duration enforcement.
 
 ### §1 — `streamTask()` rewrite
 
-**Thread dispatch:** Remove `@Transactional`. Add `@RunOnVirtualThread`.
+**Thread dispatch:** Remove `@Transactional`. Add `@RunOnVirtualThread`
+(`io.smallrye.common.annotation.RunOnVirtualThread` — same package as `@Blocking`;
+do not confuse the two).
 
 `@Transactional` was the mechanism that caused RESTEasy Reactive to dispatch the method
 on a virtual thread (documented as "load-bearing" in the existing javadoc). Removing it
 without a replacement would revert dispatch to the Vert.x I/O thread — `BlockingQueue.poll()`
-would block the event loop and freeze the server. `@Blocking` would use the finite worker
-thread pool (default 20 threads), exhausting it under any real SSE load. `@RunOnVirtualThread`
-creates one Loom virtual thread per request — the correct model for long-lived blocking I/O.
-This is the first use of `@RunOnVirtualThread` in the codebase; the distinction from
-`@Blocking` matters precisely here.
+would block the event loop and freeze the server. `@Blocking` (`io.smallrye.common.annotation.Blocking`)
+would use the finite worker thread pool (default 20 threads), exhausting it under any real
+SSE load. `@RunOnVirtualThread` creates one Loom virtual thread per request — the correct
+model for long-lived blocking I/O. This is the first use of `@RunOnVirtualThread` in the
+codebase; the distinction from `@Blocking` matters precisely here.
 
 **Transaction scope:** Use `QuarkusTransaction.requiringNew()` for the two transactional
 reads (initial validation + post-registration re-check). Each completes in milliseconds.
@@ -71,7 +73,11 @@ The loop runs with no active transaction.
 **Private helpers:** `sendStatusEvent` and `sendErrorEvent` are only ever called from
 `streamTask()`, which now runs on a virtual thread. Both helpers are updated to await
 `sink.send()` synchronously (`.toCompletableFuture().get(5, SECONDS)`) and call
-`sink.close()` directly, eliminating the `thenRun` async chain.
+`sink.close()` directly, eliminating the `thenRun` async chain. `CompletableFuture.get()`
+declares `InterruptedException`, `ExecutionException`, and `TimeoutException` — all checked.
+Both helpers declare `throws Exception`. Callers in steps 1–2 and step 4 are outside the
+try-finally block, so exceptions propagate to JAX-RS error handling. This is correct for
+error/terminal exit paths.
 
 **Execution flow:**
 
@@ -79,36 +85,45 @@ The loop runs with no active transaction.
 @RunOnVirtualThread
 streamTask() [virtual thread, active for connection duration]:
 
-  1. Immediate exits (no tx needed): A2A disabled, invalid UUID
+  ── outside try-finally ────────────────────────────────────────────────────────
+  1. Immediate exits (no tx): A2A disabled, invalid UUID
+     → sendErrorEvent (awaited, throws Exception), return
   2. QuarkusTransaction.requiringNew() — validate task exists; read current state
      If not found → sendErrorEvent (awaited), return
      If terminal  → sendStatusEvent (awaited), return
   3. consumer = queue::offer      (LinkedBlockingQueue, unbounded — offer() never drops)
      a2aBackend.registerStream(corrId, consumer)
   4. QuarkusTransaction.requiringNew() — re-check state after registration
-     Closes race: message dispatched between step 2 and step 3 lands in queue or
-     is visible in DB; re-check catches the DB-visible case.
+     Closes race: message dispatched between step 2 and step 3 is either in the
+     queue (consumer already registered) or DB-visible (re-check catches it).
      If now terminal → deregisterStream, sendStatusEvent (awaited), return
+  ── try begins here ────────────────────────────────────────────────────────────
   5. LOOP (virtual thread blocks here via queue.poll):
        remaining = deadline − now; if ≤ 0 → break
        msg = queue.poll(min(heartbeatMs, remaining), MILLISECONDS)
 
        InterruptedException → restore interrupt flag; break
-       null (poll timeout)  → if !sink.isClosed() && remaining > 0:
-                                  sink.send(comment "keepalive")   // fire-and-forget
-                              else: break
+       null (poll timeout)  → if sink.isClosed(): break
+                              sink.send(comment "keepalive")  // fire-and-forget
        OutboundMessage      → send task_status_update event (fire-and-forget for
                               non-terminal; awaited for terminal)
                               if terminal → break
-  6. finally:
-       a2aBackend.deregisterStream(corrId, consumer)
-       if !sink.isClosed() → sink.close()
+     catch (InterruptedException): restore interrupt flag
+     catch (Exception e): log at DEBUG
+  ── finally ────────────────────────────────────────────────────────────────────
+  6. a2aBackend.deregisterStream(corrId, consumer)
+     if !sink.isClosed() → sink.close()
 ```
 
-**Exception boundary:** `InterruptedException` is caught first and the interrupt flag
-is restored — this is the Quarkus graceful-shutdown signal and must not be swallowed.
-A generic `catch (Exception e)` follows for I/O and other failures; `finally` runs
-cleanup regardless of how the loop exits.
+**try-finally scope:** Steps 1–4 execute before the try block — `consumer` must be
+defined and registered before the finally can safely call `deregisterStream`. The try
+opens after `registerStream()` in step 3. Steps 1–2 and step 4's sendStatusEvent calls
+are outside the try; checked exceptions propagate directly to JAX-RS error handling.
+
+**Exception boundary:** `InterruptedException` is caught explicitly before the generic
+`catch (Exception e)` — the interrupt flag is restored so Quarkus graceful-shutdown
+signals propagate correctly. Generic exceptions (I/O failures etc.) are logged at DEBUG.
+`finally` runs cleanup regardless of exit path.
 
 **Non-terminal send failures:** Non-terminal `sink.send()` calls are fire-and-forget.
 A broken pipe on a non-terminal event won't surface until the next `sink.isClosed()`
@@ -252,10 +267,21 @@ corrupt the `events` list or trigger the latch a second time before assertions c
 | `sseStream_receivesCancelledEvent_whenDeclineDispatched` | New — live stream | `"state":"cancelled"`, `"final":true` |
 | `sseStream_keepaliveCommentsDoNotTriggerEventHandlers` | New | event handler NOT called after 3s; `streamCount > 0` (connection open) |
 
-The keepalive test verifies SSE comment lines (`: keepalive`) are not delivered to the
-`SseEventSource` event handler — per SSE spec, comments are silently ignored by clients.
-It uses `heartbeat-interval-seconds=1` and asserts the handler was not called after 3s,
-while `streamCount() > 0` confirms the connection remains open.
+**Keepalive test coordination pattern** (test 7 — different from the live-stream pattern):
+
+A COMMAND must be dispatched first: without it, `streamTask()` returns immediately with
+"task not found", fires the event handler, and the test self-defeats.
+
+```
+1. QuarkusTransaction.requiringNew() → create channel + dispatch COMMAND (establishes task)
+   corrId = taskId (no terminal dispatch — task stays in-progress)
+2. Open SseEventSource, register event listener (latch NOT used — we assert no event fires)
+3. Awaitility.await().atMost(2s).until(() -> a2aBackend.streamCount(corrId) > 0)
+4. Thread.sleep(3_000)  // > heartbeat-interval-seconds=1; at least 3 keepalives should fire
+5. assertThat(events).isEmpty()                          // comments not delivered to handler
+6. assertThat(a2aBackend.streamCount(corrId)).isGreaterThan(0)  // connection still open
+// client.close() in finally — triggers server-side sink.isClosed() → loop exits
+```
 
 Immediate-close tests (first four) do not need Awaitility — the server closes immediately
 and the `SseEventSource` delivers the event in the normal client-receive flow.
