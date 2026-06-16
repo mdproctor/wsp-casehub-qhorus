@@ -68,3 +68,4 @@
 | [2026-05-29-mdp04-the-reactive-gate.md](2026-05-29-mdp04-the-reactive-gate.md) | 2026-05-29 | ReactiveMessageService.dispatch() gets full enforcement parity — sealed TransactResult, commitment atomicity, named-PU quirks |
 | [2026-05-29-mdp03-five-fixes-three-assumptions.md](2026-05-29-mdp03-five-fixes-three-assumptions.md) | 2026-05-29 | Five XS/S fixes: trust gate target format mismatch, BARRIER_STUCK excluded type gotcha, ledger datasource in test profile restarts |
 | [2026-05-30-mdp05-humans-in-the-mesh.md](2026-05-30-mdp05-humans-in-the-mesh.md) | 2026-05-30 | ConnectorChannelBackend bridges inbound connectors into Qhorus; mapper purity refactor (Option B); LedgerProcessor native image gap; @ObservesAsync integration test fix |
+| [2026-06-16-mdp01-when-advisory-makes-orphans.md](2026-06-16-mdp01-when-advisory-makes-orphans.md) | 2026-06-16 | Hybrid type enforcement — why COMMAND/QUERY stay hard-enforced while all others become advisory |
