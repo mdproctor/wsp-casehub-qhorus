@@ -118,11 +118,12 @@ streamTask() [virtual thread, active for connection duration]:
      If terminal  → sendStatusEvent (self-contained), return
   3. consumer = queue::offer      (LinkedBlockingQueue, unbounded — offer() never drops)
      a2aBackend.registerStream(corrId, consumer)
+  ── try begins here (immediately after registerStream — covers steps 4 and 5) ──
   4. QuarkusTransaction.requiringNew() — re-check state after registration
      Closes race: message dispatched between step 2 and step 3 is either in the
      queue (consumer already registered) or DB-visible (re-check catches it).
-     If now terminal → deregisterStream, sendStatusEvent (self-contained), return
-  ── try begins here ────────────────────────────────────────────────────────────
+     If now terminal → sendStatusEvent (self-contained), return
+                       [finally deregisters consumer and skips close — sink already closed]
   5. LOOP (virtual thread blocks here via queue.poll):
        if sink.isClosed(): break         ← orphan detection: checked every iteration
        remaining = deadline − now; if ≤ 0 → break
@@ -143,10 +144,13 @@ streamTask() [virtual thread, active for connection duration]:
      if !sink.isClosed() → sink.close()
 ```
 
-**try-finally scope:** Steps 1–4 execute before the try block — `consumer` must be
-defined and registered before the finally can safely call `deregisterStream`. The try
-opens after `registerStream()` in step 3. Steps 1–4 call the self-contained helpers;
-checked exceptions from those helpers propagate directly to JAX-RS error handling.
+**try-finally scope:** Steps 1–2 execute before the try block — no consumer is registered
+yet, so there is nothing to clean up. The try opens immediately after `registerStream()`
+in step 3, covering steps 4 and 5. This is critical: if step 4's `requiringNew()` throws
+(JPA failure, transaction infrastructure failure), `finally` still runs and deregisters
+the consumer. Without this, the consumer would remain permanently in `sseStreams`, the
+queue would grow with each `post()` call, and neither would be GC-eligible until server
+restart. Steps 1–2 call the self-contained helpers; checked exceptions propagate to JAX-RS.
 
 **Exception boundary:** `InterruptedException` from `queue.poll()` is caught locally
 inside the loop with an inner try-catch — the interrupt flag is restored and the loop
