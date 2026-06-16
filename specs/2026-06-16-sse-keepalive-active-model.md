@@ -71,13 +71,38 @@ reads (initial validation + post-registration re-check). Each completes in milli
 The loop runs with no active transaction.
 
 **Private helpers:** `sendStatusEvent` and `sendErrorEvent` are only ever called from
-`streamTask()`, which now runs on a virtual thread. Both helpers are updated to await
-`sink.send()` synchronously (`.toCompletableFuture().get(5, SECONDS)`) and call
-`sink.close()` directly, eliminating the `thenRun` async chain. `CompletableFuture.get()`
-declares `InterruptedException`, `ExecutionException`, and `TimeoutException` — all checked.
-Both helpers declare `throws Exception`. Callers in steps 1–2 and step 4 are outside the
-try-finally block, so exceptions propagate to JAX-RS error handling. This is correct for
-error/terminal exit paths.
+`streamTask()`. Both helpers declare `throws Exception` and use an internal try-finally to
+guarantee `sink.close()` regardless of whether the send succeeds, times out, or is
+interrupted:
+
+```java
+private static void sendStatusEvent(SseEventSink sink, Sse sse, String taskId, String state)
+        throws Exception {
+    try {
+        sink.send(sse.newEventBuilder()
+                .name("task_status_update")
+                .data("{\"id\":\"%s\",\"status\":{\"state\":\"%s\"},\"final\":true}"
+                        .formatted(taskId, state))
+                .build())
+            .toCompletableFuture().get(5, SECONDS);
+    } finally {
+        if (!sink.isClosed()) sink.close();
+    }
+}
+```
+
+`sendErrorEvent` is identical in structure. With this, each helper is fully self-contained:
+the sink is closed regardless of how `.get()` exits. Callers in steps 1–2 and step 4 are
+outside the try-finally, so checked exceptions propagate to JAX-RS error handling.
+`streamTask()`'s outer finally sees `isClosed() = true` from the helper and skips the
+redundant close — no double-close.
+
+**Stale comment removal:** The existing `sendStatusEvent`/`sendErrorEvent` javadoc says
+"Never call sink.close() synchronously after send() — the response may not yet be written."
+That concern applied to the old async `thenRun` pattern, where calling close before the
+send's `CompletionStage` completed caused `IllegalStateException`. With `.get(5, SECONDS)`
+the send completes before close is called — the concern is gone. This comment must be
+removed in the implementation.
 
 **Execution flow:**
 
@@ -87,29 +112,32 @@ streamTask() [virtual thread, active for connection duration]:
 
   ── outside try-finally ────────────────────────────────────────────────────────
   1. Immediate exits (no tx): A2A disabled, invalid UUID
-     → sendErrorEvent (awaited, throws Exception), return
+     → sendErrorEvent (self-contained: try-finally inside closes sink), return
   2. QuarkusTransaction.requiringNew() — validate task exists; read current state
-     If not found → sendErrorEvent (awaited), return
-     If terminal  → sendStatusEvent (awaited), return
+     If not found → sendErrorEvent (self-contained), return
+     If terminal  → sendStatusEvent (self-contained), return
   3. consumer = queue::offer      (LinkedBlockingQueue, unbounded — offer() never drops)
      a2aBackend.registerStream(corrId, consumer)
   4. QuarkusTransaction.requiringNew() — re-check state after registration
      Closes race: message dispatched between step 2 and step 3 is either in the
      queue (consumer already registered) or DB-visible (re-check catches it).
-     If now terminal → deregisterStream, sendStatusEvent (awaited), return
+     If now terminal → deregisterStream, sendStatusEvent (self-contained), return
   ── try begins here ────────────────────────────────────────────────────────────
   5. LOOP (virtual thread blocks here via queue.poll):
+       if sink.isClosed(): break         ← orphan detection: checked every iteration
        remaining = deadline − now; if ≤ 0 → break
-       msg = queue.poll(min(heartbeatMs, remaining), MILLISECONDS)
 
-       InterruptedException → restore interrupt flag; break
-       null (poll timeout)  → if sink.isClosed(): break
-                              sink.send(comment "keepalive")  // fire-and-forget
+       // InterruptedException handled locally — never reaches outer catch
+       try { msg = queue.poll(min(heartbeatMs, remaining), MILLISECONDS); }
+       catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+
+       null (poll timeout)  → sink.send(comment "keepalive")  // fire-and-forget;
+                              next iteration's isClosed() check detects broken pipe
        OutboundMessage      → send task_status_update event (fire-and-forget for
-                              non-terminal; awaited for terminal)
+                              non-terminal; awaited via .get(5, SECONDS) for terminal)
                               if terminal → break
-     catch (InterruptedException): restore interrupt flag
-     catch (Exception e): log at DEBUG
+     catch (Exception e): log at DEBUG   // I/O and runtime failures only;
+                                         // InterruptedException never reaches here
   ── finally ────────────────────────────────────────────────────────────────────
   6. a2aBackend.deregisterStream(corrId, consumer)
      if !sink.isClosed() → sink.close()
@@ -117,13 +145,14 @@ streamTask() [virtual thread, active for connection duration]:
 
 **try-finally scope:** Steps 1–4 execute before the try block — `consumer` must be
 defined and registered before the finally can safely call `deregisterStream`. The try
-opens after `registerStream()` in step 3. Steps 1–2 and step 4's sendStatusEvent calls
-are outside the try; checked exceptions propagate directly to JAX-RS error handling.
+opens after `registerStream()` in step 3. Steps 1–4 call the self-contained helpers;
+checked exceptions from those helpers propagate directly to JAX-RS error handling.
 
-**Exception boundary:** `InterruptedException` is caught explicitly before the generic
-`catch (Exception e)` — the interrupt flag is restored so Quarkus graceful-shutdown
-signals propagate correctly. Generic exceptions (I/O failures etc.) are logged at DEBUG.
-`finally` runs cleanup regardless of exit path.
+**Exception boundary:** `InterruptedException` from `queue.poll()` is caught locally
+inside the loop with an inner try-catch — the interrupt flag is restored and the loop
+breaks. `InterruptedException` never reaches the outer `catch (Exception e)`, which
+handles only I/O and runtime failures (logged at DEBUG). `finally` runs cleanup
+regardless of exit path.
 
 **Non-terminal send failures:** Non-terminal `sink.send()` calls are fire-and-forget.
 A broken pipe on a non-terminal event won't surface until the next `sink.isClosed()`
@@ -227,7 +256,7 @@ WebTarget target = client.target(baseUri).path("/a2a/tasks/" + taskId + "/stream
 CountDownLatch latch = new CountDownLatch(1);
 CopyOnWriteArrayList<String> events = new CopyOnWriteArrayList<>();
 try (SseEventSource source = SseEventSource.target(target)
-        .reconnectingEvery(Long.MAX_VALUE, TimeUnit.DAYS)  // disable auto-reconnect
+        .reconnectingEvery(Long.MAX_VALUE, TimeUnit.MILLISECONDS)  // disable auto-reconnect
         .build()) {
     source.register(event -> {
         events.add(event.readData(String.class));
@@ -240,10 +269,13 @@ try (SseEventSource source = SseEventSource.target(target)
 }
 ```
 
-`reconnectingEvery(Long.MAX_VALUE, TimeUnit.DAYS)` disables the default 3s auto-reconnect.
-Without this, after a terminal event closes the server side, the client reconnects and
-receives a second `event:error` (task not found — no COMMAND was re-sent), which could
-corrupt the `events` list or trigger the latch a second time before assertions complete.
+`reconnectingEvery(Long.MAX_VALUE, TimeUnit.MILLISECONDS)` disables the default 3s
+auto-reconnect. `MILLISECONDS` is used deliberately — `TimeUnit.DAYS.toMillis(Long.MAX_VALUE)`
+overflows to a large negative `long` (`Long.MAX_VALUE × 86,400,000` exceeds `Long.MAX_VALUE`),
+which may be treated as "reconnect immediately" by the scheduling logic. `MILLISECONDS`
+requires no unit conversion and cannot overflow. Without disabling reconnect, after a
+terminal event closes the server side, the client reconnects and receives a second
+`event:error` (task not found — no COMMAND was re-sent), corrupting the `events` list.
 
 **Coordination pattern for live-stream tests:**
 ```
