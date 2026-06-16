@@ -144,19 +144,38 @@ streamTask() [virtual thread, active for connection duration]:
      if !sink.isClosed() → sink.close()
 ```
 
-**try-finally scope:** Steps 1–2 execute before the try block — no consumer is registered
-yet, so there is nothing to clean up. The try opens immediately after `registerStream()`
-in step 3, covering steps 4 and 5. This is critical: if step 4's `requiringNew()` throws
-(JPA failure, transaction infrastructure failure), `finally` still runs and deregisters
-the consumer. Without this, the consumer would remain permanently in `sseStreams`, the
-queue would grow with each `post()` call, and neither would be GC-eligible until server
-restart. Steps 1–2 call the self-contained helpers; checked exceptions propagate to JAX-RS.
+**Try structure — nested:** The outer try covers steps 4 and 5. The inner try covers the
+loop body only. There is no catch on the outer try — step 4 JPA or transaction
+infrastructure failures propagate directly through the outer try to `finally`, then to
+JAX-RS (Quarkus/Narayana will log transaction failures; no additional logging needed here).
+Only the loop body has a `catch (Exception e)` to absorb I/O and runtime failures and log
+them at DEBUG. The nesting in Java:
 
-**Exception boundary:** `InterruptedException` from `queue.poll()` is caught locally
-inside the loop with an inner try-catch — the interrupt flag is restored and the loop
-breaks. `InterruptedException` never reaches the outer `catch (Exception e)`, which
-handles only I/O and runtime failures (logged at DEBUG). `finally` runs cleanup
-regardless of exit path.
+```java
+try {                                 // outer — steps 4 + 5
+    // step 4: re-check tx
+    if (terminal) { sendStatusEvent(); return; }  // finally deregisters on return
+    try {                             // inner — loop only
+        while (true) { ... }
+    } catch (Exception e) {
+        LOG.debugf(e, "SSE stream error for task %s", taskId);
+    }
+} finally {
+    a2aBackend.deregisterStream(corrId, consumer);
+    if (!sink.isClosed()) sink.close();
+}
+```
+
+**Try boundary:** Steps 1–2 execute before the outer try — no consumer is registered yet,
+so there is nothing to clean up. The outer try opens immediately after `registerStream()`
+in step 3. This is critical: if step 4's `requiringNew()` throws, `finally` still runs and
+deregisters the consumer. Without this boundary, the consumer would remain permanently in
+`sseStreams`, the queue would accumulate messages from future `post()` calls, and neither
+would be GC-eligible until server restart.
+
+**InterruptedException:** caught locally inside the loop by an inner `try/catch` wrapping
+`queue.poll()` — the interrupt flag is restored and the loop breaks. It never reaches the
+outer `catch (Exception e)`, which handles only I/O and runtime failures.
 
 **Non-terminal send failures:** Non-terminal `sink.send()` calls are fire-and-forget.
 A broken pipe on a non-terminal event won't surface until the next `sink.isClosed()`
@@ -372,3 +391,4 @@ SSE subscriptions do not survive restarts — unchanged from #147.
 | `A2AChannelBackendSseTest` | **Zero changes** |
 | `A2AStreamTaskTest` | **Deleted** — all tests migrated |
 | `A2AStreamIntegrationTest` | New — 7 test cases covering all SSE paths |
+| `runtime/pom.xml` | Add test-scope: `quarkus-rest-client-reactive` (provides `ClientBuilder` + `SseEventSource` impl — `quarkus-rest` is server-only), `awaitility` (managed in Quarkus BOM; no version needed) |
