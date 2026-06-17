@@ -1,0 +1,9 @@
+branch: issue-261-slack-channel-backend
+project-sha: 49e92d79fc5f2b928f53f209d59c8ce5e0438a82
+date: 2026-06-17
+issue: 261
+issue-repo: casehubio/qhorus
+covers: 261
+flyway-next-v: 23
+design-repo: project
+design-section-hashes: 
