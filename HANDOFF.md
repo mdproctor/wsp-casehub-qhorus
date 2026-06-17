@@ -1,6 +1,8 @@
 # CaseHub Qhorus — Session Handover
 **Date:** 2026-06-17 — Three cross-repo issues shipped (#282, #280, #281 closed)
 
+*Updated: parent#265, parent#268 closed — removed from backlog.*
+
 ---
 
 ## Immediate Next Step
@@ -34,15 +36,13 @@ try-catch, so observer failures don't corrupt the transaction.
 
 ## What's Left
 
-- `parent#268` — sync parent docs deep-dive (CommitmentExpiredEvent + factory location) · XS · Low
+*(nothing outstanding)*
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #261 | casehub-qhorus-slack-channel module | L | Med | Next up; needs brainstorm |
-| parent#265 | Sync parent docs deep-dive | XS | Low | Filed last session |
-| parent#268 | Sync parent docs for this session | XS | Low | Filed this session |
 
 ## References
 
