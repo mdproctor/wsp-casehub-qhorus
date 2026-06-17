@@ -1,0 +1,9 @@
+branch: issue-282-fix-reactive-jpa-channel-jpql
+project-sha: 4b93df39e4ecf18e4b836b11c02b16a364a3df87
+date: 2026-06-17
+issue: 282
+issue-repo: casehubio/qhorus
+covers: 282,280,281
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
