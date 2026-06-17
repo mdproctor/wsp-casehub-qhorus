@@ -1,5 +1,5 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-17 — Active SSE model shipped (#278 closed, #277 closed)
+**Date:** 2026-06-17 — Three cross-repo issues shipped (#282, #280, #281 closed)
 
 ---
 
@@ -7,45 +7,46 @@
 
 Run `/work` to start #261 (casehub-qhorus-slack-channel module). Main is clean, both repos aligned.
 
+## What Was Done This Session
+
+**Three issues shipped on branch `issue-282-fix-reactive-jpa-channel-jpql`:**
+
+**#282 / claudony#155 — ReactiveJpaChannelStore JPQL fix:**
+`repo.update(query, Object...)` in Hibernate Reactive converts positional `?N` params to named
+params derived from adjacent field names at runtime. `?3` near `tenancyId` became `:tenancyId`
+internally but was never bound → `QueryParameterException`. Fixed with `Parameters.with()` named
+params. Added `@WithTransaction` (was missing). Unblocks Claudony's 6 failing
+`MeshResourceInterjectionTest` tests. GE-20260617-54b75b captured in garden.
+
+**#280 — MessageLedgerEntryTestFactory moved to casehub-qhorus-testing:**
+Factory now in `io.casehub.qhorus.testing` — accessible to Claudony, devtown, any consumer of
+`casehub-qhorus-testing`. Runtime module can't depend on testing (build cycle), so runtime tests
+carry a local `buildEntry()` helper instead. Unblocks claudony#94.
+
+**#281 — CommitmentExpiredEvent CDI event:**
+New record in `api/`, fired by `CommitmentService.expireOverdue()` after all saves complete.
+Two-phase design (save then fire) with per-event try-catch prevents observer exceptions from
+rolling back the expiry batch. Includes `expiresAt` for stall-duration computation.
+Unblocks engine#504 (OutcomePolicy.onExpired) and devtown#14.
+
+Key technique: CDI batch events should fire after the save loop completes, with per-event
+try-catch, so observer failures don't corrupt the transaction.
+
 ## What's Left
 
-- `#261` — casehub-qhorus-slack-channel module (SlackChannelBackend) · L · Med
-  - Requires brainstorming first
-  - casehub-connectors-slack-bot 0.2-SNAPSHOT already published to GitHub Packages
-- `parent#265` — sync casehub-qhorus deep-dive in parent docs (active SSE model, @RunOnVirtualThread, SseSettings, TERMINAL_STATES, #278 open-issue ref stale) · XS · Low
+- `parent#268` — sync parent docs deep-dive (CommitmentExpiredEvent + factory location) · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #261 | casehub-qhorus-slack-channel module | L | Med | Next up; needs brainstorm |
-| parent#265 | Sync parent docs deep-dive | XS | Low | Filed this session |
-
-## What Was Done This Session
-
-**#278, #277 closed — active virtual-thread SSE model:**
-
-`streamTask()` rewritten from a passive callback model (register consumer + return) to an
-active virtual-thread model (`@RunOnVirtualThread`, `LinkedBlockingQueue.poll()` loop):
-- Keepalive: `queue.poll(heartbeatMs)` timeout → named `event: keepalive` (not SSE comments —
-  RESTEasy SseEventSource non-compliantly fires handlers for comment-only frames)
-- Orphan detection: `sink.isClosed()` checked at top of every iteration
-- Max-duration: `casehub.qhorus.a2a.sse.max-duration-seconds` (default 1800s)
-- Config: `casehub.qhorus.a2a.sse.heartbeat-interval-seconds` (default 15s)
-- `ensureRegistered()` called from `streamTask()` — SSE stream self-registering
-- 7 integration tests via `SseEventSource` replacing RestAssured `A2AStreamTaskTest`
-- 3 new/revised protocols in `docs/protocols/casehub/`
-- 7 garden entries (SSE/VT/queue gotchas and techniques)
-
-Key gotcha: `TrustGateTest.dispatch_command_allowsObligorAboveThreshold` fails on main —
-pre-existing, not introduced by this branch (verified by stashing all changes and running
-the test on clean main).
+| parent#265 | Sync parent docs deep-dive | XS | Low | Filed last session |
+| parent#268 | Sync parent docs for this session | XS | Low | Filed this session |
 
 ## References
 
 | What | Path |
 |------|------|
-| Latest blog | `blog/2026-06-17-mdp01-three-problems-one-queue.md` |
-| Spec | `docs/specs/2026-06-16-sse-keepalive-active-model.md` (promoted to project) |
-| Protocols | `docs/protocols/casehub/sse-active-model-virtual-thread.md`, `sse-keepalive-named-event.md`, `sse-sink-async-close.md` (revised) |
+| Garden entry | `GE-20260617-54b75b` — Hibernate Reactive Panache positional param bug |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
