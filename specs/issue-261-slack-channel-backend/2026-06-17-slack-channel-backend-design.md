@@ -645,14 +645,12 @@ public record SlackBindingView(UUID channelId, String credentialRef, String slac
 `@ApplicationScoped`. Both the cleanup interval and the retention period are configurable:
 
 ```java
-@ConfigProperty(name = "casehub.qhorus.slack-channel.thread-cache-cleanup-interval",
-                defaultValue = "24h")
-String cleanupInterval;   // used in @Scheduled(every = "${...}")
-
 @ConfigProperty(name = "casehub.qhorus.slack-channel.thread-cache-ttl-days",
                 defaultValue = "30")
 int threadCacheTtlDays;
 
+// Cleanup interval is configured via the @Scheduled expression — not injected as a field.
+// casehub.qhorus.slack-channel.thread-cache-cleanup-interval (default: 24h)
 @Scheduled(every = "${casehub.qhorus.slack-channel.thread-cache-cleanup-interval:24h}")
 void cleanup() {
     threadCache.deleteOlderThan(Instant.now().minus(threadCacheTtlDays, ChronoUnit.DAYS));
