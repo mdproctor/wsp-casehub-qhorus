@@ -75,7 +75,10 @@ Follows the `ChannelConnectorBinding` pattern: UUID PK, public fields, no all-ar
 
 ```java
 @Entity
-@Table(name = "slack_bot_binding")
+@Table(name = "slack_bot_binding",
+       uniqueConstraints = @UniqueConstraint(
+           name = "uq_slack_bot_slack_id",
+           columnNames = "slack_channel_id"))
 public class SlackBotBinding extends PanacheEntityBase {
 
     @Id
@@ -89,6 +92,8 @@ public class SlackBotBinding extends PanacheEntityBase {
     public String slackChannelId;
 }
 ```
+
+**Unique constraints:** `channel_id` is `@Id` — its uniqueness is enforced by the PK; no additional `UNIQUE(channel_id)` constraint. `slack_channel_id` carries `uq_slack_bot_slack_id` — prevents two Qhorus channels from binding to the same Slack channel, which would cause duplicate inbound routing and double outbound delivery. Cf. `ChannelConnectorBinding.uq_binding_key` (two non-PK columns).
 
 Construction (field assignment — no all-args constructor, matching qhorus entity convention):
 ```java
@@ -144,8 +149,11 @@ CREATE TABLE slack_bot_binding (
     CONSTRAINT pk_slack_bot_binding
         PRIMARY KEY (channel_id),
     CONSTRAINT fk_slack_binding_channel
-        FOREIGN KEY (channel_id) REFERENCES channel(id)
+        FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT uq_slack_bot_slack_id
+        UNIQUE (slack_channel_id)
 );
+-- Note: no separate UNIQUE(channel_id) — channel_id is @Id; PK already enforces uniqueness.
 ```
 
 ### V24__slack_thread_cache.sql
