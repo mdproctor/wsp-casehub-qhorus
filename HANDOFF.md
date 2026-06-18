@@ -1,52 +1,41 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-17 — Three cross-repo issues shipped (#282, #280, #281 closed)
-
-*Updated: parent#265, parent#268 closed — removed from backlog.*
+**Date:** 2026-06-18 — Housekeeping + CI fix; #261 is next
 
 ---
 
 ## Immediate Next Step
 
-Run `/work` to start #261 (casehub-qhorus-slack-channel module). Main is clean, both repos aligned.
+Run `/work` — branch `issue-261-slack-channel-backend` is open for #261. Go straight into brainstorming the Slack channel backend. The spec is already written.
+
+**Context for #261:**
+- Spec: `specs/2026-06-17-slack-channel-backend-design.md` in the workspace (also at `specs/issue-261-slack-channel-backend/`)
+- The `casehub-connectors-slack-bot` dependency (0.2-SNAPSHOT) is published to GitHub Packages ✅
+- Module location: new `slack-channel/` submodule under the qhorus parent
+- Key classes to build: `SlackBotBinding`, `SlackBotBindingStore`, `SlackThreadCache`, `SlackInboundNormaliser`, `SlackChannelBackend`, `SlackBindingResource`
+- Next Flyway migration: V23 (as of last session)
+- This is L · Med — load the spec, brainstorm first, then TDD
 
 ## What Was Done This Session
 
-**Three issues shipped on branch `issue-282-fix-reactive-jpa-channel-jpql`:**
-
-**#282 / claudony#155 — ReactiveJpaChannelStore JPQL fix:**
-`repo.update(query, Object...)` in Hibernate Reactive converts positional `?N` params to named
-params derived from adjacent field names at runtime. `?3` near `tenancyId` became `:tenancyId`
-internally but was never bound → `QueryParameterException`. Fixed with `Parameters.with()` named
-params. Added `@WithTransaction` (was missing). Unblocks Claudony's 6 failing
-`MeshResourceInterjectionTest` tests. GE-20260617-54b75b captured in garden.
-
-**#280 — MessageLedgerEntryTestFactory moved to casehub-qhorus-testing:**
-Factory now in `io.casehub.qhorus.testing` — accessible to Claudony, devtown, any consumer of
-`casehub-qhorus-testing`. Runtime module can't depend on testing (build cycle), so runtime tests
-carry a local `buildEntry()` helper instead. Unblocks claudony#94.
-
-**#281 — CommitmentExpiredEvent CDI event:**
-New record in `api/`, fired by `CommitmentService.expireOverdue()` after all saves complete.
-Two-phase design (save then fire) with per-event try-catch prevents observer exceptions from
-rolling back the expiry batch. Includes `expiresAt` for stall-duration computation.
-Unblocks engine#504 (OutcomePolicy.onExpired) and devtown#14.
-
-Key technique: CDI batch events should fire after the save loop completes, with per-event
-try-catch, so observer failures don't corrupt the transaction.
-
-## What's Left
-
-*(nothing outstanding)*
+- Fixed casehubio/qhorus CI red — `ActorIdentityProvider` import fix (`c15807e`) existed only on the feature branch, not on either remote main. Fast-forwarded and pushed to both `origin` and `upstream`.
+- Closed #285 and #286 (both filed for the same already-landed fix).
+- Full audit: all 12 open issues verified against codebase — no hidden completions. All 68 blog entries confirmed published. All specs promoted. ADRs all in project repo.
+- Stamped 11 branches missing `chore: branch closed` marker (issue-236 through issue-282 — all closed issues, all code in main via squash).
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #261 | casehub-qhorus-slack-channel module | L | Med | Next up; needs brainstorm |
+| #261 | casehub-qhorus-slack-channel module | L | Med | **Active branch. Spec ready. Start here.** |
+| #279 | CloudEvent adapter for MessageReceivedEvent | S | Low | Independent, standalone |
+| #233 | Complete ARC42STORIES.MD | L | High | Docs; ~20 blog entries as source |
+| #218 | Consolidate `ChannelService.create()` overloads | M | Med | Refactor; deferred from connectors#6 |
 
 ## References
 
 | What | Path |
 |------|------|
-| Garden entry | `GE-20260617-54b75b` — Hibernate Reactive Panache positional param bug |
+| #261 spec | `specs/2026-06-17-slack-channel-backend-design.md` (workspace) |
+| Garden entry | `GE-20260618-a4032c` — local files show fix, CI fails: check `git branch --all --contains <sha>` |
+| Diary entry | `blog/2026-06-18-mdp01-the-fix-that-missed-main.md` |
 | Previous handover | `git show HEAD~1:HANDOFF.md` |
