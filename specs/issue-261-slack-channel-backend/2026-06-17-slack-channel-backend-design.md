@@ -105,7 +105,7 @@ bindingStore.put(b);
 
 ```java
 @Entity
-@Table(name = "slack_thread_cache")
+@Table(name = "slack_thread_entry")
 public class SlackThreadEntry extends PanacheEntityBase {
 
     @Id
@@ -151,17 +151,17 @@ CREATE TABLE slack_bot_binding (
 ### V24__slack_thread_cache.sql
 
 ```sql
-CREATE TABLE slack_thread_cache (
+CREATE TABLE slack_thread_entry (
     corr_id     UUID        NOT NULL,   -- natural PK (corrId from onInboundMessage)
     channel_id  UUID        NOT NULL,
     root_ts     VARCHAR(64) NOT NULL,   -- Slack thread root timestamp
     created_at  TIMESTAMP   NOT NULL,
-    CONSTRAINT pk_slack_thread_cache PRIMARY KEY (corr_id)
+    CONSTRAINT pk_slack_thread_entry PRIMARY KEY (corr_id)
 );
-CREATE INDEX idx_slack_thread_channel ON slack_thread_cache (channel_id);
+CREATE INDEX idx_slack_thread_entry_channel ON slack_thread_entry (channel_id);
 ```
 
-One index: `idx_slack_thread_channel (channel_id)` — for `deleteAllForChannel()` and `findAllForChannel()` (loadForChannel recovery). No reverse lookup index is needed — see Thread anchor design decision below.
+One index: `idx_slack_thread_entry_channel (channel_id)` — for `deleteAllForChannel()` and `findAllForChannel()` (loadForChannel recovery). No reverse lookup index is needed — see Thread anchor design decision below.
 
 ---
 
@@ -245,7 +245,7 @@ public class JpaSlackThreadCacheStore {
     }
 
     public List<SlackThreadEntry> findAllForChannel(UUID channelId) {
-        return SlackThreadEntry.list("channelId = ?1", channelId);  // idx_slack_thread_channel
+        return SlackThreadEntry.list("channelId = ?1", channelId);  // idx_slack_thread_entry_channel
     }
 
     // findCorrIdByRootTs intentionally absent — see Thread anchor design decision.
@@ -269,7 +269,7 @@ public class JpaSlackThreadCacheStore {
 
     @Transactional
     public void deleteAllForChannel(UUID channelId) {
-        SlackThreadEntry.delete("channelId = ?1", channelId);  // idx_slack_thread_channel
+        SlackThreadEntry.delete("channelId = ?1", channelId);  // idx_slack_thread_entry_channel
     }
 
     @Transactional
@@ -618,13 +618,15 @@ public record SlackBindingView(UUID channelId, String credentialRef, String slac
 ```
 1. CacheEntry entry = channelCache.get(channelId)    // must capture slackChannelId before evict()
 2. 404 if entry == null and DB has no binding
-3. backend.evict(channelId)                          // stops inbound routing atomically
+3. backend.evict(channelId)                          // stops inbound routing atomically (in-memory only)
 4. gateway.deregisterBackend(channelId, BACKEND_ID)  // stops fanOut routing
-5. threadCacheStore.deleteAllForChannel(channelId)   // purge thread history — after evict(), post()
-                                                     // returns immediately on missing CacheEntry
-                                                     // so rows are orphaned; delete is correct cleanup
-6. bindingStore.delete(channelId)                    // DB binding last
-7. 204
+5. bindingStore.delete(channelId)                    // DB binding
+6. 204
+// Note: SlackThreadEntry rows are NOT deleted here.
+// After evict(), post() finds no CacheEntry and returns early — rows are functionally orphaned.
+// TTL cleanup (SlackThreadCacheCleanupJob) handles them on its daily run.
+// In-flight commitments that resolve before TTL still generate RESPONSE posts;
+// those posts simply hit the "no CacheEntry" early return (DEBUG log) rather than reaching Slack.
 ```
 
 `close()` is NOT called from `delete()` — `close()` has channel-deletion semantics and is only called by `ChannelGateway.closeChannel()`.
