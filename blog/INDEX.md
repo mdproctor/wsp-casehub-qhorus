@@ -3,6 +3,7 @@
 | File | Date | Title |
 |------|------|-------|
 | [2026-06-18-mdp01-the-fix-that-missed-main.md](2026-06-18-mdp01-the-fix-that-missed-main.md) | 2026-06-18 | CI red from a fix that landed on a branch but never reached main; full audit — 11 branches stamped, #285/#286 closed |
+| [2026-06-18-mdp02-slack-thread-cache.md](2026-06-18-mdp02-slack-thread-cache.md) | 2026-06-18 | SlackChannelBackend shipped (#261) — thread continuity via composite cache, write-before-dispatch race fix, Hibernate L1 and package registration gotchas |
 | [2026-06-17-mdp01-three-problems-one-queue.md](2026-06-17-mdp01-three-problems-one-queue.md) | 2026-06-17 | Three cross-repo issues shipped (#282, #280, #281 closed) |
 | [2026-06-16-mdp01-when-advisory-makes-orphans.md](2026-06-16-mdp01-when-advisory-makes-orphans.md) | 2026-06-16 | Advisory type enforcement (#271): removing client-side validate() from MCP tools, orphan Commitment discovery |
 | [2026-06-13-mdp01-ten-issues-one-stream.md](2026-06-13-mdp01-ten-issues-one-stream.md) | 2026-06-13 | S/XS batch (#276+): CDI @DefaultBean blast radius, Set<MessageType> type-safety migration, A2A SSE streaming with CompletionStage sink-close gotcha, reactive SPI SPI fix |
