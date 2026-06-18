@@ -317,6 +317,15 @@ if (!result.ok()) {
     return;
 }
 
+// Track thread misses — correlationId was set but no anchor exists in memory or DB.
+// This should not happen in normal operation: onInboundMessage() writes the anchor before
+// calling receiveHumanMessage(), so post() should always find it. A miss here indicates
+// an edge case (slackTs was null on inbound, or a DB write failure in onInboundMessage()).
+if (message.correlationId() != null && threadTs == null) {
+    meterRegistry.counter("slack_thread_miss_total",
+                          "channel_id", channel.id().toString()).increment();
+}
+
 // Anchor thread on first successful post for this correlationId
 if (message.correlationId() != null && threadTs == null && result.ts() != null) {
     String corrIdStr = message.correlationId().toString();
@@ -524,7 +533,24 @@ public record SlackBindingView(UUID channelId, String credentialRef, String slac
 
 ## `SlackThreadCacheCleanupJob`
 
-`@ApplicationScoped`, `@Scheduled(every = "24h")`. Calls `threadCacheStore.deleteOlderThan(Instant.now().minus(30, DAYS))`. Cleans up rows for commitments that expired without a terminal message reaching the backend.
+`@ApplicationScoped`. Both the cleanup interval and the retention period are configurable:
+
+```java
+@ConfigProperty(name = "casehub.qhorus.slack-channel.thread-cache-cleanup-interval",
+                defaultValue = "24h")
+String cleanupInterval;   // used in @Scheduled(every = "${...}")
+
+@ConfigProperty(name = "casehub.qhorus.slack-channel.thread-cache-ttl-days",
+                defaultValue = "30")
+int threadCacheTtlDays;
+
+@Scheduled(every = "${casehub.qhorus.slack-channel.thread-cache-cleanup-interval:24h}")
+void cleanup() {
+    threadCacheStore.deleteOlderThan(Instant.now().minus(threadCacheTtlDays, ChronoUnit.DAYS));
+}
+```
+
+Cleans up rows for commitments that expired without a terminal message reaching the backend (server crash mid-commitment, network partition during DONE delivery).
 
 ---
 
@@ -566,6 +592,52 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 ## Known limitations
 
 **Reverse mutual exclusion not enforced.** `SlackBindingResource` rejects a Slack binding when a generic `ChannelConnectorBinding` exists (409). The inverse is not enforced — `connector-backend` must not depend on `slack-channel`. Follow-up issue.
+
+---
+
+## Thread lifecycle — data flow
+
+The complete trace from a human Slack message to an agent thread reply:
+
+**Inbound (human Slack message → Qhorus QUERY/RESPONSE):**
+1. `SlackInboundConnector` receives Slack webhook → fires `InboundMessage(connectorId="slack-inbound", externalChannelRef=slackChannelId, metadata={"slack-ts": ts, "slack-thread-ts"?: threadTs, ...})`
+2. `SlackChannelBackend.onInboundMessage()`:
+   - Route to `ChannelRef` via `slackIndex` (O(1) — slackChannelId → Qhorus channelId)
+   - Thread context resolution:
+     - Thread reply + cache hit: `slackThreadTs` → DB reverse lookup → corrId (RESPONSE path)
+     - New message or cache miss: generate `UUID corrId`, compute `rootTs = slackThreadTs ?? slackTs`
+   - **ORDERING INVARIANT:** write `(channelId, corrId, rootTs)` to DB and memory **before** `receiveHumanMessage()`
+   - Call `gateway.receiveHumanMessage(channelRef, InboundHumanMessage(corrId=corrId.toString()))`
+3. `SlackInboundNormaliser.normalise()` — infers COMMAND / RESPONSE / QUERY; passes `raw.correlationId()` through
+4. `MessageService.dispatch(MessageDispatch(correlationId=corrId.toString()))` → persists `Message`, writes ledger entry
+5. `fanOut()` fires for the dispatched message and for the normaliser telemetry EVENT; both call `post()`. The EVENT returns immediately at the type guard. No net Slack API call for the inbound dispatch.
+
+**Outbound (agent RESPONSE → Slack thread reply):**
+6. Agent reads QUERY via `check_messages`, sees `correlationId=corrId`
+7. Agent calls `send_message(type=RESPONSE, correlationId=corrId, inReplyTo=queryMessageId)`
+8. `MessageService.dispatch()` → persists → `fanOut()` spawns virtual thread
+9. `SlackChannelBackend.post(channel, OutboundMessage(type=RESPONSE, correlationId=UUID))`
+10. Thread lookup: `corrIdStr → threadTs` from memory (loaded at channel init); DB fallback if memory miss (e.g. post-restart)
+11. `slackBotClient.postMessage(token, slackChannelId, content, threadTs=rootTs)` → reply appears in the human's original Slack thread
+
+**Key invariant the data flow protects:** The thread anchor (step 2 write) happens before `receiveHumanMessage()` (step 2 call), which happens before the message is visible to the agent (step 6). This ordering guarantees that when the agent sends RESPONSE and `post()` runs (step 9), the thread anchor already exists in both memory and DB.
+
+---
+
+## Design decisions and non-obvious invariants
+
+This section captures decisions that would be non-obvious from the code alone.
+
+| Decision | Why |
+|---|---|
+| Generate corrId in `onInboundMessage()`, not in `post()` | `post()` runs on a virtual thread from `fanOut()`. Generating corrId there would require a thread cache write AFTER the outbound message is dispatched — wrong direction. The corrId must exist before the inbound message reaches the agent. |
+| `rootTs = slackThreadTs ?? slackTs` for cache-miss thread replies | Slack `thread_ts` must equal the ROOT message's timestamp. Storing the reply's `slackTs` would cause Slack to reject the `postMessage` or create a sub-sub-thread. |
+| DB-backed thread cache, not in-memory only | Server restarts between a COMMAND and its RESPONSE would send the reply to channel root without DB persistence. The `onChannelInitialised()` recovery load restores the mapping. |
+| Separate `close()` / `evict()` / `delete()` paths | `close()` is channel-deletion (total cleanup including DB rows). `evict()` is admin unbinding (in-memory only — in-flight commits can still resolve). `delete()` is the REST endpoint (calls `evict()`, then separately deletes DB thread rows because the binding is gone so orphaned rows serve no purpose). |
+| UUID PK on `SlackThreadCache`, not BIGINT | All qhorus entities use UUID PKs; BIGINT would require a sequence in the DDL and `@GeneratedValue` in the entity, diverging from platform convention for no benefit at this scale. |
+| Tier 1.5 credential reference | Tier 1 (`@ConfigProperty`) is single-workspace. Tier 2 (`EndpointRegistry.credentialRef`) is not yet implemented. Tier 1.5 stores a logical name in DB, resolved from `casehub.qhorus.slack-channel.credentials.<name>` at call time — supports multiple Slack workspaces without a secrets backend. |
+| Explicit DONE/FAILURE/DECLINE enumeration for eviction | `MessageType.isTerminal()` returns true for HANDOFF — must NOT evict (delegated agent continues in same Slack thread). DECLINE is not in `isTerminal()` but must evict. Using `isTerminal()` would be wrong in both directions. |
+| Blanket WARN→DEBUG in `ConnectorChannelBackend` | Every Slack inbound event before a binding is configured fires WARN in `ConnectorChannelBackend` (which has no `ChannelConnectorBinding`). The `inbound_messages_discarded_total{connector_id}` counter is the correct alerting surface. Coupling `ConnectorChannelBackend` to `SlackChannelBackend` to be selective would violate module independence. |
 
 ---
 
