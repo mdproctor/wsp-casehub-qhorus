@@ -159,12 +159,9 @@ CREATE TABLE slack_thread_cache (
     CONSTRAINT pk_slack_thread_cache PRIMARY KEY (corr_id)
 );
 CREATE INDEX idx_slack_thread_channel ON slack_thread_cache (channel_id);
-CREATE INDEX idx_slack_thread_root_ts ON slack_thread_cache (channel_id, root_ts);
 ```
 
-Two indexes:
-- `idx_slack_thread_channel (channel_id)` — for `deleteAllForChannel()` and `findAllForChannel()` (loadForChannel recovery)
-- `idx_slack_thread_root_ts (channel_id, root_ts)` — for the inbound reverse lookup: given a Slack `thread_ts`, find the `corrId` that anchored this thread. The composite index is required — without it, the reverse lookup is a full table scan.
+One index: `idx_slack_thread_channel (channel_id)` — for `deleteAllForChannel()` and `findAllForChannel()` (loadForChannel recovery). No reverse lookup index is needed — see Thread anchor design decision below.
 
 ---
 
@@ -251,12 +248,7 @@ public class JpaSlackThreadCacheStore {
         return SlackThreadEntry.list("channelId = ?1", channelId);  // idx_slack_thread_channel
     }
 
-    public Optional<UUID> findCorrIdByRootTs(UUID channelId, String rootTs) {
-        return SlackThreadEntry
-            .<SlackThreadEntry>find("channelId = ?1 AND rootTs = ?2", channelId, rootTs)
-            .firstResultOptional()
-            .map(e -> e.corrId);                             // idx_slack_thread_root_ts
-    }
+    // findCorrIdByRootTs intentionally absent — see Thread anchor design decision.
 
     // --- Writes (all @Transactional) ---
 
@@ -318,11 +310,6 @@ public class SlackThreadCache {
                             .map(m -> m.get(corrId)).orElse(null);
         if (ts != null) return Optional.of(ts);
         return store.findByCorrId(corrId).map(e -> e.rootTs);  // DB fallback
-    }
-
-    /** Called from onInboundMessage() — reverse lookup, always DB (no reverse in-memory index). */
-    public Optional<UUID> getCorrIdByRootTs(UUID channelId, String rootTs) {
-        return store.findCorrIdByRootTs(channelId, rootTs);
     }
 
     /** Called from onChannelInitialised() — restart recovery: load DB into memory. */
@@ -496,32 +483,27 @@ String slackThreadTs = msg.metadata().get("slack-thread-ts");
 String slackTs       = msg.metadata().get("slack-ts");
 String corrId;
 
-UUID corrIdUUID;
-if (slackThreadTs != null && !slackThreadTs.equals(slackTs)) {
-    // Thread reply — reverse-lookup the corrId that anchored this thread.
-    // Cache miss: treat as new conversation (human replied to a thread we didn't create).
-    corrIdUUID = threadCache.getCorrIdByRootTs(channelRef.id(), slackThreadTs).orElse(null);
-} else {
-    corrIdUUID = null;
-}
+// Always generate a fresh corrId — per-message commitment model.
+// Each inbound human message (top-level or thread reply) starts its own Qhorus commitment.
+// Thread context (slackThreadTs) determines WHERE the agent's response appears in Slack
+// (outbound rootTs), but never which corrId to reuse — reuse would map to a closed or
+// unrelated commitment, which is semantically wrong in the Qhorus speech-act model.
+UUID corrIdUUID = UUID.randomUUID();
 
-if (corrIdUUID == null) {
-    // New top-level message OR unrecognised thread reply — generate corrId and anchor.
-    corrIdUUID = UUID.randomUUID();
+// rootTs: for top-level messages, slackTs is the anchor root.
+// For thread replies, slackThreadTs is the thread root — post() uses this so the agent's
+// RESPONSE appears in the same Slack thread as the human's follow-up.
+String rootTs = (slackThreadTs != null && !slackThreadTs.equals(slackTs))
+        ? slackThreadTs   // thread reply — root is the Slack thread root
+        : slackTs;        // top-level — root is this message itself
 
-    // rootTs: for top-level messages, slackTs IS the root.
-    // For unrecognised thread replies, slackThreadTs is the root — using slackTs would make
-    // Slack reject the thread reply (thread_ts must equal the root message ts, not reply ts).
-    String rootTs = (slackThreadTs != null) ? slackThreadTs : slackTs;
-
-    // ORDERING INVARIANT: ATTEMPT the anchor write before receiveHumanMessage().
-    // receiveHumanMessage() triggers fanOut(). If a RESPONSE arrives at post() before
-    // the in-memory anchor is set, post() misses and posts to channel root.
-    // SlackThreadCache.put() sets in-memory first (never throws), then DB best-effort.
-    // Delivery proceeds regardless of DB outcome.
-    if (rootTs != null) {
-        threadCache.put(channelRef.id(), corrIdUUID, rootTs);
-    }
+// ORDERING INVARIANT: ATTEMPT the anchor write before receiveHumanMessage().
+// receiveHumanMessage() triggers fanOut(). If a RESPONSE arrives at post() before
+// the in-memory anchor is set, post() misses and posts to channel root instead of thread.
+// SlackThreadCache.put() sets in-memory first (never throws), then DB best-effort.
+// Delivery proceeds regardless of DB outcome.
+if (rootTs != null) {
+    threadCache.put(channelRef.id(), corrIdUUID, rootTs);
 }
 
 String corrId = corrIdUUID.toString();
@@ -548,23 +530,17 @@ public class SlackInboundNormaliser implements InboundNormaliser {
 
     @Override
     public NormalisedMessage normalise(ChannelRef channel, InboundHumanMessage raw) {
-        String content      = raw.content();
-        String slackThreadTs = raw.metadata().get("slack-thread-ts");
-        String slackTs      = raw.metadata().get("slack-ts");
+        String content = raw.content();
 
-        // Type inference — ordered by specificity:
-        // 1. Slash command → COMMAND (content != null required; null content → QUERY)
-        // 2. Thread reply with known corrId → RESPONSE
-        // 3. Default → QUERY
-        final MessageType type;
-        if (content != null && content.startsWith("/")) {
-            type = MessageType.COMMAND;
-        } else if (slackThreadTs != null && !slackThreadTs.equals(slackTs)
-                   && raw.correlationId() != null) {
-            type = MessageType.RESPONSE;
-        } else {
-            type = MessageType.QUERY;
-        }
+        // Type inference: COMMAND for slash commands, QUERY for everything else.
+        // RESPONSE is intentionally absent — inbound human messages always start a new
+        // Qhorus commitment (per-message model). Thread context (slackThreadTs) determines
+        // WHERE the agent replies in Slack (rootTs → thread_ts in post()), not whether the
+        // human message is a RESPONSE. A human thread reply is a new QUERY in that thread's
+        // conversational context, not a RESPONSE to a previous commitment.
+        final MessageType type = (content != null && content.startsWith("/"))
+                ? MessageType.COMMAND
+                : MessageType.QUERY;
 
         // content may be null for media-only messages (images, files, voice).
         // COMMAND, QUERY, and RESPONSE accept null content at the MessageDispatch level.
@@ -764,6 +740,7 @@ This section captures decisions that would be non-obvious from the code alone.
 | DB-backed thread cache, not in-memory only | Server restarts between a COMMAND and its RESPONSE would send the reply to channel root without DB persistence. The `onChannelInitialised()` recovery load restores the mapping. |
 | Separate `close()` / `evict()` / `delete()` paths | `close()` is channel-deletion (total cleanup including DB rows). `evict()` is admin unbinding (in-memory only — in-flight commits can still resolve). `delete()` is the REST endpoint (calls `evict()`, then separately deletes DB thread rows because the binding is gone so orphaned rows serve no purpose). |
 | UUID PK on `SlackThreadCache`, not BIGINT | All qhorus entities use UUID PKs; BIGINT would require a sequence in the DDL and `@GeneratedValue` in the entity, diverging from platform convention for no benefit at this scale. |
+| Thread anchor = outbound only, not inbound corrId source | `slackThreadTs` determines WHERE the agent's reply appears in Slack (rootTs for post()), but never which corrId to reuse for inbound routing. Each inbound human message always generates a fresh corrId — per-message commitment model. Reusing a previous corrId would route a human follow-up to an already-closed or unrelated Qhorus commitment. The reverse lookup `(channelId, rootTs) → corrId` was removed: (1) it maps to multiple corrIds in the same Slack thread (non-unique); (2) its only coherent use case is a per-thread commitment model, which conflicts with per-message. No `idx_slack_thread_root_ts` index. |
 | Per-binding credential reference (PP-20260617-per-binding-credential-ref) | Static `@ConfigProperty` is single-workspace (Tier 1). `EndpointRegistry.credentialRef` is not yet implemented (Tier 2 — deferred, platform#103). Per-binding reference stores a logical name in `credential_ref`, resolved from `casehub.qhorus.slack-channel.credentials.<name>` at call time — supports multiple Slack workspaces without a secrets backend. Token never stored in DB. |
 | Explicit DONE/FAILURE/DECLINE enumeration for eviction (not `isTerminal()`) | `MessageType.isTerminal()` is wrong in BOTH directions for this use: (1) it returns true for HANDOFF — HANDOFF must NOT evict, because the delegated agent continues in the same Slack thread; (2) it returns false for DECLINE — DECLINE must evict, because the commitment is rejected and the conversation is done. Explicit `DONE \|\| FAILURE \|\| DECLINE` is the only correct predicate. |
 | Blanket WARN→DEBUG in `ConnectorChannelBackend` | Every Slack inbound event before a binding is configured fires WARN in `ConnectorChannelBackend` (which has no `ChannelConnectorBinding`). The `inbound_messages_discarded_total{connector_id}` counter is the correct alerting surface. Coupling `ConnectorChannelBackend` to `SlackChannelBackend` to be selective would violate module independence. |
