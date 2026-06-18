@@ -544,7 +544,11 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 
 `SlackChannelBackendTest` — `InMemorySlackBotBindingStore`, `InMemorySlackThreadCacheStore`, `@InjectMock SlackBotClient`, `@InjectMock ChannelGateway`. Cover:
 - `post()`: EVENT type → immediate return (no postMessage call), null content → immediate return, missing CacheEntry → ERROR log + return, first post with corrId (top-level + cache written to memory and DB), second post same corrId (thread reply using cached ts), DONE/FAILURE/DECLINE evict from memory and DB, RESPONSE does NOT evict, HANDOFF does NOT evict, failed Slack API call → WARN + no cache mutation
-- `onInboundMessage()`: non-Slack connector → filtered, unknown slackChannelId → DEBUG + counter, new top-level message → corrId generated, DB written before gateway, passed through, thread reply (cache hit) → corrId found + RESPONSE type, thread reply (cache miss) → new corrId + QUERY type, null content → passes through with no NPE
+- `onInboundMessage()`: non-Slack connector → filtered, unknown slackChannelId → DEBUG + counter
+  - New top-level message (no `slack-thread-ts`): corrId generated, rootTs = `slackTs`, written to DB BEFORE gateway call (ordering invariant), corrId passed in InboundHumanMessage, normaliser returns QUERY
+  - Thread reply, cache hit: corrId found via DB reverse lookup (`slack-thread-ts → corrId`), corrId passed through, normaliser returns RESPONSE
+  - Thread reply, cache miss: corrId generated, rootTs = `slackThreadTs` (not `slackTs` — thread root, not reply ts), written to DB BEFORE gateway call, normaliser returns QUERY
+  - Null content (media-only message): passes through to gateway with no NPE; normaliser returns QUERY with null content
 - `onChannelInitialised()`: DB rows loaded into in-memory cache (restart recovery path)
 
 `SlackInboundNormaliserTest` — pure logic. Cover: slash command → COMMAND, slash command with null content → QUERY (no NPE), thread reply + corrId → RESPONSE, new message → QUERY, thread-ts == slack-ts (human thread root) → QUERY.
@@ -553,7 +557,7 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 
 `SlackChannelBackendIT` — `@InjectMock SlackBotClient`. Lifecycle: bind → init event → inbound new message → corrId generated and written to DB → agent RESPONSE → thread reply asserted. Assert `slackBotClient.postMessage()` called `times(1)` — the normaliser telemetry EVENT from `receiveHumanMessage()` returns immediately at the EVENT type guard. Assert `messageService` called `times(2)` per inbound message (content dispatch + telemetry EVENT).
 
-`SlackBindingResourceIT` — PUT (200), GET (200, no token), PUT unknown credentialRef (400 with key name), DELETE (204), double-DELETE (404), PUT on channel with generic binding (409).
+`SlackBindingResourceIT` — PUT (200), GET (200, no token), PUT unknown credentialRef (400 with key name), DELETE (204), double-DELETE (404), PUT on channel with generic `ChannelConnectorBinding` pre-check (409 from step 2), PUT with mocked `gateway.initChannel()` throwing `DuplicateParticipatingBackendException` → 409 with no net binding in store (tests the race-condition catch path: binding save is undone in the same transaction, `findByChannelId()` returns empty after the call).
 
 `FlywayMigrationSchemaTest` — plain-Java Flyway + H2. Runs V1–V24 + V2000. Asserts both tables with correct columns, constraints, indexes.
 
