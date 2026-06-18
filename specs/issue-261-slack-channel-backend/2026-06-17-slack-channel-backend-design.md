@@ -275,6 +275,11 @@ public class JpaSlackThreadCacheStore implements SlackThreadCacheStore {
 
 **`InMemorySlackThreadCacheStore`** — `@Alternative @Priority(1) @ApplicationScoped` in `testing/`. No `@Transactional` needed — pure in-memory ConcurrentHashMap.
 
+**Method naming conventions (avoid confusion):**
+- `delete(UUID channelId, String correlationId)` — two-arg form, deletes **one** entry. Used by `post()` for terminal commitment eviction.
+- `deleteAllForChannel(UUID channelId)` — one-arg form, deletes **all** entries for the channel. Used by `close()` (channel deletion) and `delete()` REST endpoint. The "All" suffix is intentional — an implementer must not call the two-arg form in `close()`.
+- In-memory counterpart: `threadCache.remove(channelId)` (removes the entire inner map) vs `threadCache.get(channelId).remove(corrId)` (removes one entry). The distinction mirrors the store signatures.
+
 ---
 
 ## `SlackChannelBackend`
@@ -456,21 +461,36 @@ if (corrId == null) {
     // or Slack will reject the reply (thread_ts must equal the root message ts, not a reply ts).
     String rootTs = (slackThreadTs != null) ? slackThreadTs : slackTs;
 
-    // ORDERING INVARIANT: write to thread cache BEFORE calling receiveHumanMessage().
-    // receiveHumanMessage() dispatches the COMMAND/QUERY synchronously, which triggers
-    // fanOut(). If a RESPONSE arrives at post() before this write completes, post()
-    // misses the cache and posts to the channel root instead of the correct Slack thread.
-    // The write must complete before the gateway call — this ordering is non-negotiable.
+    // ORDERING INVARIANT: ATTEMPT the anchor write before calling receiveHumanMessage().
+    // receiveHumanMessage() dispatches the COMMAND/QUERY synchronously via messageService,
+    // which triggers fanOut(). If a RESPONSE arrives at post() before this write completes,
+    // post() misses the cache and posts to the channel root instead of the correct thread.
+    // Delivery (receiveHumanMessage) MUST NOT be blocked by an anchor write failure —
+    // the anchor is an observability aid, not a delivery precondition.
+    //
+    // Ordering within the try block:
+    //   1. In-memory first — always succeeds, serves post() for this JVM session.
+    //   2. DB second (best-effort) — durable on commit; benign failure if it throws.
+    //
+    // If DB write fails: in-memory entry remains (serving post() correctly); DB has no row.
+    // On next restart, the absent DB entry means a cache miss — the documented recovery path.
+    // JPA transaction rollback does NOT undo ConcurrentHashMap.put(), so in-memory always
+    // reflects what was set even if the DB transaction rolls back.
     if (rootTs != null) {
-        threadCacheStore.put(channelRef.id(), corrId, rootTs);
         threadCache.computeIfAbsent(channelRef.id(), k -> new ConcurrentHashMap<>())
-                   .put(corrId, rootTs);
+                   .put(corrId, rootTs);                                    // in-memory first
+        try {
+            threadCacheStore.put(channelRef.id(), corrId, rootTs);          // DB second (best-effort)
+        } catch (Exception e) {
+            LOG.warnf(e, "Thread anchor DB write failed for channel %s corrId %s — " +
+                      "delivery proceeds; in-memory anchor retained; restart recovery " +
+                      "disabled for this corrId", channelRef.id(), corrId);
+        }
     }
 }
 
-// content may be null for media-only Slack messages (images, files, voice).
-// QUERY and RESPONSE accept null content — MessageDispatch.build() has no content
-// requirement for these types.
+// Delivery always proceeds — anchor write outcome does not block message delivery.
+// content may be null for media-only Slack messages; QUERY/RESPONSE accept null content.
 gateway.receiveHumanMessage(channelRef,
     new InboundHumanMessage(msg.externalSenderId(), msg.content(),
                              msg.receivedAt(), msg.metadata(), corrId, null));
@@ -638,9 +658,10 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 `SlackChannelBackendTest` — `InMemorySlackBotBindingStore`, `InMemorySlackThreadCacheStore`, `@InjectMock SlackBotClient`, `@InjectMock ChannelGateway`. Cover:
 - `post()`: EVENT type → immediate return (no postMessage call), null content → immediate return, missing CacheEntry → ERROR log + return, first post with corrId (top-level + cache written to memory and DB), second post same corrId (thread reply using cached ts), DONE/FAILURE/DECLINE evict from memory and DB, RESPONSE does NOT evict, HANDOFF does NOT evict, failed Slack API call → WARN + no cache mutation
 - `onInboundMessage()`: non-Slack connector → filtered, unknown slackChannelId → DEBUG + counter
-  - New top-level message (no `slack-thread-ts`): corrId generated, rootTs = `slackTs`, written to DB BEFORE gateway call (ordering invariant), corrId passed in InboundHumanMessage, normaliser returns QUERY
+  - New top-level message (no `slack-thread-ts`): in-memory anchor set first, DB put attempted (best-effort), corrId passed in InboundHumanMessage, normaliser returns QUERY
   - Thread reply, cache hit: corrId found via DB reverse lookup (`slack-thread-ts → corrId`), corrId passed through, normaliser returns RESPONSE
-  - Thread reply, cache miss: corrId generated, rootTs = `slackThreadTs` (not `slackTs` — thread root, not reply ts), written to DB BEFORE gateway call, normaliser returns QUERY
+  - Thread reply, cache miss: corrId generated, rootTs = `slackThreadTs` (not `slackTs` — thread root, not reply ts), in-memory first then DB best-effort, normaliser returns QUERY
+  - **`threadCacheStore.put()` throws**: in-memory update already succeeded (set before try-catch); `receiveHumanMessage()` is still called; WARN logged; assert gateway call happened and anchor is in memory but not in DB
   - Null content (media-only message): passes through to gateway with no NPE; normaliser returns QUERY with null content
 - `onChannelInitialised()`: DB rows loaded into in-memory cache (restart recovery path)
 
