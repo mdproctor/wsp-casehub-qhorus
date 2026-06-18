@@ -624,19 +624,18 @@ public record SlackBindingView(UUID channelId, String credentialRef, String slac
 ### DELETE `/{channelId}` (ordering matters — read cache before DB delete)
 
 ```
-1. CacheEntry entry = channelCache.get(channelId)    // must capture slackChannelId before evict()
-2. 404 if entry == null and DB has no binding
-3. backend.evict(channelId)                          // stops inbound routing atomically (in-memory only)
-4. gateway.deregisterBackend(channelId, BACKEND_ID)  // stops fanOut routing
-5. bindingStore.delete(channelId)                    // DB binding
-6. 204
-// Note: SlackThreadEntry rows are NOT deleted here.
-// After evict(), post() finds no CacheEntry and returns early — rows are functionally orphaned.
-// TTL cleanup (SlackThreadCacheCleanupJob) handles them on its daily run.
-// In-flight commitments that resolve before TTL still generate RESPONSE posts;
-// those posts simply hit the "no CacheEntry" early return (DEBUG log) rather than reaching Slack.
+1. CacheEntry entry = channelCache.get(channelId)         // capture slackChannelId before evict()
+2. If entry == null AND DB has no binding → return 204 immediately (idempotent DELETE)
+3. backend.evict(channelId)                               // stops inbound routing atomically (in-memory only)
+4. gateway.deregisterBackend(channelId, BACKEND_ID)       // stops fanOut routing
+5. threadCache.deleteAllForChannel(channelId)             // purge DB thread rows; in-flight commits are
+                                                          // already broken (post() returns early after evict)
+                                                          // so rows are functionally orphaned — clean up now
+6. bindingStore.delete(channelId)                         // DB binding
+7. 204
 ```
 
+**Idempotent:** DELETE returns 204 whether or not the binding exists. Desired end state (no binding) is achieved in both cases.  
 `close()` is NOT called from `delete()` — `close()` has channel-deletion semantics and is only called by `ChannelGateway.closeChannel()`.
 
 ---
