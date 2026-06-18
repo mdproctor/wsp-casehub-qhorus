@@ -23,6 +23,34 @@ slack-channel/
   jandex:      jandex-maven-plugin (required for CDI bean scanning)
 ```
 
+**Files to create (complete listing):**
+
+```
+slack-channel/
+  pom.xml
+  src/main/java/io/casehub/qhorus/slack/channel/
+    SlackBotBinding.java               — JPA entity (@Entity, extends PanacheEntityBase)
+    SlackBotBindingStore.java          — store SPI interface
+    JpaSlackBotBindingStore.java       — Panache-backed store impl (@ApplicationScoped)
+    SlackThreadCache.java              — JPA entity (@Entity, extends PanacheEntityBase)
+    SlackThreadCacheStore.java         — store SPI interface
+    JpaSlackThreadCacheStore.java      — Panache-backed store impl (@ApplicationScoped)
+    SlackChannelBackend.java           — HumanParticipatingChannelBackend impl (@ApplicationScoped)
+    SlackInboundNormaliser.java        — InboundNormaliser impl (@ApplicationScoped)
+    SlackBindingResource.java          — JAX-RS resource (@ApplicationScoped)
+    SlackBindingRequest.java           — request record
+    SlackBindingView.java              — response record
+    SlackThreadCacheCleanupJob.java    — @Scheduled TTL eviction (@ApplicationScoped)
+  src/main/resources/
+    db/slack-channel/migration/
+      V23__slack_bot_binding.sql
+      V24__slack_thread_cache.sql
+
+testing/src/main/java/io/casehub/qhorus/testing/
+    InMemorySlackBotBindingStore.java  — @Alternative @Priority(1)
+    InMemorySlackThreadCacheStore.java — @Alternative @Priority(1)
+```
+
 Added to root `pom.xml` `<modules>` list alongside `connector-backend`.
 
 **Compile dependencies:**
@@ -317,16 +345,19 @@ if (!result.ok()) {
     return;
 }
 
-// Track thread misses — correlationId was set but no anchor exists in memory or DB.
-// This should not happen in normal operation: onInboundMessage() writes the anchor before
-// calling receiveHumanMessage(), so post() should always find it. A miss here indicates
-// an edge case (slackTs was null on inbound, or a DB write failure in onInboundMessage()).
+// Track thread misses — correlationId was set but no anchor found in memory or DB.
+// Common recovery path: after a server restart, onChannelInitialised() reloads anchors
+// from DB so this should rarely fire. Fires for edge cases where slackTs was null on
+// inbound (anchor not written) or the DB write in onInboundMessage() failed.
+// Counter fires BEFORE the recovery anchor below — the miss is counted even when
+// the post succeeds and result.ts() creates a new anchor.
 if (message.correlationId() != null && threadTs == null) {
     meterRegistry.counter("slack_thread_miss_total",
                           "channel_id", channel.id().toString()).increment();
 }
 
-// Anchor thread on first successful post for this correlationId
+// Recovery: anchor this corrId to the new top-level post so subsequent RESPONSE/STATUS/DONE
+// posts thread correctly. This IS v1 behaviour — not deferred to v1.5.
 if (message.correlationId() != null && threadTs == null && result.ts() != null) {
     String corrIdStr = message.correlationId().toString();
     threadCache.computeIfAbsent(channel.id(), k -> new ConcurrentHashMap<>())
@@ -456,7 +487,7 @@ public class SlackInboundNormaliser implements InboundNormaliser {
 }
 ```
 
-**Slash-command detection note:** COMMAND type is inferred from a leading `/`. The null guard (`content != null`) prevents NPE for media-only Slack messages. COMMAND requires neither correlationId nor inReplyTo in `MessageDispatch.build()` — the agent receives the COMMAND and responds independently.
+**Slash-command detection note:** COMMAND type is inferred from a leading `/`. `SlackInboundConnector.parseMessages()` uses `event.getString("text", "")` — content is always non-null (empty string `""` for media-only Slack messages such as images, files, and voice). The `content != null` guard is therefore defensive for future callers that may pass null, not an active fix for the current Slack path. For empty-string content, `"".startsWith("/")` returns false and type defaults to QUERY. COMMAND requires neither correlationId nor inReplyTo in `MessageDispatch.build()` — the agent receives the COMMAND and responds independently.
 
 ---
 
@@ -635,8 +666,8 @@ This section captures decisions that would be non-obvious from the code alone.
 | DB-backed thread cache, not in-memory only | Server restarts between a COMMAND and its RESPONSE would send the reply to channel root without DB persistence. The `onChannelInitialised()` recovery load restores the mapping. |
 | Separate `close()` / `evict()` / `delete()` paths | `close()` is channel-deletion (total cleanup including DB rows). `evict()` is admin unbinding (in-memory only — in-flight commits can still resolve). `delete()` is the REST endpoint (calls `evict()`, then separately deletes DB thread rows because the binding is gone so orphaned rows serve no purpose). |
 | UUID PK on `SlackThreadCache`, not BIGINT | All qhorus entities use UUID PKs; BIGINT would require a sequence in the DDL and `@GeneratedValue` in the entity, diverging from platform convention for no benefit at this scale. |
-| Tier 1.5 credential reference | Tier 1 (`@ConfigProperty`) is single-workspace. Tier 2 (`EndpointRegistry.credentialRef`) is not yet implemented. Tier 1.5 stores a logical name in DB, resolved from `casehub.qhorus.slack-channel.credentials.<name>` at call time — supports multiple Slack workspaces without a secrets backend. |
-| Explicit DONE/FAILURE/DECLINE enumeration for eviction | `MessageType.isTerminal()` returns true for HANDOFF — must NOT evict (delegated agent continues in same Slack thread). DECLINE is not in `isTerminal()` but must evict. Using `isTerminal()` would be wrong in both directions. |
+| Per-binding credential reference (PP-20260617-per-binding-credential-ref) | Static `@ConfigProperty` is single-workspace (Tier 1). `EndpointRegistry.credentialRef` is not yet implemented (Tier 2 — deferred, platform#103). Per-binding reference stores a logical name in `credential_ref`, resolved from `casehub.qhorus.slack-channel.credentials.<name>` at call time — supports multiple Slack workspaces without a secrets backend. Token never stored in DB. |
+| Explicit DONE/FAILURE/DECLINE enumeration for eviction (not `isTerminal()`) | `MessageType.isTerminal()` is wrong in BOTH directions for this use: (1) it returns true for HANDOFF — HANDOFF must NOT evict, because the delegated agent continues in the same Slack thread; (2) it returns false for DECLINE — DECLINE must evict, because the commitment is rejected and the conversation is done. Explicit `DONE \|\| FAILURE \|\| DECLINE` is the only correct predicate. |
 | Blanket WARN→DEBUG in `ConnectorChannelBackend` | Every Slack inbound event before a binding is configured fires WARN in `ConnectorChannelBackend` (which has no `ChannelConnectorBinding`). The `inbound_messages_discarded_total{connector_id}` counter is the correct alerting surface. Coupling `ConnectorChannelBackend` to `SlackChannelBackend` to be selective would violate module independence. |
 
 ---
