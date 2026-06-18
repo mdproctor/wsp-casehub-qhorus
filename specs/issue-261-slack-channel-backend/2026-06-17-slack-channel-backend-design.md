@@ -242,8 +242,38 @@ void deleteAllForChannel(UUID channelId);                              // channe
 int deleteOlderThan(Instant threshold);                                // TTL cleanup
 ```
 
-**`JpaSlackThreadCacheStore`** — `@ApplicationScoped`, named `qhorus` PU.  
-**`InMemorySlackThreadCacheStore`** — `@Alternative @Priority(1) @ApplicationScoped` in `testing/`.
+**`JpaSlackThreadCacheStore`** — `@ApplicationScoped`, named `qhorus` PU. All write methods must be `@Transactional`.
+
+**Transaction requirement (critical):** `post()` runs on a raw JDK virtual thread spawned by `ChannelGateway.fanOut()` via `Thread.ofVirtual().start(...)`. This thread has no active CDI request scope and no JTA transaction. Panache writes without an active JTA transaction throw `TransactionRequiredException`, which `fanOut()`'s `catch (Exception ex)` silently swallows — the Slack post succeeds but the recovery anchor / eviction never fires. `@Transactional` with REQUIRED propagation fixes both paths:
+- Called from a virtual thread (no active tx): starts a new JTA transaction.
+- Called from `close()` inside `delete_channel` (which is `@Transactional`): joins the outer transaction.
+
+Same consideration applies to `put()` called from `onInboundMessage()` (`@ObservesAsync` — ManagedExecutor thread with no active JTA tx by default).
+
+```java
+@ApplicationScoped
+public class JpaSlackThreadCacheStore implements SlackThreadCacheStore {
+
+    @Transactional
+    public void put(UUID channelId, String correlationId, String threadTs) { ... }
+
+    @Transactional
+    public void delete(UUID channelId, String correlationId) { ... }
+
+    @Transactional
+    public void deleteAllForChannel(UUID channelId) { ... }
+
+    @Transactional
+    public int deleteOlderThan(Instant threshold) { ... }
+
+    // Read-only methods: @Transactional(readOnly=true) recommended for EntityManager lifecycle
+    public Optional<String> findThreadTs(UUID channelId, String correlationId) { ... }
+    public Optional<String> findCorrelationId(UUID channelId, String threadTs) { ... }
+    public List<SlackThreadCache> findByChannelId(UUID channelId) { ... }
+}
+```
+
+**`InMemorySlackThreadCacheStore`** — `@Alternative @Priority(1) @ApplicationScoped` in `testing/`. No `@Transactional` needed — pure in-memory ConcurrentHashMap.
 
 ---
 
@@ -356,21 +386,27 @@ if (message.correlationId() != null && threadTs == null) {
                           "channel_id", channel.id().toString()).increment();
 }
 
-// Recovery: anchor this corrId to the new top-level post so subsequent RESPONSE/STATUS/DONE
-// posts thread correctly. This IS v1 behaviour — not deferred to v1.5.
-if (message.correlationId() != null && threadTs == null && result.ts() != null) {
+boolean isTerminalType = (message.type() == DONE || message.type() == FAILURE
+                          || message.type() == DECLINE);
+
+// Recovery: anchor this corrId to the new top-level post so subsequent RESPONSE/STATUS posts
+// thread correctly. This IS v1 behaviour — not deferred. Skip for terminal types: writing
+// the anchor and then immediately evicting it (steps below) is a wasteful INSERT+DELETE cycle
+// with no net state change. If the type is terminal, there will be no subsequent posts anyway.
+if (message.correlationId() != null && threadTs == null && result.ts() != null && !isTerminalType) {
     String corrIdStr = message.correlationId().toString();
     threadCache.computeIfAbsent(channel.id(), k -> new ConcurrentHashMap<>())
                .put(corrIdStr, result.ts());
     threadCacheStore.put(channel.id(), corrIdStr, result.ts());
+    // UX note: recovery creates a NEW top-level bot message, not a reply to the human's
+    // original message. See Known Limitations.
 }
 
 // Evict on terminal commitment resolution.
-// Do NOT use MessageType.isTerminal() — it returns true for HANDOFF (must not evict;
-// delegated agent continues the same thread) and false for DECLINE (must evict).
-// Use explicit enumeration.
-if ((message.type() == DONE || message.type() == FAILURE || message.type() == DECLINE)
-        && message.correlationId() != null) {
+// Do NOT use MessageType.isTerminal(): it includes HANDOFF (must NOT evict — delegated agent
+// continues in same thread) and excludes DECLINE (must evict — commitment rejected).
+// Explicit enumeration is the only correct predicate.
+if (isTerminalType && message.correlationId() != null) {
     String corrIdStr = message.correlationId().toString();
     Map<String, String> channelThread = threadCache.get(channel.id());
     if (channelThread != null) channelThread.remove(corrIdStr);
@@ -623,6 +659,10 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 ## Known limitations
 
 **Reverse mutual exclusion not enforced.** `SlackBindingResource` rejects a Slack binding when a generic `ChannelConnectorBinding` exists (409). The inverse is not enforced — `connector-backend` must not depend on `slack-channel`. Follow-up issue.
+
+**Thread cache miss creates a new top-level bot message, not a thread reply to the human.** On a cache miss in `post()` (e.g., TTL-evicted entry, `slackTs` was null on inbound), the recovery anchor posts as a new top-level Slack message. The commitment's subsequent posts (DONE, STATUS, further RESPONSE) thread under that bot message, not under the human's original message. The human's original question appears "unanswered" in Slack. This is the correct recovery path (avoids total loss of threading) but the UX is visibly different from the normal path. Monitoring: `slack_thread_miss_total{channel_id}` counter.
+
+**`@Transactional` on `JpaSlackThreadCacheStore` write methods is required.** Without it, `put()` and `delete()` called from `post()` (virtual thread, no JTA tx) and from `onInboundMessage()` (`@ObservesAsync` ManagedExecutor, no active JTA tx) throw `TransactionRequiredException`. `fanOut()`'s `catch (Exception ex)` swallows these silently — the Slack post succeeds but anchors/evictions never fire.
 
 ---
 
