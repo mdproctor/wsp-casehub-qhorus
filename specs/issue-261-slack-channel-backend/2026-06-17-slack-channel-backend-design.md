@@ -177,7 +177,29 @@ void put(SlackBotBinding binding);
 void delete(UUID channelId);
 ```
 
-**`JpaSlackBotBindingStore`** — `@ApplicationScoped`, named `qhorus` PU.  
+**`JpaSlackBotBindingStore`** — `@ApplicationScoped`, named `qhorus` PU. Delegates to Panache static methods on `SlackBotBinding` (which extends `PanacheEntityBase`):
+
+```java
+@ApplicationScoped
+public class JpaSlackBotBindingStore implements SlackBotBindingStore {
+
+    @Override
+    public Optional<SlackBotBinding> findByChannelId(UUID channelId) {
+        return SlackBotBinding.findByIdOptional(channelId);  // channelId is the @Id
+    }
+
+    @Override
+    public void put(SlackBotBinding binding) {
+        binding.persistAndFlush();
+    }
+
+    @Override
+    public void delete(UUID channelId) {
+        SlackBotBinding.deleteById(channelId);
+    }
+}
+```
+
 **`InMemorySlackBotBindingStore`** — `@Alternative @Priority(1) @ApplicationScoped` in `testing/`.
 
 ### `SlackThreadCacheStore`
@@ -349,15 +371,24 @@ if (slackThreadTs != null && !slackThreadTs.equals(slackTs)) {
 }
 
 if (corrId == null) {
-    // New top-level message or unrecognised thread — generate corrId and anchor.
-    // DB write BEFORE receiveHumanMessage() eliminates the race where a fast agent
-    // RESPONSE arrives at post() before the thread_ts cache entry exists.
+    // New top-level message OR unrecognised thread reply — generate corrId and anchor.
     UUID newCorrId = UUID.randomUUID();
     corrId = newCorrId.toString();
-    if (slackTs != null) {
-        threadCacheStore.put(channelRef.id(), corrId, slackTs);
+
+    // For a top-level message: slackTs is the root. For an unrecognised thread reply:
+    // slackThreadTs is the root — the reply's own slackTs must NOT be used as thread_ts,
+    // or Slack will reject the reply (thread_ts must equal the root message ts, not a reply ts).
+    String rootTs = (slackThreadTs != null) ? slackThreadTs : slackTs;
+
+    // ORDERING INVARIANT: write to thread cache BEFORE calling receiveHumanMessage().
+    // receiveHumanMessage() dispatches the COMMAND/QUERY synchronously, which triggers
+    // fanOut(). If a RESPONSE arrives at post() before this write completes, post()
+    // misses the cache and posts to the channel root instead of the correct Slack thread.
+    // The write must complete before the gateway call — this ordering is non-negotiable.
+    if (rootTs != null) {
+        threadCacheStore.put(channelRef.id(), corrId, rootTs);
         threadCache.computeIfAbsent(channelRef.id(), k -> new ConcurrentHashMap<>())
-                   .put(corrId, slackTs);
+                   .put(corrId, rootTs);
     }
 }
 
@@ -452,7 +483,25 @@ public record SlackBindingView(UUID channelId, String credentialRef, String slac
 2. `channelBindingStore.findByChannelId(channelId)` — 409 if generic `ChannelConnectorBinding` exists
 3. Validate credential: `Config.getValue("casehub.qhorus.slack-channel.credentials." + credentialRef)` — 400 with key name if `NoSuchElementException`
 4. Persist: field-assignment construction (see entity section), `bindingStore.put(b)`
-5. `gateway.initChannel(channelId, new ChannelRef(channelId, channel.name))` — fires `ChannelInitialisedEvent`; backend self-registers
+5. `gateway.initChannel(channelId, new ChannelRef(channelId, channel.name))` — fires `ChannelInitialisedEvent`; backend self-registers. Wrap in try-catch:
+   ```java
+   try {
+       gateway.initChannel(channelId, new ChannelRef(channelId, channel.name));
+   } catch (DuplicateParticipatingBackendException e) {
+       // Race: a ChannelConnectorBinding was added between step 2 and step 5.
+       // The binding save at step 4 is in the same @Transactional method — catching here
+       // before the exception reaches the @Transactional interceptor boundary leaves the
+       // transaction active (not RollbackOnly). Undo the save and return 409.
+       bindingStore.delete(channelId);
+       return Response.status(409)
+           .entity("Channel already has a participating backend: " + e.getMessage())
+           .build();
+   }
+   ```
+   `DuplicateParticipatingBackendException extends IllegalStateException`. Catching it within
+   the method (not at the `@Transactional` boundary) keeps the transaction active. The
+   `bindingStore.delete()` call in the catch block undoes the save in the same transaction.
+   The transaction commits cleanly with no net change to the binding table.
 6. 200 `SlackBindingView`
 
 ### DELETE `/{channelId}` (ordering matters — read cache before DB delete)
