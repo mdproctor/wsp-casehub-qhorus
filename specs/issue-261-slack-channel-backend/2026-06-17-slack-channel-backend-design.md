@@ -645,7 +645,20 @@ public record SlackBindingView(UUID channelId, String workspaceId, String slackC
 
 1. `channelService.findById(channelId)` — 404 if channel absent
 2. `channelBindingStore.findByChannelId(channelId)` — 409 if generic `ChannelConnectorBinding` exists
-3. Validate credential: `Config.getValue("casehub.qhorus.slack-channel.credentials." + workspaceId)` — 400 with key name if `NoSuchElementException`
+3. Validate credential — check both missing key AND blank value:
+   ```java
+   String credKey = "casehub.qhorus.slack-channel.credentials." + workspaceId;
+   String token;
+   try {
+       token = ConfigProvider.getConfig().getValue(credKey, String.class);
+   } catch (NoSuchElementException e) {
+       return Response.status(400).entity("Credential key not found: " + credKey).build();
+   }
+   if (token.isBlank()) {
+       return Response.status(400).entity("Credential " + credKey + " is configured but empty").build();
+   }
+   ```
+   `Config.getValue()` returns `""` without throwing when the property is set to an empty string (e.g. `T123ABC=`). Without the blank check, an empty token is accepted at bind time; `post()` later calls Slack with `Authorization: Bearer ` and receives `{"ok":false,"error":"not_authed"}` — silent delivery failure. Detecting this at bind time is strictly better UX.
 4. Persist: field-assignment construction (see entity section), `bindingStore.put(b)`
 5. `gateway.initChannel(channelId, new ChannelRef(channelId, channel.name))` — fires `ChannelInitialisedEvent`; backend self-registers. Wrap in try-catch:
    ```java
@@ -745,6 +758,8 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 ---
 
 ## Known limitations
+
+**Recovery anchor / terminal eviction race in post():** `save()` (recovery anchor) and `delete()` (terminal eviction) in `post()` run in independent `@Transactional(REQUIRED)` transactions on virtual threads from `fanOut()`. If RESPONSE and DONE arrive for the same corrId in rapid succession, their virtual threads may interleave: if DONE's `delete()` runs before RESPONSE's `save()`, the anchor is inserted after the eviction — net: anchor present when it should be absent. In well-formed Qhorus conversations, RESPONSE always precedes DONE (agent sends RESPONSE before DONE — separate HTTP calls processed sequentially). This ordering guarantees RESPONSE's `post()` starts before DONE's `post()` starts, making the race vanishingly unlikely. For v1, rely on the FIFO guarantee from the agent protocol and document the assumption.
 
 **RESPONSE-no-evict follow-up: protocol noise.** RESPONSE (agent answers human QUERY) does not evict the thread anchor. If the human follows up in the same Slack thread, `findCorrIdByThreadTs()` finds the original corrId and the normaliser returns `MessageType.RESPONSE`. The original QUERY commitment is already discharged. Whether Qhorus silently ignores the second RESPONSE or surfaces it to the agent depends on its commitment store validation. This is observable as unexpected RESPONSE messages for discharged commitments. Mitigation: DONE/FAILURE/DECLINE evict the anchor, so post-terminal follow-ups correctly start new QUERY commitments.
 
