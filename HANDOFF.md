@@ -1,19 +1,23 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-18 — #289 shipped (InMemory store Hibernate dirty-flush fix) + push alignment
+**Date:** 2026-06-19 — #290 shipped (Merkle frontier tenancyId fixes), unblocks claudony#155
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes aligned at `45fad37`. Pick the next issue from the backlog — #279 (CloudEvent adapter) is the easiest standalone entry point.
+Main is clean. Both remotes aligned at `8a554b8`. Pick the next issue — #279 (CloudEvent adapter) is the easiest standalone entry point.
 
 ## What Was Done This Session
 
-**Push alignment:** `mdproctor/qhorus` was missing 2 commits (slack-channel + CDI regression guard) from the previous session. Pushed to align. Push order convention locked in: origin (mdproctor) always first, then upstream (casehubio) — enforced by work-end skill, memory updated.
+**#290 — Merkle frontier tenancyId fixes (two commits):**
 
-**#289 — InMemory store Hibernate dirty-flush fix:** `InMemoryChannelStore.updateLastActivity()` and `InMemoryReactiveChannelStore.updateLastActivity()` were modifying `channel.lastActivityAt` in-place within `Panache.withSession()`. Hibernate's bytecode dirty tracker flagged the field write as a managed entity mutation and generated a JPA UPDATE at session flush — even though `InMemoryReactiveChannelStore` was correctly selected by CDI (confirmed by direct injection test). Fix: both methods are now no-ops. Unblocks `claudony#155` (6/9 `MeshResourceInterjectionTest` failures). Shipped to both remotes.
+Claudony's `MeshResourceInterjectionTest` failures traced through several false leads before a broad classpath scan of all `:tenancyId` references found the actual source:
 
-**Protocol + CLAUDE.md:** `PP-20260618-100368` formalised the rule. Garden entry `GE-20260618-d81cef` submitted.
+1. `LedgerMerkleFrontier.deleteBySubjectAndLevel` named query had a `:tenancyId` predicate added in `casehub-ledger` but the call site in `ReactiveLedgerEntryJpaRepository.save()` never bound it → `QueryParameterException` at runtime.
+
+2. `LedgerMerkleTree.append()` creates frontier nodes without tenancyId. Column is NOT NULL → INSERT failed after fix 1.
+
+Both fixed with one line each. Build passes, both remotes aligned at `8a554b8`.
 
 ## What's Next
 
@@ -25,11 +29,12 @@ Main is clean. Both remotes aligned at `45fad37`. Pick the next issue from the b
 
 ## Cross-Module
 
-**Claudony unblocked:** `claudony#155` should close once Claudony picks up a SNAPSHOT after `cd46e30`. Claudony needs to bump its Qhorus dependency to a build that includes the `fix(#289)` commit.
+**Claudony:** `claudony#155` now has the full fix chain: `cd46e30` (no-op InMemory), `a29e461` (bind `:tenancyId` in named query), `8a554b8` (propagate tenancyId to frontier nodes). Claudony needs a SNAPSHOT after `8a554b8` — all three commits required.
 
 ## References
 
 | What | Path |
 |------|------|
-| Protocol — InMemory store mutation | `docs/protocols/casehub/inmemory-store-no-entity-mutation-in-session.md` |
-| Garden entry | `GE-20260618-d81cef` (jvm/ domain) |
+| Garden entries | `GE-20260619-fe34fc` (named query cross-repo drift), `GE-20260619-479b69` (entity factory tenancy) |
+| Protocol | `PP-20260618-100368` — InMemory store mutation prohibition |
+| Previous handover | `git show HEAD~1:HANDOFF.md` |
