@@ -675,11 +675,11 @@ public record SlackBindingView(UUID channelId, String workspaceId, String slackC
 2. If entry == null AND DB has no binding → return 204 immediately (idempotent DELETE)
 3. backend.evict(channelId)                               // stops inbound routing atomically (in-memory only)
 4. gateway.deregisterBackend(channelId, BACKEND_ID)       // stops fanOut routing
-5. threadCache.deleteAllForChannel(channelId)             // purge DB thread rows; in-flight commits are
-                                                          // already broken (post() returns early after evict)
-                                                          // so rows are functionally orphaned — clean up now
-6. bindingStore.delete(channelId)                         // DB binding
-7. 204
+5. bindingStore.delete(channelId)                         // DB binding
+6. 204
+// Note: SlackThreadEntry DB rows are NOT deleted here.
+// After evict(), post() finds no CacheEntry and returns early — rows are functionally orphaned.
+// TTL cleanup (SlackThreadCacheCleanupJob) handles them. Comment in implementation explains.
 ```
 
 **Idempotent:** DELETE returns 204 whether or not the binding exists. Desired end state (no binding) is achieved in both cases.  
