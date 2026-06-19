@@ -1,4 +1,5 @@
-# Branch Closed — issue-261-slack-channel-backend
-**Date:** 2026-06-18
-**Issue:** #261
-**Covers:** 261
+# Branch Closed: issue-291-delegated-javadoc
+
+**Date:** 2026-06-19
+**Issues:** 291
+**Status:** merged to main
