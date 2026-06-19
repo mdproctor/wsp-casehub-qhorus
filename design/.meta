@@ -1,0 +1,9 @@
+branch: issue-291-delegated-javadoc
+project-sha: 8a554b86648466bbdeb9a11af1ced553eaf5fcee
+date: 2026-06-19
+issue: 291
+issue-repo: casehubio/qhorus
+covers: 291
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
