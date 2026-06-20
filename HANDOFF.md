@@ -1,28 +1,30 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-19 — #291 shipped (CommitmentState.DELEGATED Javadoc)
+**Date:** 2026-06-20 — qhorus#261 closed (casehub-qhorus-slack-channel bug fixes)
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. All three (local, mdproctor, casehubio) aligned at `06a9b75`. Pick next issue — #279 (CloudEvent adapter) is the easiest standalone entry point.
-
-**Remote restored:** `origin` was silently changed to casehubio during the previous session (likely IntelliJ). Fixed — origin is mdproctor, upstream is casehubio. Both are verified aligned. Add an early-session `remote -v` sanity check to detect if this recurs.
+Main is clean. All three remotes (local, mdproctor, casehubio) aligned at `06a9b75`. Branch `issue-261-slack-channel-backend` is marked closed. Next: qhorus#292 (skip recovery anchor for terminal types — minor optimization from work-end code review), or pick a new issue.
 
 ## What Was Done This Session
 
-**#291 — CommitmentState.DELEGATED Javadoc:** Added cross-system warning to the `DELEGATED` constant clarifying: (1) it is terminal — the active obligation lives in the child OPEN Commitment; (2) `findByCorrelationId()` returns the child, not the DELEGATED parent; (3) `WorkItemStatus.DELEGATED` in `casehub-work` is non-terminal (pre-acceptance hold) — refs casehubio/work#240. One commit, `16c833b`.
+**qhorus#261 — casehub-qhorus-slack-channel bug fixes:** 8 code-level bugs fixed against r27 spec plus connectors#22 (Slack event subtype filter). Bugs fixed: `@ObservesAsync→@Observes` on onChannelInitialised, UNIQUE(slack_channel_id) in V23 DDL, rootTs fix for unknown thread replies, slash-command COMMAND detection in normaliser, evict() encapsulation (delete() no longer accesses backend fields directly), PUT flow reorder + ChannelConnectorBinding mutual exclusion check + blank-token validation, rebind cleanup (evict+deleteAll before save), injected Config for testable resolveToken(). All changes committed to the issue branch, squashed, pushed to fork and upstream.
+
+**connectors#22 — Slack event subtype filter:** Added one-line subtype filter to SlackInboundConnector.parseMessages() — message_changed/message_deleted/channel_join no longer generate spurious Qhorus COMMAND/QUERY messages. Pushed to connectors main.
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #279 | CloudEvent adapter for `MessageReceivedEvent` | S | Low | Independent, standalone |
-| #233 | Complete ARC42STORIES.MD | L | High | Docs; ~20 blog entries as source |
-| #218 | Consolidate `ChannelService.create()` overloads | M | Med | Refactor, deferred |
+| qhorus#292 | Skip recovery anchor write for terminal types in post() | XS | Low | Deferred from code review; end state correct, just inefficient |
+| qhorus#279 | CloudEvent adapter for MessageReceivedEvent | S | Low | Independent, standalone |
+| qhorus#233 | Complete ARC42STORIES.MD | L | High | Docs; ~20 blog entries as source |
 
 ## References
 
 | What | Path |
 |------|------|
-| Previous session | `git show HEAD~1:HANDOFF.md` — #290 Merkle frontier fixes, claudony#155 fix chain |
+| Spec (r27) | `docs/specs/issue-261-slack-channel-backend/2026-06-17-slack-channel-backend-design.md` (project) |
+| Plan (archived) | `plans/attic/issue-261-slack-channel-backend/` (workspace) |
+| Previous session | `git show HEAD~1:HANDOFF.md` — #291 CommitmentState.DELEGATED Javadoc, remote alignment fix |
