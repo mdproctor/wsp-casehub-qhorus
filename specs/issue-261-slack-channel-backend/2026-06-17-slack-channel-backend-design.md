@@ -42,8 +42,8 @@ slack-channel/
     SlackBindingView.java              — response record
     SlackThreadCacheCleanupJob.java    — @Scheduled TTL eviction (@ApplicationScoped)
   src/main/resources/
-    db/slack-channel/migration/
-      V23__slack_bot_binding.sql
+    db/qhorus/migration/           — same classpath path as runtime migrations
+      V23__slack_bot_binding.sql   — discovered automatically when JAR is on classpath
       V24__slack_thread_cache.sql
 
 testing/src/main/java/io/casehub/qhorus/testing/
@@ -145,8 +145,8 @@ public class SlackThreadCache extends PanacheEntityBase {
 
 ## Flyway migrations
 
-**Directory:** `slack-channel/src/main/resources/db/slack-channel/migration/`  
-Separate scoped path per Rule 4 of `flyway-version-range-allocation.md`. Version numbers remain global across all locations for the same datasource. V23/V24 avoid collision with V1–V22 in `db/qhorus/migration/`.
+**Directory:** `slack-channel/src/main/resources/db/qhorus/migration/`  
+Same classpath path as runtime migrations. When the slack-channel JAR is on the classpath, Flyway's existing scan of `classpath:db/qhorus/migration` discovers V23/V24 automatically — no new location config entry needed. V23/V24 avoid collision with the runtime's V1–V22 sequence.
 
 ### V23__slack_bot_binding.sql
 
@@ -187,19 +187,23 @@ CREATE INDEX idx_slack_thread_channel ON slack_thread_cache (channel_id);
 
 ## Runtime config changes — `runtime/src/main/resources/application.properties`
 
-Two additions required. Both are safe when the module is absent (no jar → no resources found, no packages discovered):
+**Flyway:** No change required. V23/V24 live at `slack-channel/src/main/resources/db/qhorus/migration/` — same classpath path as runtime migrations. When the slack-channel JAR is on the classpath, Flyway's existing scan of `classpath:db/qhorus/migration` discovers V23 and V24 automatically. The existing config must be preserved unchanged:
 
 ```properties
-# 1. Include slack-channel Flyway migrations when jar is on classpath
-quarkus.flyway.qhorus.locations=classpath:db/qhorus/migration,classpath:db/slack-channel/migration
-
-# 2. Extend Hibernate entity scan to cover io.casehub.qhorus.slack.channel package
-quarkus.hibernate-orm.qhorus.packages=io.casehub.qhorus,io.casehub.ledger.runtime
+# Preserve this unchanged — do NOT replace db/ledger/migration with db/slack-channel/migration
+quarkus.flyway.qhorus.locations=classpath:db/qhorus/migration,classpath:db/ledger/migration
 ```
 
-The `packages` expansion changes `io.casehub.qhorus.runtime` → `io.casehub.qhorus` — a superset that includes the new package while retaining all existing entities.
+**Hibernate packages:** One line addition — append, do not expand the parent package. The protocol `optional-module-jpa-package-registration.md` requires explicit append; expanding `io.casehub.qhorus.runtime` to `io.casehub.qhorus` would scan all future sub-packages unconditionally:
 
-**Module test `application.properties`** must include both additions and use `drop-and-create` (no Flyway in test cycle).
+```properties
+# Append io.casehub.qhorus.slack — do NOT change io.casehub.qhorus.runtime to io.casehub.qhorus
+quarkus.hibernate-orm.qhorus.packages=io.casehub.qhorus.runtime,io.casehub.ledger.runtime,io.casehub.qhorus.slack
+```
+
+Safe when module is absent: Hibernate scans the package but finds no classes (no JAR on classpath for that package). No entities registered, nothing breaks.
+
+**Module test `application.properties`** must include the packages append and use `drop-and-create` (no Flyway in test cycle).
 
 ---
 
