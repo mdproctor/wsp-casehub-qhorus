@@ -5,9 +5,9 @@
 
 ## Immediate Next Step
 
-Main is clean. casehubio/qhorus at `16c833b`. Pick next issue — #279 (CloudEvent adapter) is the easiest standalone entry point.
+Main is clean. All three (local, mdproctor, casehubio) aligned at `06a9b75`. Pick next issue — #279 (CloudEvent adapter) is the easiest standalone entry point.
 
-⚠️ **Remote config changed:** `origin` now points to `casehubio/qhorus` (was `mdproctor/qhorus`). Run `git remote set-url origin https://github.com/mdproctor/qhorus.git` and `git remote add upstream https://github.com/casehubio/qhorus.git` in the project repo to restore the fork model.
+**Remote restored:** `origin` was silently changed to casehubio during the previous session (likely IntelliJ). Fixed — origin is mdproctor, upstream is casehubio. Both are verified aligned. Add an early-session `remote -v` sanity check to detect if this recurs.
 
 ## What Was Done This Session
 
