@@ -146,7 +146,7 @@ public class SlackThreadCache extends PanacheEntityBase {
 ## Flyway migrations
 
 **Directory:** `slack-channel/src/main/resources/db/qhorus/migration/`  
-Same classpath path as runtime migrations. When the slack-channel JAR is on the classpath, Flyway's existing scan of `classpath:db/qhorus/migration` discovers V23/V24 automatically — no new location config entry needed. V23/V24 avoid collision with the runtime's V1–V22 sequence.
+Same classpath path as runtime migrations. When the slack-channel JAR is on the classpath, Flyway's existing scan of `classpath:db/qhorus/migration` discovers V23/V24 automatically — no new location config entry needed. V23/V24 avoid collision with the runtime's V1–V22 sequence. Version numbers follow `casehub/garden: docs/protocols/casehub/flyway-version-range-allocation.md` Rule 4 (named datasource scoped path) — verify the next available V-number by scanning all branches before writing migrations, as described in that protocol.
 
 ### V23__slack_bot_binding.sql
 
@@ -719,6 +719,8 @@ public record SlackBindingView(UUID channelId, String workspaceId, String slackC
 // TTL cleanup (SlackThreadCacheCleanupJob) handles them. Comment in implementation explains.
 ```
 
+**`put()` is intentionally NOT `@Transactional`.** Steps 5 and 6 commit in independent transactions. This is a deliberate design decision — do not add `@Transactional` to `put()` without understanding the consequence: if `put()` were `@Transactional`, `onChannelInitialised()` (step 7 via `initChannel()`) would join that outer transaction. When `registerBackend()` throws `DuplicateParticipatingBackendException` inside the observer, the `@Transactional` interceptor marks the OUTER transaction rollback-only before re-throwing. The catch block that calls `bindingStore.deleteByChannelId()` would then execute inside a rollback-only transaction, throwing `RollbackException` — the save cannot be undone. The split-transaction design avoids this: the observer's own transaction rolls back (reads-only, clean no-op), the exception re-throws to the catch block, which runs `bindingStore.deleteByChannelId()` in a fresh independent transaction. The known cost is that steps 5 and 6 are not atomic (see Known Limitations).
+
 **Idempotent:** DELETE returns 204 whether or not the binding exists. Desired end state (no binding) is achieved in both cases.  
 `close()` is NOT called from `delete()` — `close()` has channel-deletion semantics and is only called by `ChannelGateway.closeChannel()`.
 
@@ -804,7 +806,7 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 
 **RESPONSE-no-evict follow-up: protocol noise.** RESPONSE (agent answers human QUERY) does not evict the thread anchor. If the human follows up in the same Slack thread, `findCorrIdByThreadTs()` finds the original corrId and the normaliser returns `MessageType.RESPONSE`. The original QUERY commitment is already discharged. Whether Qhorus silently ignores the second RESPONSE or surfaces it to the agent depends on its commitment store validation. This is observable as unexpected RESPONSE messages for discharged commitments. Mitigation: DONE/FAILURE/DECLINE evict the anchor, so post-terminal follow-ups correctly start new QUERY commitments.
 
-**Slack event subtype filtering is SlackInboundConnector's responsibility.** `SlackChannelBackend` receives `InboundMessage` events already filtered by `SlackInboundConnector`. The connector filters bot messages (`bot_id` key present) and non-message event types, but does not filter Slack message subtypes such as `message_changed` (edited messages), `message_deleted`, or `channel_join`. These have `type="message"` and no `bot_id` and pass through the connector's current filters. An edited message would generate a new Qhorus COMMAND or QUERY, potentially creating duplicate or confusing commitments. This is a shared infrastructure concern in the connectors repo (casehub-connectors), not a `SlackChannelBackend` design issue. If subtype filtering is needed, it must be added to `SlackInboundConnector.parseMessages()` — file a casehub-connectors issue if this becomes a problem in practice.
+**Slack event subtype filtering is SlackInboundConnector's responsibility (connectors#22).** `SlackChannelBackend` receives `InboundMessage` events already filtered by `SlackInboundConnector`. The connector currently does NOT filter by `subtype`. Events with `type="message"` and no `bot_id` pass through regardless of subtype — including `message_changed` (edited messages), `message_deleted`, `channel_join`. Every message edit in an active workspace generates a new Qhorus COMMAND/QUERY, creating duplicate commitments and agent work. The fix is a one-line addition to `SlackInboundConnector.parseMessages()`: `if (event.getString("subtype", null) != null) return messages;`. This is tracked at casehub-connectors#22 and must be fixed before shipping to a real workspace.
 
 **Reverse mutual exclusion not enforced.** `SlackBindingResource` rejects a Slack binding when a generic `ChannelConnectorBinding` exists (409). The inverse is not enforced — `connector-backend` must not depend on `slack-channel`. Follow-up issue.
 
