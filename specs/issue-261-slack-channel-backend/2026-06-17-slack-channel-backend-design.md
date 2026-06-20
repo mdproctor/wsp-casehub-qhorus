@@ -395,6 +395,20 @@ private record CacheEntry(String workspaceId, String slackChannelId, String chan
 
 Thread cache state is owned by the injected `SlackThreadCache` CDI bean — not by `SlackChannelBackend`.
 
+**Token resolution** uses an injected `org.eclipse.microprofile.config.Config` (not the static `ConfigProvider.getConfig()`) so that unit tests can inject a mock `Config` directly via the constructor without anonymous subclass overrides:
+
+```java
+// Constructor parameter (alongside gateway, bindingStore, slackBotClient, ...)
+private final Config config;
+
+String resolveToken(String workspaceId) {
+    return config.getValue("casehub.qhorus.slack-channel.credentials." + workspaceId, String.class);
+}
+```
+
+In unit tests: `Config config = mock(Config.class); when(config.getValue(...)).thenReturn("xoxb-test");`  
+`ConfigProvider.getConfig()` (static access) prevents CDI injection and forces anonymous subclass overrides — the known antipattern. Injected `Config` is the standard CDI approach and matches what Quarkus supports via `@Inject Config config`.
+
 ### `@Observes ChannelInitialisedEvent` (sync)
 
 **`@Observes` is required** — `ChannelGateway.initChannel()` uses synchronous `channelInitialisedEvents.fire()`. CDI routes synchronous `fire()` exclusively to `@Observes` observers. `@ObservesAsync` will never execute for this event. Compare: `ConnectorChannelBackend.onChannelInitialised()` also uses `@Observes`.
@@ -743,7 +757,15 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
   - Thread reply, cache miss: corrId generated, rootTs = `slackThreadTs` (not `slackTs` — thread root, not reply ts), in-memory first then DB best-effort, normaliser returns QUERY
   - **`threadCacheStore.put()` throws**: in-memory update already succeeded (set before try-catch); `receiveHumanMessage()` is still called; WARN logged; assert gateway call happened and anchor is in memory but not in DB
   - Null content (media-only message): passes through to gateway with no NPE; normaliser returns QUERY with null content
-- `onChannelInitialised()`: DB rows loaded into in-memory cache (restart recovery path)
+- `onChannelInitialised()` — these paths must be unit-tested (NOT bypassed by pre-populating `bindingCache` directly, which is the antipattern that hid the `@ObservesAsync` bug):
+  - `_registration`: fire `ChannelInitialisedEvent` for a channel with a binding → verify `channelCache` and `slackIndex` populated, `gateway.registerBackend()` called
+  - `_restartRecovery`: binding exists, `threadCacheStore.findByChannelId()` returns rows → verify rows loaded into `threadCache` inner map (corrId → threadTs)
+  - `_unknownChannel`: fire event for channel with no binding → verify no registration, `channelCache` empty
+
+**Required `onInboundMessage()` unit tests** — these paths currently have zero coverage; the rootTs bug and ORDERING INVARIANT are unverified:
+  - `_newTopLevelMessage`: send message with no `slack-thread-ts` → verify new corrId generated, `threadCacheStore.put(channelId, corrId, slackTs)` called **before** `gateway.receiveHumanMessage()` (mock ordering)
+  - `_unknownThreadReply`: send thread reply where `getCorrIdByThreadTs()` returns empty → verify `rootTs = slackThreadTs` (not `slackTs`), new corrId generated, DB written with slackThreadTs
+  - `_knownThreadReply`: send thread reply where `getCorrIdByThreadTs()` returns existing corrId → verify no new anchor written, existing corrId passed in `InboundHumanMessage`, normaliser returns RESPONSE
 
 `SlackInboundNormaliserTest` — pure logic. Cover: slash command → COMMAND, slash command with null content → QUERY (no NPE), thread reply + corrId → RESPONSE, new message → QUERY, thread-ts == slack-ts (human thread root) → QUERY.
 
@@ -751,7 +773,16 @@ In `ConnectorChannelBackend.onInboundMessage()`, the log for "No channel for con
 
 `SlackChannelBackendIT` — `@InjectMock SlackBotClient`. Lifecycle: bind → init event → inbound new message → corrId generated and written to DB → agent RESPONSE → thread reply asserted. Assert `slackBotClient.postMessage()` called `times(1)` — the normaliser telemetry EVENT from `receiveHumanMessage()` returns immediately at the EVENT type guard. Assert `messageService` called `times(2)` per inbound message (content dispatch + telemetry EVENT).
 
-`SlackBindingResourceIT` — PUT (200), GET (200, no token), PUT unknown workspaceId / credentialRef (400 with key name), DELETE (204), double-DELETE (404), PUT on channel with generic `ChannelConnectorBinding` pre-check (409 from step 2), PUT with mocked `gateway.initChannel()` throwing `DuplicateParticipatingBackendException` → 409 with no net binding in store (tests the race-condition catch path: binding save is undone in the same transaction, `findByChannelId()` returns empty after the call).
+`SlackBindingResourceTest` (unit, CDI-free with mocked dependencies) — the endpoint behaviors below need explicit test coverage:
+  - PUT → 200: valid workspaceId, slackChannelId, and configured token → binding persisted, 200 `SlackBindingView` returned
+  - PUT → 400 (missing key): `Config.getValue()` throws `NoSuchElementException` → 400 with key name in body
+  - PUT → 400 (blank token): `Config.getValue()` returns `""` → 400 with "Credential ... is configured but empty"
+  - PUT → 409 (generic binding exists): `channelBindingStore.findByChannelId()` returns a `ChannelConnectorBinding` → 409 before any DB write
+  - PUT → 409 (DuplicateParticipatingBackendException): `gateway.initChannel()` throws → 409, `bindingStore.findByChannelId()` returns empty (binding save undone in same transaction)
+  - DELETE → 204 (binding present): evict() called, deregisterBackend() called, bindingStore.delete() called, 204
+  - DELETE → 204 (no binding, idempotent): no-op, 204 immediately
+  - GET → 200: binding exists, token field absent from response
+  - GET → 404: no binding
 
 `FlywayMigrationSchemaTest` — plain-Java Flyway + H2. Runs V1–V24 + V2000. Asserts both tables with correct columns, constraints, indexes.
 
