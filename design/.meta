@@ -1,0 +1,9 @@
+branch: issue-292-xs-s-batch
+project-sha: 06a9b75f9b39ea96a802245d30d2a560ff33c85a
+date: 2026-06-20
+issue: 292
+issue-repo: casehubio/qhorus
+covers: 292,279
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
