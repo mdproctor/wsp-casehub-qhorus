@@ -677,8 +677,14 @@ public record SlackBindingView(UUID channelId, String workspaceId, String slackC
    }
    ```
    `Config.getValue()` returns `""` without throwing when the property is set to an empty string (e.g. `T123ABC=`). Without the blank check, an empty token is accepted at bind time; `post()` later calls Slack with `Authorization: Bearer ` and receives `{"ok":false,"error":"not_authed"}` — silent delivery failure. Detecting this at bind time is strictly better UX.
-4. Persist: field-assignment construction (see entity section), `bindingStore.put(b)`
-5. `gateway.initChannel(channelId, new ChannelRef(channelId, channel.name))` — fires `ChannelInitialisedEvent`; backend self-registers. Wrap in try-catch:
+4. **Clean up stale routing state** — called unconditionally before save; safe no-ops on fresh binds:
+   ```java
+   backend.evict(channelId);                          // clears bindingCache + slackToChannel + threadCache (in-memory)
+   threadCacheStore.deleteAllForChannel(channelId);   // clears DB thread cache
+   ```
+   **Why this is required:** On rebind (same channel, different slackChannelId), the old `slackToChannel["C1"]` entry survives without evict(), causing C1's inbound messages to continue routing to this channel. Also, old thread_ts values from C1 are cached for this channel — post() would call the C2 bot API with C1's thread timestamps, causing Slack API failures or unexpected thread nesting. The clean-slate approach is unconditional to also handle tombstone cases (binding deleted and re-created).
+5. Persist: field-assignment construction (see entity section), `bindingStore.put(b)`
+6. `gateway.initChannel(channelId, new ChannelRef(channelId, channel.name))` — fires `ChannelInitialisedEvent`; backend self-registers. Wrap in try-catch:
    ```java
    try {
        gateway.initChannel(channelId, new ChannelRef(channelId, channel.name));
@@ -697,7 +703,7 @@ public record SlackBindingView(UUID channelId, String workspaceId, String slackC
    the method (not at the `@Transactional` boundary) keeps the transaction active. The
    `bindingStore.delete()` call in the catch block undoes the save in the same transaction.
    The transaction commits cleanly with no net change to the binding table.
-6. 200 `SlackBindingView`
+7. 200 `SlackBindingView`
 
 ### DELETE `/{channelId}` (ordering matters — read cache before DB delete)
 
