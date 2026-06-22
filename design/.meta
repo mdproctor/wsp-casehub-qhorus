@@ -1,0 +1,9 @@
+branch: issue-295-normative-benchmark
+project-sha: 4e9869bca6e201f96f435ec90e2e55a44f3d975a
+date: 2026-06-22
+issue: 295
+issue-repo: casehubio/qhorus
+covers: 295
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
