@@ -1,0 +1,9 @@
+branch: issue-303-extract-evidential-checker
+project-sha: 915beb7cd10cdd6b14a30ce32698abf655d96c14
+date: 2026-06-23
+issue: 303
+issue-repo: casehubio/qhorus
+covers: 303,304,305
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
