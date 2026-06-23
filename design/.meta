@@ -1,0 +1,9 @@
+branch: issue-218-channel-create-consolidation
+project-sha: 6407ee2c1ae3a7602510d00cf592525a5987197a
+date: 2026-06-23
+issue: 218
+issue-repo: casehubio/qhorus
+covers: 218,302,301,300
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
