@@ -1,11 +1,13 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-21 — #292 + #279 shipped; #293 cross-repo fix from connectors#20
+**Date:** 2026-06-23 — #295 normative benchmark (all four milestones shipped)
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `52ddf6e`. No S/XS issues remain open. Next candidates:
+Main is clean. Both remotes at `0883284`. No open issues remain from the benchmark epic.
+
+Next candidates:
 
 | # | Description | Scale | Complexity |
 |---|-------------|-------|------------|
@@ -15,16 +17,23 @@ Main is clean. Both remotes at `52ddf6e`. No S/XS issues remain open. Next candi
 
 ## What Was Done This Session
 
-**#292 (XS) — SlackChannelBackend recovery anchor skip for terminal types:** Terminal messages (DONE/FAILURE/DECLINE) with no cached thread were writing a recovery anchor then immediately evicting it. Extracted `isTerminal` flag, guarded anchor creation with `!isTerminal`, reused flag for eviction. 3 new tests (RED→GREEN).
+**Normative benchmark #295 — all four milestones:**
 
-**#279 (S) — QhorusCloudEventAdapter:** CDI adapter in `runtime/gateway/` observes `@ObservesAsync MessageReceivedEvent` and fires `Event<CloudEvent>.fireAsync()`. Mapping: type=`io.casehub.qhorus.message.<type>`, source=`/casehub-qhorus/channel/<id>`, tenancyid extension from event. CloudEvent via transitive dep: casehub-qhorus-api → casehub-platform-api → cloudevents-core. 8 unit tests. Code review fixed: `Locale.ROOT` on toLowerCase, `ZoneOffset.UTC` on timestamp, WARN log on serialize failure.
+- **#296 Zone 1:** `UnstructuredWorkerAgent` (COMPLETED:/CANNOT_COMPLETE: format) + `Zone1UnstructuredBaselineTest` (V1/V2/V3). 70–80% cheating on V2/V3 at temperature=0.1.
+- **#297 Zone 2:** `Zone2NormativeChannelTest` — typed channel with COMMAND/response cycle. 0% false DONE — model sends RESPONSE instead of DONE; obligation technically closes (CommitmentState.FULFILLED) but with wrong type.
+- **#298 Zone 3:** `EvidentialChecker` (I_df + I_ec checks, type-based not state-based) + `Zone3EvidentialCheckerTest` (9 tests, 2s) + `NormativeBenchmarkDemoTest` (three-act narrative, 20s) + README.
+- **#299 Multi-model:** `Zone1Zone2Zone3Jlama1BTest` (all zones combined, comparison table) + Ollama/Claude stubs with activation instructions.
 
-**Remote alignment fix:** `origin` had silently changed to casehubio; restored to mdproctor, both remotes synced.
+**Key finding:** Zone 3 must check response TYPE (DONE/FAILURE/DECLINE), not CommitmentStore state. RESPONSE sent with a COMMAND's corrId fulfills the commitment (FULFILLED), so `state == OPEN` never fires. Protocol PP-20260623-fd69f3 captures this.
 
-**#293 (XS) — QhorusCloudEventAdapter fireAsync + InboundMessage migration:** Cross-repo fix from connectors#20 CloudEvent adapter consistency work. (1) Added `.exceptionally()` handler to `fireAsync()` in `QhorusCloudEventAdapter` — unhandled CompletionStage was silently swallowing downstream failures. (2) Migrated ~14 test construction sites to new 9-arg `InboundMessage` constructor (added `connectorType` + `tenancyId` fields). (3) Fixed protocol violation in `ConfiguredAutoChannelPolicyTest:113` — raw `"slack-inbound"` string replaced with `InboundConnectorIds.SLACK_INBOUND`. Also noted: `QhorusCloudEventAdapter.withTime()` uses `OffsetDateTime.now()` instead of event timestamp — tracked as a comment on #293.
+**Protocol added:** PP-20260623-fd69f3 — command-obligation-verification-type-check
+
+**Garden entries:** GE-20260623-ef0e7c (QUERY hard-blocks on typed channel), GE-20260623-92964b (RESPONSE fulfills commitment)
 
 ## References
 
 | What | Path |
 |------|------|
-| Previous session | `git show HEAD~1:HANDOFF.md` — #261 slack-channel bug fixes, remote alignment |
+| Benchmark spec | `docs/specs/2026-06-22-normative-benchmark-design.md` (workspace) |
+| Run the demo | `mvn test -Pwith-llm-examples -Dtest=NormativeBenchmarkDemoTest -f examples/agent-communication/pom.xml` |
+| Previous session | `git show HEAD~1:HANDOFF.md` |
