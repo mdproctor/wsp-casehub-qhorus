@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-23-mdp01-stopped-lying-wrong-word.md](2026-06-23-mdp01-stopped-lying-wrong-word.md) | 2026-06-23 | Normative benchmark: Zone 2 eliminated false DONE but model switched to RESPONSE (wrong type for COMMAND); Zone 3 catches it via type check, not state check |
 | [2026-06-18-mdp01-the-fix-that-missed-main.md](2026-06-18-mdp01-the-fix-that-missed-main.md) | 2026-06-18 | CI red from a fix that landed on a branch but never reached main; full audit — 11 branches stamped, #285/#286 closed |
 | [2026-06-18-mdp02-slack-thread-cache.md](2026-06-18-mdp02-slack-thread-cache.md) | 2026-06-18 | SlackChannelBackend shipped (#261) — thread continuity via composite cache, write-before-dispatch race fix, Hibernate L1 and package registration gotchas |
 | [2026-06-17-mdp01-three-problems-one-queue.md](2026-06-17-mdp01-three-problems-one-queue.md) | 2026-06-17 | Three cross-repo issues shipped (#282, #280, #281 closed) |
