@@ -9,11 +9,16 @@ Main is clean. Both remotes at `0883284`. No open issues remain from the benchma
 
 Next candidates:
 
-| # | Description | Scale | Complexity |
-|---|-------------|-------|------------|
-| #233 | Complete ARC42STORIES.MD | L | High |
-| #218 | Consolidate `ChannelService.create()` overloads | M | Med |
-| #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — |
+| # | Description | Scale | Complexity | Blocked by |
+|---|-------------|-------|------------|------------|
+| #303 | Extract `EvidentialChecker` to casehub-qhorus runtime as publishable dependency | S | Low | — |
+| #304 | Extend `CommitmentAttestationPolicy` SPI with `CommitmentContext` (corrId, channelId) | S | Med | #303 |
+| #305 | Fix RESPONSE-on-COMMAND attestation gap — no trust signal fires today | S | Med | #304 |
+| #233 | Complete ARC42STORIES.MD | L | High | — |
+| #218 | Consolidate `ChannelService.create()` overloads | M | Med | — |
+| #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — | — |
+
+**#303–305 are sequentially dependent** — do them in order. They unblock casehub-devtown#13 (trust-threshold evidential attestation). The RESPONSE gap (#305) is a correctness fix; agents sending RESPONSE on COMMAND obligations currently escape with no FLAGGED attestation.
 
 ## What Was Done This Session
 
