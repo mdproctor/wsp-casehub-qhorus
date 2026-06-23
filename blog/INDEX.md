@@ -2,6 +2,8 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-23-mdp02-what-response-got-away-with.md](2026-06-23-mdp02-what-response-got-away-with.md) | 2026-06-23 | EvidentialChecker extracted to runtime; CommitmentContext SPI; RESPONSE-on-COMMAND attestation gap fixed |
+| [2026-06-23-mdp01-stopped-lying-wrong-word.md](2026-06-23-mdp01-stopped-lying-wrong-word.md) | 2026-06-23 | Normative benchmark — Zone 1/2/3; 1B model stops lying, uses RESPONSE instead of DONE/FAILURE/DECLINE |
 | [2026-06-18-mdp01-the-fix-that-missed-main.md](2026-06-18-mdp01-the-fix-that-missed-main.md) | 2026-06-18 | CI red from a fix that landed on a branch but never reached main; full audit — 11 branches stamped, #285/#286 closed |
 | [2026-06-18-mdp02-slack-thread-cache.md](2026-06-18-mdp02-slack-thread-cache.md) | 2026-06-18 | SlackChannelBackend shipped (#261) — thread continuity via composite cache, write-before-dispatch race fix, Hibernate L1 and package registration gotchas |
 | [2026-06-17-mdp01-three-problems-one-queue.md](2026-06-17-mdp01-three-problems-one-queue.md) | 2026-06-17 | Three cross-repo issues shipped (#282, #280, #281 closed) |
