@@ -1,44 +1,44 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-23 — #295 normative benchmark (all four milestones shipped)
+**Date:** 2026-06-23 — #303/#304/#305 attestation chain + #233 ARC42STORIES.MD
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `0883284`. No open issues remain from the benchmark epic.
+Main is clean. Both remotes at `213ed51`. All four issues closed (#303, #304, #305, #233).
 
 Next candidates:
 
-| # | Description | Scale | Complexity | Blocked by |
-|---|-------------|-------|------------|------------|
-| #303 | Extract `EvidentialChecker` to casehub-qhorus runtime as publishable dependency | S | Low | — |
-| #304 | Extend `CommitmentAttestationPolicy` SPI with `CommitmentContext` (corrId, channelId) | S | Med | #303 |
-| #305 | Fix RESPONSE-on-COMMAND attestation gap — no trust signal fires today | S | Med | #304 |
-| #233 | Complete ARC42STORIES.MD | L | High | — |
-| #218 | Consolidate `ChannelService.create()` overloads | M | Med | — |
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #218 | Consolidate `ChannelService.create()` overloads into `ChannelCreateRequest` | M | Med | — |
 | #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — | — |
+| #302 | Migrate agent-communication tests to current createChannel/findByChannelId API | S | Low | Stale call sites |
+| #301 | Fix stale OidcCurrentPrincipal Javadoc (no @Priority annotation) | XS | Low | — |
+| #300 | CloudEvent adapter for Qhorus message events | S | Med | — |
 
-**#303–305 are sequentially dependent** — do them in order. They unblock casehub-devtown#13 (trust-threshold evidential attestation). The RESPONSE gap (#305) is a correctness fix; agents sending RESPONSE on COMMAND obligations currently escape with no FLAGGED attestation.
+casehub-devtown#13 is now unblocked — trust-threshold evidential attestation has all dependencies shipped.
 
 ## What Was Done This Session
 
-**Normative benchmark #295 — all four milestones:**
+**EvidentialChecker extraction (#303):** Moved `EvidentialChecker`, `BenchmarkContext`, `BenchmarkViolation` from `examples/agent-communication/` to `runtime/audit/` as `@DefaultBean @ApplicationScoped`. Signature changed from `check(AgentResponse, BenchmarkContext)` to `check(String, String, BenchmarkContext)` — removes examples dependency.
 
-- **#296 Zone 1:** `UnstructuredWorkerAgent` (COMPLETED:/CANNOT_COMPLETE: format) + `Zone1UnstructuredBaselineTest` (V1/V2/V3). 70–80% cheating on V2/V3 at temperature=0.1.
-- **#297 Zone 2:** `Zone2NormativeChannelTest` — typed channel with COMMAND/response cycle. 0% false DONE — model sends RESPONSE instead of DONE; obligation technically closes (CommitmentState.FULFILLED) but with wrong type.
-- **#298 Zone 3:** `EvidentialChecker` (I_df + I_ec checks, type-based not state-based) + `Zone3EvidentialCheckerTest` (9 tests, 2s) + `NormativeBenchmarkDemoTest` (three-act narrative, 20s) + README.
-- **#299 Multi-model:** `Zone1Zone2Zone3Jlama1BTest` (all zones combined, comparison table) + Ollama/Claude stubs with activation instructions.
+**CommitmentContext SPI (#304):** New `CommitmentContext` record in `api/spi/`. `CommitmentAttestationPolicy.attestationFor()` gains a 3-arg abstract method; 2-arg default delegates with null. `LedgerWriteService` and `ReactiveLedgerWriteService` pass context at attestation time.
 
-**Key finding:** Zone 3 must check response TYPE (DONE/FAILURE/DECLINE), not CommitmentStore state. RESPONSE sent with a COMMAND's corrId fulfills the commitment (FULFILLED), so `state == OPEN` never fires. Protocol PP-20260623-fd69f3 captures this.
+**RESPONSE attestation gap (#305):** RESPONSE added to `ATTESTATION_TYPES`. `StoredCommitmentAttestationPolicy` returns FLAGGED/0.3. Config: `casehub.qhorus.attestation.response-confidence`. Guard on prior entry type ensures RESPONSE-on-QUERY produces no attestation.
 
-**Protocol added:** PP-20260623-fd69f3 — command-obligation-verification-type-check
+**ARC42STORIES.MD (#233):** Complete — 809 lines, 11 delivery chapters, §3–§13 all written from blog entries and git history.
 
-**Garden entries:** GE-20260623-ef0e7c (QUERY hard-blocks on typed channel), GE-20260623-92964b (RESPONSE fulfills commitment)
+**Protocol:** PP-20260623-77adf0 — commitment-attestation-policy-null-context
+
+**Garden:** GE-20260623-9c5d06 — unused import for inferred lambda parameter type
+
+**Peer-repo issue:** casehubio/parent#307 — sync casehub-qhorus deep-dive for runtime.audit + CommitmentContext
 
 ## References
 
 | What | Path |
 |------|------|
-| Benchmark spec | `docs/specs/2026-06-22-normative-benchmark-design.md` (workspace) |
-| Run the demo | `mvn test -Pwith-llm-examples -Dtest=NormativeBenchmarkDemoTest -f examples/agent-communication/pom.xml` |
+| ARC42STORIES.MD | workspace `ARC42STORIES.MD` |
+| Blog entry | `blog/2026-06-23-mdp02-what-response-got-away-with.md` |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
