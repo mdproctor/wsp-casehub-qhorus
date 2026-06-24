@@ -2,12 +2,15 @@
 
 **Issue:** casehubio/qhorus#218
 **Date:** 2026-06-24
+**Revised:** 2026-06-24 (spec review feedback)
 
 ---
 
 ## Problem
 
-`ChannelService` has 5 overloads of `create()` stepping from 4 to 14 positional parameters. The overloads exist because `ChannelCreateRequest` — a record with 14 fields — is painful to construct. The same pattern is duplicated in `ReactiveChannelService` and `QhorusMcpTools`. This is an escalating anti-pattern: every new field added to channel creation requires extending the overload chain in three classes.
+`ChannelService` has 5 `create()` methods: 4 convenience overloads stepping from 4 to 8 positional parameters, plus the canonical `create(ChannelCreateRequest)`. The overloads exist because `ChannelCreateRequest` — a record with 14 fields — is painful to construct positionally. The same overload chain is duplicated in `ReactiveChannelService` (5 methods) and `QhorusMcpTools` (4 package-private convenience overloads). This is an escalating anti-pattern: every new field added to channel creation requires extending the chain in three classes.
+
+A secondary duplication exists in `populateChannel(ChannelCreateRequest)` and `blankToNull(String)`, which are identical across `ChannelService` and `ReactiveChannelService`.
 
 ## Design
 
@@ -53,14 +56,10 @@ public record ChannelCreateRequest(...) {
         public Builder rateLimitPerInstance(Integer r) { this.rateLimitPerInstance = r; return this; }
         public Builder allowedTypes(Set<MessageType> t) { this.allowedTypes = t; return this; }
         public Builder deniedTypes(Set<MessageType> t) { this.deniedTypes = t; return this; }
-        public Builder connectorBinding(String inboundId, String externalKey,
-                String outboundId, String outboundDest) {
-            this.inboundConnectorId = inboundId;
-            this.externalKey = externalKey;
-            this.outboundConnectorId = outboundId;
-            this.outboundDestination = outboundDest;
-            return this;
-        }
+        public Builder inboundConnectorId(String id) { this.inboundConnectorId = id; return this; }
+        public Builder externalKey(String key) { this.externalKey = key; return this; }
+        public Builder outboundConnectorId(String id) { this.outboundConnectorId = id; return this; }
+        public Builder outboundDestination(String dest) { this.outboundDestination = dest; return this; }
 
         public ChannelCreateRequest build() {
             return new ChannelCreateRequest(name, description, semantic,
@@ -73,6 +72,8 @@ public record ChannelCreateRequest(...) {
     }
 }
 ```
+
+Each connector binding field gets its own named setter — no grouped `connectorBinding(String, String, String, String)` method. Four positionally-identical strings would reintroduce the exact ambiguity the builder eliminates. The compact constructor's all-or-nothing validation fires in `build()` regardless.
 
 Validation (slug format, connector binding completeness, type overlap) stays in the record's compact constructor — `build()` delegates to it. No duplication.
 
@@ -104,20 +105,65 @@ The 14-param `@Tool` method stays — it is the MCP interface.
 
 Replaced by `builder("name").build()` which is equivalent and more capable.
 
+### 6. Extract Channel.fromRequest()
+
+Both `ChannelService` and `ReactiveChannelService` have identical `populateChannel(ChannelCreateRequest)` and `blankToNull(String)` private methods. Extract to a static factory on the entity:
+
+```java
+public class Channel extends PanacheEntityBase {
+
+    public static Channel fromRequest(ChannelCreateRequest req, String tenancyId) {
+        Channel ch = new Channel();
+        ch.name = req.name();
+        ch.description = req.description();
+        ch.semantic = req.semantic();
+        ch.barrierContributors = req.barrierContributors();
+        ch.allowedWriters = blankToNull(req.allowedWriters());
+        ch.adminInstances = blankToNull(req.adminInstances());
+        ch.rateLimitPerChannel = req.rateLimitPerChannel();
+        ch.rateLimitPerInstance = req.rateLimitPerInstance();
+        ch.allowedTypes = MessageType.serializeTypes(req.allowedTypes());
+        ch.deniedTypes = MessageType.serializeTypes(req.deniedTypes());
+        ch.tenancyId = tenancyId;
+        return ch;
+    }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
+}
+```
+
+Both services become one-liners:
+```java
+// ChannelService
+Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
+channelStore.put(channel);
+
+// ReactiveChannelService
+Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
+return Panache.withTransaction("qhorus", () -> channelStore.put(channel));
+```
+
+`CurrentPrincipal` is not passed to the entity — tenancyId is resolved in the service and passed as a plain string. The entity has no CDI dependency.
+
 ## Call site migration
 
 | Category | Count | Migration |
 |----------|-------|-----------|
 | `channelService.create(4-param)` | ~76 | `channelService.create(ChannelCreateRequest.builder("name").description("desc").build())` |
-| `channelService.create(6-param)` | 1 | Builder with explicit fields |
-| `channelService.create(ChannelCreateRequest)` with `new` | ~26 | Replace `new ChannelCreateRequest(...)` with builder |
-| `tools.createChannel(4-param)` | 9 | Replace with 14-param @Tool call |
-| `tools.createChannel(14-param)` | ~444 | No change — @Tool interface |
+| `channelService.create(8-param)` | 2 | Builder — ChannelServiceTest:23 and ReactiveChannelServiceTest:27 contract test helpers |
+| `channelService.create(ChannelCreateRequest)` with `new` | ~26 (blocking) | Replace `new ChannelCreateRequest(...)` with builder |
+| `reactiveChannelService.create(ChannelCreateRequest)` with `new` | 1 | ReactiveChannelServiceDeniedTypesTest:32 — builder |
+| `tools.createChannel(4-param pkg-private)` | 9 | Switch to `channelService.create(builder)` — these tests (CommitmentToolTest, CommitmentLifecycleTest) use channel creation as setup, not as the thing under test |
+| `tools.createChannel(14-param @Tool)` | ~444 | No change — MCP interface |
 | `ChannelCreateRequest.simple()` | 5 | `builder("name").build()` |
+
+The 5-param and 6-param ChannelService overloads have 0 external callers (internal delegation chain only).
 
 ## Cross-repo impact
 
-**Claudony:** 3 call sites use `channelService.create(ChannelCreateRequest)` with `new ChannelCreateRequest(...)`. The method signature doesn't change. The canonical record constructor still exists (records require it). These sites should be migrated to the builder for consistency — a separate claudony commit, not gated on this work.
+**Claudony:** 1 production call site constructs `new ChannelCreateRequest(...)` at `ClaudonyReactiveCaseChannelProvider.java:176`. The method signature (`create(ChannelCreateRequest)`) doesn't change. The canonical record constructor still exists (records require it). This site should be migrated to the builder for consistency — a separate claudony commit, not gated on this work. The test file (`ClaudonyReactiveCaseChannelProviderTest`) uses Mockito `argThat` matchers that don't construct instances — no migration needed.
 
 **Connectors, Drafthouse:** No direct `ChannelService.create()` calls.
 
