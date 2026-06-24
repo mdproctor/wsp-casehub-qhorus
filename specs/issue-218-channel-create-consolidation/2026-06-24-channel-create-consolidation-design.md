@@ -2,7 +2,7 @@
 
 **Issue:** casehubio/qhorus#218
 **Date:** 2026-06-24
-**Revised:** 2026-06-24 (spec review feedback)
+**Revised:** 2026-06-24 (spec review round 2)
 
 ---
 
@@ -77,6 +77,8 @@ Each connector binding field gets its own named setter — no grouped `connector
 
 Validation (slug format, connector binding completeness, type overlap) stays in the record's compact constructor — `build()` delegates to it. No duplication.
 
+**Constructor visibility:** The canonical record constructor remains public. JLS §8.10.4.2 prohibits a public record's canonical constructor from having more restricted access — package-private is not an option without abandoning records entirely, which would sacrifice value semantics, equals/hashCode, immutability, and pattern matching for no architectural gain. The builder is the conventional API. The public constructor serves as a natural enforcement mechanism: when field 15 is added, constructor callers break (compile error forces explicit handling), while builder callers are unaffected (new field defaults to null). The breakage activates precisely when it matters — at field evolution time — making it better than constructor hiding, which would prevent all direct construction including valid same-package uses.
+
 ### 2. Delete ChannelService convenience overloads
 
 Delete from `ChannelService`:
@@ -99,7 +101,7 @@ Delete from `QhorusMcpTools`:
 - `createChannel(String, String, String, String, String, String)` — 6-param pkg-private
 - `createChannel(String, String, String, String, String, String, Integer, Integer)` — 8-param pkg-private
 
-The 14-param `@Tool` method stays — it is the MCP interface.
+The 14-param `@Tool` method stays — it is the MCP interface. Its internal `new ChannelCreateRequest(...)` construction is migrated to use the builder for consistency.
 
 ### 5. Delete ChannelCreateRequest.simple()
 
@@ -136,14 +138,16 @@ public class Channel extends PanacheEntityBase {
 
 Both services become one-liners:
 ```java
-// ChannelService
+// ChannelService.create()
 Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
 channelStore.put(channel);
 
-// ReactiveChannelService
+// ReactiveChannelService.create()
 Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
 return Panache.withTransaction("qhorus", () -> channelStore.put(channel));
 ```
+
+`findOrCreateWithBinding()` also calls `populateChannel(req)` internally — replaced by `Channel.fromRequest()` as part of this extraction. Its method signature is unchanged.
 
 `CurrentPrincipal` is not passed to the entity — tenancyId is resolved in the service and passed as a plain string. The entity has no CDI dependency.
 
@@ -158,6 +162,9 @@ return Panache.withTransaction("qhorus", () -> channelStore.put(channel));
 | `tools.createChannel(4-param pkg-private)` | 9 | Switch to `channelService.create(builder)` — these tests (CommitmentToolTest, CommitmentLifecycleTest) use channel creation as setup, not as the thing under test |
 | `tools.createChannel(14-param @Tool)` | ~444 | No change — MCP interface |
 | `ChannelCreateRequest.simple()` | 5 | `builder("name").build()` |
+| `QhorusMcpTools.createChannel` @Tool body | 1 | Internal `new ChannelCreateRequest(...)` → builder |
+| `ReactiveQhorusMcpTools.createChannel` @Tool body | 1 | Internal `new ChannelCreateRequest(...)` → builder |
+| `ConnectorChannelBackend.tryAutoCreate()` | 1 | Production code: `new ChannelCreateRequest(14 args)` → builder (passes to `findOrCreateWithBinding`, not `create`) |
 
 The 5-param and 6-param ChannelService overloads have 0 external callers (internal delegation chain only).
 
@@ -165,10 +172,12 @@ The 5-param and 6-param ChannelService overloads have 0 external callers (intern
 
 **Claudony:** 1 production call site constructs `new ChannelCreateRequest(...)` at `ClaudonyReactiveCaseChannelProvider.java:176`. The method signature (`create(ChannelCreateRequest)`) doesn't change. The canonical record constructor still exists (records require it). This site should be migrated to the builder for consistency — a separate claudony commit, not gated on this work. The test file (`ClaudonyReactiveCaseChannelProviderTest`) uses Mockito `argThat` matchers that don't construct instances — no migration needed.
 
-**Connectors, Drafthouse:** No direct `ChannelService.create()` calls.
+**connector-backend (in-repo):** `ConnectorChannelBackend.tryAutoCreate()` constructs `new ChannelCreateRequest(14 positional args)` and passes to `findOrCreateWithBinding()`. Migrated to builder as part of this work.
+
+**Connectors (casehub-connectors), Drafthouse:** No `ChannelService.create()` or `ChannelCreateRequest` construction calls.
 
 ## Not in scope
 
-- 14-param `@Tool` method signature (MCP framework constraint)
-- `findOrCreateWithBinding(ChannelCreateRequest)` (already canonical)
-- Reactive `@Tool` method (stays as-is)
+- 14-param `@Tool` method signature (MCP framework constraint — the @Tool bodies are migrated to use the builder internally, but the parameter list is fixed by the MCP protocol)
+- `findOrCreateWithBinding(ChannelCreateRequest)` method signature (unchanged — its internal `populateChannel()` call is replaced by `Channel.fromRequest()` as part of Section 6)
+- Reactive `@Tool` method signature (stays as-is — internal body migrated to builder)
