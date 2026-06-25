@@ -1,0 +1,9 @@
+branch: issue-294-event-timestamp-context-normaliser
+project-sha: 151c6ac1b0304d36ce918af46b6aac439313a3a3
+date: 2026-06-25
+issue: 294
+issue-repo: casehubio/qhorus
+covers: 294,307,216
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
