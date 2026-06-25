@@ -32,22 +32,35 @@ The `ConnectorsCloudEventAdapter` already uses `message.receivedAt()` — Qhorus
 
 Add `Instant occurredAt` to `MessageReceivedEvent`. Populate from `Message.createdAt` (set by `@PrePersist`) in `MessageObserverDispatcher.dispatch()`. Use in the adapter instead of `now()`.
 
+### Null-safety
+
+The compact constructor adds `Objects.requireNonNull(occurredAt, "occurredAt")` alongside the existing EVENT content check. The record is public API — callers that construct it (tests in qhorus, claudony, engine) must supply a non-null timestamp. Production path is always safe (`message.createdAt` is set by `@PrePersist`); `MessageObserverDispatcher` uses `message.createdAt != null ? message.createdAt : Instant.now()` as defence-in-depth before passing to the constructor (same pattern as `MessageService.dispatch()` line 276-277).
+
+### CloudEvent data payload
+
+`QhorusCloudEventAdapter.toCloudEvent()` serialises the entire `MessageReceivedEvent` as the CloudEvent `data` field. Adding `occurredAt` means the JSON data payload gains a new `"occurredAt"` key. This is additive (non-breaking) and mirrors the duplication pattern used by `ConnectorsCloudEventAdapter` (envelope `time` + payload `receivedAt`). The CloudEvent `time` field is the envelope-level contract; `occurredAt` in the data payload is the source-of-truth copy.
+
 ### Changes
 
 | File | Change |
 |------|--------|
-| `api/.../MessageReceivedEvent.java` | Add `Instant occurredAt` field after `correlationId`, before `content` |
+| `api/.../MessageReceivedEvent.java` | Add `Instant occurredAt` field after `correlationId`, before `content`; add `Objects.requireNonNull(occurredAt)` in compact constructor |
 | `runtime/.../MessageObserverDispatcher.java` | Pass `message.createdAt` (with `Instant.now()` fallback) at construction |
 | `runtime/.../QhorusCloudEventAdapter.java` | `.withTime(event.occurredAt().atOffset(ZoneOffset.UTC))` replaces `OffsetDateTime.now()` |
-| All test constructors | Add `occurredAt` argument |
 
-### Edge case
+### Breaking change — call-site inventory
 
-`message.createdAt` is set by `@PrePersist` — always populated after `messageStore.put()`. The dispatcher is called post-persist. For defence-in-depth against direct `Message` construction in tests: `message.createdAt != null ? message.createdAt : Instant.now()` (same pattern as `MessageService.dispatch()` line 276-277).
+`MessageReceivedEvent` is a record in `qhorus-api`. Adding a field changes the canonical constructor. All callers gain the `occurredAt` argument (`Instant.now()` in tests).
 
-### Breaking change
-
-`MessageReceivedEvent` is a record in `qhorus-api`. Adding a field changes the canonical constructor. All callers must be updated. This is intentional — every caller should carry the event's own timestamp.
+| Repo | File | Sites |
+|------|------|-------|
+| qhorus | `MessageObserverDispatcher.java` | 1 (production fix site) |
+| qhorus | `QhorusCloudEventAdapterTest.java` | 7 |
+| qhorus | `MessageObserverDispatcherTest.java` | multiple incl. assertThrows at lines 373/380 |
+| claudony | `FleetMessageRelayObserverTest.java` | 3 |
+| engine | `InboundWorkItemBridgeGuardTest.java` | 1 |
+| engine | `InboundWorkItemBridgeTest.java` | 3 |
+| engine | `QhorusMessageSignalBridgeTest.java` | 3 |
 
 ---
 
@@ -106,6 +119,8 @@ The gateway already captures the normaliser per-channel in `BackendEntry` (one e
 - Remove: `default InboundNormaliser normaliser() { return null; }`
 - Add: `default InboundNormaliser normaliserFor(UUID channelId) { return null; }`
 
+The parameter is `UUID channelId`, not `ChannelRef`. This is deliberate: `registerBackend(UUID channelId, ...)` only has the UUID — constructing a `ChannelRef` would require a name lookup for zero benefit. Neither `ConnectorChannelBackend` nor `SlackChannelBackend` need the name for normaliser dispatch (both key on UUID from their internal caches). The `open/close/post` SPI methods use `ChannelRef` because backends need the human-readable name for display (Slack thread titles, connector delivery logs). `normaliserFor` is a pure lookup — UUID suffices.
+
 `ChannelGateway.registerBackend()`: change `hb.normaliser()` → `hb.normaliserFor(channelId)`.
 
 `SlackChannelBackend`: rename method, ignore parameter, return same normaliser.
@@ -132,6 +147,7 @@ Lives in `connector-backend`, not `qhorus-api`. The concept of "connector type" 
 
 - Inject `Instance<ConnectorNormaliser>` for CDI discovery
 - Build `Map<String, ConnectorNormaliser>` at `@PostConstruct`, keyed by `connectorId()`
+- **Duplicate detection:** If two `ConnectorNormaliser` beans return the same `connectorId()`, throw `IllegalStateException` at bootstrap naming both classes. Follows the `ProjectionRegistry` pattern (fail-fast at CDI startup, not at first tool call).
 - Implement `normaliserFor(UUID channelId)`: look up `CacheEntry.inboundConnectorId` → return matching normaliser or `null` (falls through to system `DefaultInboundNormaliser`)
 
 ### Bonus: correlationId passthrough
