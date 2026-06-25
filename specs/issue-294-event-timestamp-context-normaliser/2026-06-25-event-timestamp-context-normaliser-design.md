@@ -46,6 +46,7 @@ The compact constructor adds `Objects.requireNonNull(occurredAt, "occurredAt")` 
 |------|--------|
 | `api/.../MessageReceivedEvent.java` | Add `Instant occurredAt` field after `correlationId`, before `content`; add `Objects.requireNonNull(occurredAt)` in compact constructor |
 | `runtime/.../MessageObserverDispatcher.java` | Pass `message.createdAt` (with `Instant.now()` fallback) at construction |
+| `runtime/.../ReactiveMessageService.java` | Set `syntheticMsg.createdAt = ctx.occurredAt()` on the synthetic Message (lines 304-314); without this, the reactive path falls back to `Instant.now()` — relocating the bug rather than fixing it |
 | `runtime/.../QhorusCloudEventAdapter.java` | `.withTime(event.occurredAt().atOffset(ZoneOffset.UTC))` replaces `OffsetDateTime.now()` |
 
 ### Breaking change — call-site inventory
@@ -80,18 +81,34 @@ Both blocking (`LedgerWriteService`) and reactive (`ReactiveLedgerWriteService`)
 
 Add `String capabilityTag` to `CommitmentContext`. Extract it from `commandEntry.content` BEFORE constructing `CommitmentContext`. Set `LedgerAttestation.capabilityTag` from `ctx.capabilityTag()` instead of re-extracting. Single extraction, single source of truth.
 
+### 2-arg overload removal
+
+`CommitmentAttestationPolicy` has a backward-compatible 2-arg default method:
+```java
+default Optional<AttestationOutcome> attestationFor(MessageType terminalType,
+        String resolvedActorId) {
+    return attestationFor(terminalType, resolvedActorId, null);
+}
+```
+
+**Remove it.** Zero production callers — both `LedgerWriteService` and `ReactiveLedgerWriteService` call the 3-arg form directly. Zero callers outside qhorus. 13 test callers in `CommitmentAttestationPolicyTest`, all exercising the policy without context. Adding `capabilityTag` to `CommitmentContext` increases what this shim hides — tests using it can never exercise capability-scoped attestation.
+
+Migration: all 13 test sites become `attestationFor(type, actorId, null)`. The `twoArgDefault_delegatesToThreeArg_withNullContext` test is deleted (tests the removed shim). Context remains nullable in the 3-arg form — it's an SPI boundary.
+
 ### Changes
 
 | File | Change |
 |------|--------|
 | `api/.../CommitmentContext.java` | Add `String capabilityTag` field after `commitmentId` |
+| `api/.../CommitmentAttestationPolicy.java` | Remove 2-arg `attestationFor` default method |
 | `runtime/.../LedgerWriteService.java` | Call `extractCapabilityTag(commandEntry.content)` before `CommitmentContext` construction; pass as 5th arg; set `attestation.capabilityTag = ctx.capabilityTag()` |
 | `runtime/.../ReactiveLedgerWriteService.java` | Same restructuring |
-| All test constructors | Add `capabilityTag` argument |
+| `runtime/test/.../CommitmentAttestationPolicyTest.java` | All 13 sites → 3-arg form with null context; delete `twoArgDefault_delegatesToThreeArg_withNullContext` test |
+| All other test constructors of `CommitmentContext` | Add `capabilityTag` argument |
 
 ### Protocol update
 
-PP-20260623-77adf0 (`commitment-attestation-policy-null-context`) must be updated to document the new `capabilityTag` field. Null-safety guidance: implementations should treat null `capabilityTag` as global scope (`CapabilityTag.GLOBAL`).
+PP-20260623-77adf0 (`commitment-attestation-policy-null-context`) must be updated: remove reference to the 2-arg overload, document the new `capabilityTag` field. Null-safety guidance remains — the 3-arg form's context parameter is nullable at the SPI boundary. Implementations should treat null `capabilityTag` (or null context) as global scope (`CapabilityTag.GLOBAL`).
 
 ### Downstream unblock
 
