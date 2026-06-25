@@ -177,9 +177,23 @@ Lives in `connector-backend`, not `qhorus-api`. The concept of "connector type" 
 |------|--------|
 | `api/.../HumanParticipatingChannelBackend.java` | `normaliser()` → `normaliserFor(UUID channelId)` |
 | `runtime/.../ChannelGateway.java` | Pass `channelId` to `normaliserFor()` in `registerBackend()` |
-| `slack-channel/.../SlackChannelBackend.java` | Rename method |
+| `slack-channel/.../SlackChannelBackend.java` | Rename method, ignore parameter |
 | `connector-backend/.../ConnectorNormaliser.java` | **New interface** |
 | `connector-backend/.../ConnectorChannelBackend.java` | Inject `Instance<ConnectorNormaliser>`, dispatch map, `normaliserFor()` impl, correlationId passthrough in `route()` |
+
+### Breaking change — call-site inventory
+
+`normaliser()` → `normaliserFor(UUID channelId)` breaks all `@Override` sites. Same fix pattern as `SlackChannelBackend`: rename, ignore parameter, return same normaliser.
+
+| Repo | File | Sites | Notes |
+|------|------|-------|-------|
+| qhorus | `SlackChannelBackend.java` | 1 | Production — ignore param, return `slackInboundNormaliser` |
+| qhorus | `ConnectorChannelBackend.java` | 1 | Production — new dispatch logic |
+| qhorus | `ChannelGatewayTest.java` | 2 (lines 249, 321) | Test inline backends — rename, ignore param |
+| qhorus | `ChannelGatewayIntegrationTest.java` | 1 (line 64) | Test inline backend — rename, ignore param |
+| qhorus | `ChannelGatewayTest.java` | 0 (line 271) | Comment-only ref — update comment text to `normaliserFor(UUID)` |
+
+No implementations of `HumanParticipatingChannelBackend` exist outside qhorus (verified across claudony, engine, work).
 
 ### Design constraints
 
