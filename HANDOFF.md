@@ -1,3 +1,5 @@
+*Updated: casehub-devtown#13 closed — removed from backlog.*
+
 # CaseHub Qhorus — Session Handover
 **Date:** 2026-06-27 — #294, #307, #216 event timestamp, attestation context, per-connector normaliser
 
@@ -17,8 +19,6 @@ Next candidates:
 |---|-------------|-------|------------|-------|
 | #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — | — |
 | #169 | Extract persistence-memory/ module from testing/ | M | Low | Standalone |
-
-casehub-devtown#13 unblocked by #307 (capabilityTag now in CommitmentContext).
 
 ## What Was Done This Session
 
