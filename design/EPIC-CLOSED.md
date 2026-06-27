@@ -1,5 +1,5 @@
-# Branch Closed: issue-261-slack-channel-backend
+# Branch Closed: issue-294-event-timestamp-context-normaliser
 
-**Date:** 2026-06-20
-**Issues:** 261
+**Date:** 2026-06-27
+**Issues:** 294,307,216
 **Status:** merged to main
