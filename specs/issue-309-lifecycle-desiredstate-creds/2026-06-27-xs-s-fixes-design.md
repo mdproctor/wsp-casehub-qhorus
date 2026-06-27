@@ -56,6 +56,10 @@ Lives in `api/src/test/` — the enum is in the API module.
 - `api/src/main/java/io/casehub/qhorus/api/message/CommitmentState.java` — add `isActive()`
 - `api/src/test/java/io/casehub/qhorus/api/message/CommitmentStateTest.java` — new test
 
+### Cross-repo update
+
+`parent/docs/LIFECYCLE.md` — update CommitmentState registration row to list both `isTerminal()` and `isActive()` in the "Terminal check method" column (currently shows `isTerminal()` only). Per LIFECYCLE.md Rule 2 step 3.
+
 ---
 
 ## #308 — Slack credential migration to CredentialResolver
