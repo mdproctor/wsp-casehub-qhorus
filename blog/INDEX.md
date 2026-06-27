@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-27-mdp01-when-now-is-the-bug.md](2026-06-27-mdp01-when-now-is-the-bug.md) | 2026-06-27 | CloudEvent timestamp fix (#294), capabilityTag in CommitmentContext (#307), per-connector normaliserFor(UUID) SPI (#216) |
 | [2026-06-24-mdp01-the-overload-that-kept-growing.md](2026-06-24-mdp01-the-overload-that-kept-growing.md) | 2026-06-24 | Builder on ChannelCreateRequest; 12 convenience overloads deleted; Channel.fromRequest() extraction |
 | [2026-06-23-mdp02-what-response-got-away-with.md](2026-06-23-mdp02-what-response-got-away-with.md) | 2026-06-23 | EvidentialChecker extracted to runtime; CommitmentContext SPI; RESPONSE-on-COMMAND attestation gap fixed |
 | [2026-06-23-mdp01-stopped-lying-wrong-word.md](2026-06-23-mdp01-stopped-lying-wrong-word.md) | 2026-06-23 | Normative benchmark — Zone 1/2/3; 1B model stops lying, uses RESPONSE instead of DONE/FAILURE/DECLINE |
