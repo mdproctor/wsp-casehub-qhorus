@@ -1,34 +1,37 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-24 — #218 ChannelCreateRequest builder consolidation
+**Date:** 2026-06-27 — #294, #307, #216 event timestamp, attestation context, per-connector normaliser
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `151c6ac`. Four issues closed (#218, #302, #301, #300).
+Main is clean. Both remotes at `80e0eb8`. Three issues closed (#294, #307, #216).
 
-⚠️ GitHub Packages auth expired — `mvn install` fails resolving `casehub-platform:0.2-SNAPSHOT`. Re-authenticate before building: check `~/.m2/settings.xml` GitHub token. The code is verified (full build passed before squash, identical code).
+GitHub Packages auth status unknown — was expired last session. If `mvn install` fails resolving `casehub-platform:0.2-SNAPSHOT`, check `~/.m2/settings.xml` GitHub token.
+
+Cross-repo follow-up needed: `MessageReceivedEvent` constructor changed (added `Instant occurredAt`). Claudony (3 test sites) and engine (7 test sites) will fail at next compile — mechanical fix (`Instant.now()` as 7th arg).
 
 Next candidates:
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — | — |
+| #169 | Extract persistence-memory/ module from testing/ | M | Low | Standalone |
 
-casehub-devtown#13 remains unblocked.
+casehub-devtown#13 unblocked by #307 (capabilityTag now in CommitmentContext).
 
 ## What Was Done This Session
 
-**ChannelCreateRequest builder (#218):** Added `Builder` inner class (name required, semantic defaults to APPEND, 14 individual named setters). Deleted 12 convenience overloads across ChannelService (4), ReactiveChannelService (4), QhorusMcpTools (4). `create(ChannelCreateRequest)` is now the sole entry point. `ChannelCreateRequest.simple()` removed.
+**CloudEvent timestamp (#294):** Added `Instant occurredAt` to `MessageReceivedEvent` with `requireNonNull` in compact constructor. Populated from `Message.createdAt` in `MessageObserverDispatcher`. Fixed reactive path (`syntheticMsg.createdAt = ctx.occurredAt()`). Adapter uses `event.occurredAt()` instead of `OffsetDateTime.now()`.
 
-**Channel.fromRequest() extraction:** Eliminated identical `populateChannel()` and `blankToNull()` duplication across ChannelService and ReactiveChannelService. Static factory on Channel — tenancyId passed as parameter, no CDI dependency.
+**Attestation capabilityTag (#307):** Added `String capabilityTag` as 5th field on `CommitmentContext`. Extracted from COMMAND content BEFORE `attestationFor()` — single extraction, single source of truth. Removed 2-arg `attestationFor` backward-compat overload (zero production callers). Updated protocol PP-20260623-77adf0.
 
-**Stale issues closed:** #302 (already fixed in #296), #301 (resolved by platform#111), #300 (already implemented in #279). Zero code changes.
+**Per-connector normaliser (#216):** Renamed `normaliser()` → `normaliserFor(UUID channelId)` on `HumanParticipatingChannelBackend`. New `ConnectorNormaliser` SPI in connector-backend with CDI discovery and duplicate detection. `ConnectorChannelBackend.route()` now passes `correlation-id` from metadata.
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/issue-218-channel-create-consolidation/2026-06-24-channel-create-consolidation-design.md` |
-| Blog entry | workspace `blog/2026-06-24-mdp01-the-overload-that-kept-growing.md` |
+| Design spec | `docs/specs/2026-06-25-event-timestamp-context-normaliser-design.md` |
+| Blog entry | workspace `blog/2026-06-27-mdp01-when-now-is-the-bug.md` |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
