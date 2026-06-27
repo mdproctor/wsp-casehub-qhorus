@@ -1,0 +1,9 @@
+branch: issue-309-lifecycle-desiredstate-creds
+project-sha: 80e0eb80ed11e22e25b1d236a80fd4624b08b108
+date: 2026-06-27
+issue: 309
+issue-repo: casehubio/qhorus
+covers: 309,287,308
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
