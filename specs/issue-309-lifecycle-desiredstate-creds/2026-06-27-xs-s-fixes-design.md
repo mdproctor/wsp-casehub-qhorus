@@ -1,8 +1,27 @@
-# XS/S Fixes: Lifecycle, DesiredState Bridge, Credential Migration
+# XS/S Fixes: Lifecycle, Credential Migration
 
 **Date:** 2026-06-27
-**Issues:** #309, #287, #308
+**Issues:** #309, #308
 **Branch:** `issue-309-lifecycle-desiredstate-creds`
+
+---
+
+## #287 — Removed from scope (wrong repo)
+
+The original spec proposed a `desiredstate/` bridge module in qhorus implementing `NodeDriftChecker` with `@Alternative @Priority(1)`. This was architecturally wrong — it creates an upward coupling from qhorus (Foundation tier) to casehub-ops-api (Integration tier).
+
+The existing `ChannelDriftChecker` already lives in `casehub-ops/deployment/` and already depends on `casehub-qhorus` runtime (`provided` scope). The dependency direction is correct (ops→qhorus, downward). The enrichment — comparing all 13+ fields instead of 4, adding connector binding checks — belongs in that existing checker, not in a new qhorus module.
+
+The cross-foundation-bridge-module-placement protocol does not apply here — it governs "peer foundation modules," and casehub-ops is Integration tier, not a peer.
+
+**Action:** Close qhorus#287 with a redirect to a new casehub-ops issue. The ops issue should include:
+
+1. Enrich `ChannelDriftChecker` to compare all `ChannelNodeSpec` fields (description, semantic, allowedWriters, adminInstances, barrierContributors, plus the 4 mutable fields already checked).
+2. Add connector binding drift detection via `ChannelBindingStore.findByChannelId()`.
+3. Fix the tenancy gap: replace `ChannelLookup.findByName(name)` with `CrossTenantChannelStore.findByNameAndTenancy(name, tenancyId)` — the `tenancyId` parameter is already passed to `check()` but currently ignored.
+4. Fix CSV string comparison for `allowedWriters`, `adminInstances`, `barrierContributors`: compare as sorted sets (split, sort, compare) rather than `Objects.equals()` on raw strings — `"agent-a,agent-b"` and `"agent-b,agent-a"` are semantically equivalent.
+5. Test reverse binding asymmetry: binding present in actual but absent in spec is also `DRIFTED`.
+6. Update PLATFORM.md line 413 to remove the "qhorus#287" bridge reference.
 
 ---
 
@@ -39,94 +58,6 @@ Lives in `api/src/test/` — the enum is in the API module.
 
 ---
 
-## #287 — `casehub-qhorus-desiredstate` bridge module
-
-### Problem
-
-casehub-ops ships a `ChannelDriftChecker` that compares only 4 mutable fields (allowedTypes, deniedTypes, rateLimitPerChannel, rateLimitPerInstance). It cannot check immutable fields (semantic) or connector binding state because that requires access to qhorus runtime stores.
-
-### Design
-
-A new `desiredstate/` submodule — single-class Jandex library module following the optional-module-pattern protocol.
-
-**Module:** `casehub-qhorus-desiredstate`
-**Package:** `io.casehub.qhorus.desiredstate`
-
-**Dependencies:**
-- `casehub-ops-api` (`provided`) — `NodeDriftChecker`, `ChannelNodeSpec`, `DeploymentNodeSpec`, `NodeStatus`
-- `casehub-desiredstate-api` (`provided`) — `NodeSpec`, `NodeStatus` (transitive via ops-api, but explicit for clarity)
-- `casehub-qhorus-api` — `ChannelSemantic`, `MessageType`
-- `casehub-qhorus` — `ChannelStore`, `ChannelBindingStore`, `Channel`
-- Jandex plugin for CDI discovery
-- `casehub-platform` (`test`) — `MockCurrentPrincipal`
-
-**Class:** `QhorusChannelDriftChecker`
-
-```java
-@Alternative
-@Priority(1)
-@ApplicationScoped
-public class QhorusChannelDriftChecker implements NodeDriftChecker {
-
-    @Override
-    public String nodeType() { return "channel"; }
-
-    @Override
-    public NodeStatus check(NodeSpec spec, String tenancyId) { ... }
-}
-```
-
-Injects `ChannelStore` and `ChannelBindingStore`. Lookup by `spec.nodeId()` (channel name) via `ChannelStore.findByName()`.
-
-**Fields compared:**
-
-| Field | Source | Category |
-|-------|--------|----------|
-| semantic | `Channel.semantic` vs `ChannelNodeSpec.semantic()` | Immutable |
-| description | `Channel.description` vs `ChannelNodeSpec.description()` | Mutable |
-| allowedTypes | `Channel.allowedTypes` (CSV) vs `ChannelNodeSpec.allowedTypes()` (Set) | Mutable |
-| deniedTypes | `Channel.deniedTypes` (CSV) vs `ChannelNodeSpec.deniedTypes()` (Set) | Mutable |
-| allowedWriters | `Channel.allowedWriters` vs `ChannelNodeSpec.allowedWriters()` | Mutable |
-| adminInstances | `Channel.adminInstances` vs `ChannelNodeSpec.adminInstances()` | Mutable |
-| barrierContributors | `Channel.barrierContributors` vs `ChannelNodeSpec.barrierContributors()` | Mutable |
-| rateLimitPerChannel | `Channel.rateLimitPerChannel` vs `ChannelNodeSpec.rateLimitPerChannel()` | Mutable |
-| rateLimitPerInstance | `Channel.rateLimitPerInstance` vs `ChannelNodeSpec.rateLimitPerInstance()` | Mutable |
-| inboundConnectorId | `ChannelBindingStore` vs `ChannelNodeSpec.inboundConnectorId()` | Binding |
-| externalKey | `ChannelBindingStore` vs `ChannelNodeSpec.externalKey()` | Binding |
-| outboundConnectorId | `ChannelBindingStore` vs `ChannelNodeSpec.outboundConnectorId()` | Binding |
-| outboundDestination | `ChannelBindingStore` vs `ChannelNodeSpec.outboundDestination()` | Binding |
-
-**Not compared:** `paused` (operational state), `autoCreated` (metadata), `tenancyId` (parameter), timestamps, Slack-specific bindings (separate module concern).
-
-**Type comparison helpers:** `MessageType.parseTypes(csv)` converts stored CSV to `Set<MessageType>` for comparison with the spec's typed sets. Null-safe: both-null means match; null vs empty-set means match (open channel).
-
-### Test
-
-`QhorusChannelDriftCheckerTest` — CDI-free unit test using `InMemoryChannelStore` and `InMemoryChannelBindingStore` from `casehub-qhorus-testing`.
-
-Scenarios:
-1. Channel absent → `ABSENT`
-2. All fields match → `PRESENT`
-3. Mutable field drift (each field) → `DRIFTED`
-4. Immutable field drift (semantic) → `DRIFTED`
-5. Connector binding drift → `DRIFTED`
-6. Connector binding absent in actual but present in spec → `DRIFTED`
-7. Non-channel spec type → `UNKNOWN`
-
-### Files changed
-
-- `desiredstate/pom.xml` — new module
-- `desiredstate/src/main/java/io/casehub/qhorus/desiredstate/QhorusChannelDriftChecker.java`
-- `desiredstate/src/test/java/io/casehub/qhorus/desiredstate/QhorusChannelDriftCheckerTest.java`
-- `pom.xml` — add `<module>desiredstate</module>` (after `runtime` — depends on it)
-
-### Cross-repo impact
-
-PLATFORM.md Cross-Repo Dependency Map needs a new row:
-`casehub-ops-api` consumed by `casehub-qhorus` `desiredstate` — `NodeDriftChecker` SPI.
-
----
-
 ## #308 — Slack credential migration to CredentialResolver
 
 ### Problem
@@ -137,20 +68,33 @@ PLATFORM.md Cross-Repo Dependency Map needs a new row:
 
 **SlackChannelBackend:**
 - Replace `Config config` constructor parameter with `CredentialResolver credentialResolver`
+- Remove `import org.eclipse.microprofile.config.Config`
 - `resolveToken(String workspaceId)` calls `credentialResolver.resolve(workspaceId)` and extracts `CredentialPropertyKeys.BEARER_TOKEN`
-- Throws `NoSuchElementException` if token is null or blank (preserves existing error contract)
+
+**Error contract change:** `Config.getValue()` throws `NoSuchElementException` when a key is missing. `CredentialResolver.resolve()` never throws — it returns `Map.of()` for missing refs. The new `resolveToken()` must explicitly throw `NoSuchElementException` when the `BEARER_TOKEN` key is absent or blank from the resolved map. The throwing responsibility shifts from Config to our code.
+
+```java
+String resolveToken(String workspaceId) {
+    Map<String, String> creds = credentialResolver.resolve(workspaceId);
+    String token = creds.get(CredentialPropertyKeys.BEARER_TOKEN);
+    if (token == null || token.isBlank()) {
+        throw new NoSuchElementException("No bearer-token for credential ref: " + workspaceId);
+    }
+    return token;
+}
+```
 
 **SlackBindingResource:**
 - Replace `Config config` constructor parameter with `CredentialResolver credentialResolver`
-- Validation in `put()` uses `credentialResolver.resolve(req.workspaceId())` and checks for `BEARER_TOKEN` presence/non-blank
-- Error messages updated to reference `casehub.credentials.<workspaceId>` namespace
+- Remove `import org.eclipse.microprofile.config.Config`
+- Validation in `put()` uses `credentialResolver.resolve(req.workspaceId())` and checks for `BEARER_TOKEN` presence/non-blank. Error messages updated to reference `casehub.credentials.<workspaceId>` namespace.
 
 **SlackBotBinding:**
 - No changes. `workspaceId` remains the credential ref — Slack tokens are per-workspace.
 
 **Dependencies (slack-channel/pom.xml):**
-- Add `casehub-platform-api` as explicit compile dependency (already transitive, but direct import of `CredentialResolver` warrants explicit declaration)
-- Remove `microprofile-config-api` from `<scope>provided</scope>` — no longer directly imported. Still available transitively through CDI and JPA.
+- Add `casehub-platform-api` as explicit compile dependency (already transitive via `casehub-qhorus-api`, but direct import of `CredentialResolver` warrants explicit declaration)
+- Remove `microprofile-config-api` from `<scope>provided</scope>` — no main source file imports it after migration. Confirmed: only `SlackChannelBackend.java` and `SlackBindingResource.java` import `Config`; both are migrated.
 
 **Config namespace change:**
 - Old: `casehub.qhorus.slack-channel.credentials.<workspaceId>=xoxb-...`
@@ -160,7 +104,11 @@ PLATFORM.md Cross-Repo Dependency Map needs a new row:
 
 ### Test
 
-Update `SlackChannelBackendTest` and `SlackBindingResourceTest` (if it exists — may need `SlackBindingResourceTest` to be created) to inject/mock `CredentialResolver` instead of `Config`.
+Update existing tests to mock `CredentialResolver` instead of `Config`:
+
+- **`SlackChannelBackendTest`** — replace `Config` mock with `CredentialResolver` mock. `resolveToken()` tests verify: (a) successful resolution returns token from `BEARER_TOKEN` key; (b) empty map from resolve → `NoSuchElementException`; (c) blank token value → `NoSuchElementException`.
+- **`SlackBindingResourceTest`** — has 6 test methods covering all validation paths. Replace `Config config` field with `CredentialResolver credentialResolver`. Update `credKey` references to use `CredentialResolver.resolve()` mock setup. The `put_missingCredential_returns400_beforeSave` and `put_blankCredential_returns400_beforeSave` tests verify the same error paths but through the new API.
+- Test `application.properties` — rename credential keys to `casehub.credentials.*` if any integration tests use them.
 
 ### Files changed
 
@@ -168,7 +116,7 @@ Update `SlackChannelBackendTest` and `SlackBindingResourceTest` (if it exists �
 - `slack-channel/src/main/java/io/casehub/qhorus/slack/SlackChannelBackend.java` — replace Config with CredentialResolver
 - `slack-channel/src/main/java/io/casehub/qhorus/slack/SlackBindingResource.java` — replace Config with CredentialResolver
 - `slack-channel/src/test/java/io/casehub/qhorus/slack/SlackChannelBackendTest.java` — update mocks
-- Test application.properties — rename credential keys to `casehub.credentials.*`
+- `slack-channel/src/test/java/io/casehub/qhorus/slack/SlackBindingResourceTest.java` — update mocks
 
 ### Protocol update
 
@@ -179,5 +127,5 @@ The `per-binding-credential-reference.md` protocol in casehub/garden should be u
 ## Implementation Order
 
 1. **#309** — XS, no dependencies, foundational
-2. **#287** — S, independent of #308, new module
-3. **#308** — S, independent of #287, migration in existing module
+2. **#308** — S, credential migration in existing module
+3. **#287** — Removed from qhorus scope; redirect to casehub-ops issue
