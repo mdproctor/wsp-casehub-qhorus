@@ -90,7 +90,8 @@ String resolveToken(String workspaceId) {
 - Validation in `put()` uses `credentialResolver.resolve(req.workspaceId())` and checks for `BEARER_TOKEN` presence/non-blank. Error messages updated to reference `casehub.credentials.<workspaceId>` namespace.
 
 **SlackBotBinding:**
-- No changes. `workspaceId` remains the credential ref — Slack tokens are per-workspace.
+- Field unchanged. `workspaceId` remains the credential ref — Slack tokens are per-workspace.
+- Javadoc update only: `workspaceId` field comment references "MicroProfile Config credential key" — update to "CredentialResolver credential ref".
 
 **Dependencies (slack-channel/pom.xml):**
 - Add `casehub-platform-api` as explicit compile dependency (already transitive via `casehub-qhorus-api`, but direct import of `CredentialResolver` warrants explicit declaration)
@@ -108,7 +109,7 @@ Update existing tests to mock `CredentialResolver` instead of `Config`:
 
 - **`SlackChannelBackendTest`** — replace `Config` mock with `CredentialResolver` mock. `resolveToken()` tests verify: (a) successful resolution returns token from `BEARER_TOKEN` key; (b) empty map from resolve → `NoSuchElementException`; (c) blank token value → `NoSuchElementException`.
 - **`SlackBindingResourceTest`** — has 6 test methods covering all validation paths. Replace `Config config` field with `CredentialResolver credentialResolver`. Update `credKey` references to use `CredentialResolver.resolve()` mock setup. The `put_missingCredential_returns400_beforeSave` and `put_blankCredential_returns400_beforeSave` tests verify the same error paths but through the new API.
-- Test `application.properties` — rename credential keys to `casehub.credentials.*` if any integration tests use them.
+- `slack-channel/src/test/resources/application.properties` — rename `casehub.qhorus.slack-channel.credentials.T_TEST` to `casehub.credentials.T_TEST` (line 35).
 
 ### Files changed
 
@@ -117,6 +118,8 @@ Update existing tests to mock `CredentialResolver` instead of `Config`:
 - `slack-channel/src/main/java/io/casehub/qhorus/slack/SlackBindingResource.java` — replace Config with CredentialResolver
 - `slack-channel/src/test/java/io/casehub/qhorus/slack/SlackChannelBackendTest.java` — update mocks
 - `slack-channel/src/test/java/io/casehub/qhorus/slack/SlackBindingResourceTest.java` — update mocks
+- `slack-channel/src/main/java/io/casehub/qhorus/slack/SlackBotBinding.java` — javadoc update on `workspaceId` field
+- `slack-channel/src/test/resources/application.properties` — rename credential key to `casehub.credentials.*`
 
 ### Protocol update
 
