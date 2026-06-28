@@ -1,0 +1,9 @@
+branch: issue-310-sweep-isactive-resolvetoken-test
+project-sha: dc946b6f077c64fb93257eecd22c1cccae9c08db
+date: 2026-06-28
+issue: 310
+issue-repo: casehubio/qhorus
+covers: 310
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
