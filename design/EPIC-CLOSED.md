@@ -1,5 +1,5 @@
-# Branch Closed: issue-261-slack-channel-backend
+# Branch Closed: issue-309-lifecycle-desiredstate-creds
 
-**Date:** 2026-06-20
-**Issues:** 261
+**Date:** 2026-06-28
+**Issues:** 309,287,308
 **Status:** merged to main
