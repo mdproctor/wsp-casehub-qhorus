@@ -1,37 +1,35 @@
-*Updated: casehub-devtown#13 closed — removed from backlog.*
-
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-27 — #294, #307, #216 event timestamp, attestation context, per-connector normaliser
+**Date:** 2026-06-28 — #309, #308 lifecycle + credential migration; #287 redirected to ops
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `80e0eb8`. Three issues closed (#294, #307, #216).
+Main is clean. Both remotes at `dc946b6`. Three issues closed (#309, #308, #287→ops#14).
 
-GitHub Packages auth status unknown — was expired last session. If `mvn install` fails resolving `casehub-platform:0.2-SNAPSHOT`, check `~/.m2/settings.xml` GitHub token.
-
-Cross-repo follow-up needed: `MessageReceivedEvent` constructor changed (added `Instant occurredAt`). Claudony (3 test sites) and engine (7 test sites) will fail at next compile — mechanical fix (`Instant.now()` as 7th arg).
+Cross-repo follow-up still pending from last session: `MessageReceivedEvent` constructor changed (added `Instant occurredAt`). Claudony (3 test sites) and engine (7 test sites) will fail at next compile — mechanical fix (`Instant.now()` as 7th arg).
 
 Next candidates:
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #287 | `casehub-qhorus-desiredstate` NodeDriftChecker bridge | — | — | — |
+| #310 | Sweep `!isTerminal()` → `isActive()` + resolveToken direct test | XS | Low | Follow-up from code review |
 | #169 | Extract persistence-memory/ module from testing/ | M | Low | Standalone |
+| ops#14 | Enrich ChannelDriftChecker — full field comparison, tenancy fix | S | Low | Cross-repo (casehub-ops) |
 
 ## What Was Done This Session
 
-**CloudEvent timestamp (#294):** Added `Instant occurredAt` to `MessageReceivedEvent` with `requireNonNull` in compact constructor. Populated from `Message.createdAt` in `MessageObserverDispatcher`. Fixed reactive path (`syntheticMsg.createdAt = ctx.occurredAt()`). Adapter uses `event.occurredAt()` instead of `OffsetDateTime.now()`.
+**CommitmentState isActive (#309):** Added `isActive()` with explicit enumeration of OPEN and ACKNOWLEDGED. `CommitmentStateTest` verifies exhaustiveness invariant (every state classified by exactly one method). LIFECYCLE.md updated in parent repo.
 
-**Attestation capabilityTag (#307):** Added `String capabilityTag` as 5th field on `CommitmentContext`. Extracted from COMMAND content BEFORE `attestationFor()` — single extraction, single source of truth. Removed 2-arg `attestationFor` backward-compat overload (zero production callers). Updated protocol PP-20260623-77adf0.
+**Slack credential migration (#308):** Replaced `Config.getValue("casehub.qhorus.slack-channel.credentials.<id>")` with `CredentialResolver.resolve(workspaceId).get(BEARER_TOKEN)`. Error contract preserved — `resolveToken()` now throws explicitly since CredentialResolver never throws. Config namespace: `casehub.credentials.<id>`.
 
-**Per-connector normaliser (#216):** Renamed `normaliser()` → `normaliserFor(UUID channelId)` on `HumanParticipatingChannelBackend`. New `ConnectorNormaliser` SPI in connector-backend with CDI discovery and duplicate detection. `ConnectorChannelBackend.route()` now passes `correlation-id` from metadata.
+**#287 redirected:** Original bridge module proposal was a layering violation (Foundation→Integration upward coupling). Closed qhorus#287, filed casehub-ops#14 with 6 requirements including tenancy gap fix and CSV set comparison.
+
+**Code review:** 0 Critical/Important. 3 Minor noted → filed #310.
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/2026-06-25-event-timestamp-context-normaliser-design.md` |
-| Blog entry | workspace `blog/2026-06-27-mdp01-when-now-is-the-bug.md` |
+| Design spec | `docs/specs/2026-06-27-xs-s-fixes-design.md` |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
