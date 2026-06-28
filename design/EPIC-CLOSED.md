@@ -1,5 +1,5 @@
-# Branch Closed: issue-261-slack-channel-backend
+# Branch Closed: issue-310-sweep-isactive-resolvetoken-test
 
-**Date:** 2026-06-20
-**Issues:** 261
+**Date:** 2026-06-29
+**Issues:** 310
 **Status:** merged to main
