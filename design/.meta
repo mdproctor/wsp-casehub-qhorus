@@ -1,0 +1,9 @@
+branch: issue-311-batch-ci-delivery-modules
+project-sha: 040e1db0145ef361afd9ae46c4f0e63597ed912c
+date: 2026-06-30
+issue: 311
+issue-repo: casehubio/qhorus
+covers: 311,312,313,169
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
