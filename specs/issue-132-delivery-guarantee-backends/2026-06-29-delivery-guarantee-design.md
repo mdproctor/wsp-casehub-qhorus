@@ -196,7 +196,11 @@ void pumpLoop() {
                 Set<UUID> unique = new HashSet<>(batch);
                 batch.clear();
                 for (UUID channelId : unique) {
-                    processChannel(channelId);
+                    try {
+                        processChannel(channelId);
+                    } catch (Exception e) {
+                        LOG.errorf(e, "Error processing channel %s — pump continues", channelId);
+                    }
                 }
             }
         } catch (InterruptedException e) {
@@ -395,10 +399,13 @@ public void fanOut(UUID channelId, String channelName, OutboundMessage message) 
     for (BackendEntry entry : List.copyOf(entries)) {
         if (entry.backend() == agentBackend) continue;
         ChannelBackend backend = entry.backend();
-        if (backend.deliveryGuarantee() == DeliveryGuarantee.AT_LEAST_ONCE) {
+        if (deliveryEnabled && backend.deliveryGuarantee() == DeliveryGuarantee.AT_LEAST_ONCE) {
             hasTracked = true;
-            continue;
+            continue; // pump handles delivery
         }
+        // BEST_EFFORT backends always get fire-and-forget.
+        // AT_LEAST_ONCE backends also get fire-and-forget when delivery is disabled
+        // (safe fallback — preserves pre-pump behavior).
         Thread.ofVirtual().start(() -> {
             try {
                 backend.post(ref, message);
@@ -422,7 +429,7 @@ Signature unchanged — no caller migration. `closeChannel()` requires no change
 
 | Property | Default | Purpose |
 |----------|---------|---------|
-| `enabled` | `true` | Master switch |
+| `enabled` | `true` | Master switch — when `false`, pump and reconciler do not start; `fanOut()` delivers to ALL backends fire-and-forget (safe fallback to pre-pump behavior) |
 | `batch-size` | `100` | Max messages per backend per pump cycle |
 | `max-consecutive-failures` | `10` | Unhealthy threshold |
 | `reconciliation-interval` | `30s` | Scheduled backup interval |
