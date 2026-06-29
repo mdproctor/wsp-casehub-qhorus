@@ -117,7 +117,7 @@ public class DeliveryCursor extends PanacheEntityBase {
 
 Keyed by `(channelId, backendId)`. Channels are tenant-scoped, so no separate `tenancyId` needed. `lastDeliveredId` is the message store Long ID — messages with `id > lastDeliveredId` are pending delivery.
 
-Flyway V23 at `db/qhorus/migration/V23__delivery_cursor.sql`:
+Flyway V25 at `db/qhorus/migration/V25__delivery_cursor.sql`:
 
 ```sql
 CREATE TABLE delivery_cursor (
