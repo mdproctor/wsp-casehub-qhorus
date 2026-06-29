@@ -162,11 +162,13 @@ Implementations:
 
 **Dependency graph (no cycles):**
 ```
-ChannelGateway → DeliverySignalQueue ← DeliveryService
-                                        ↓
-                                   ChannelGateway (for trackedEntries — one-directional)
-                                   @CrossTenant CrossTenantMessageStore (for message queries)
-                                   @CrossTenant CrossTenantChannelStore (for channel name lookup)
+MessageService → DeliverySignalQueue ← DeliveryService
+  (post-commit)                          ↓
+                                    ChannelGateway (for trackedEntries — one-directional)
+                                    @CrossTenant CrossTenantMessageStore (for message queries)
+                                    @CrossTenant CrossTenantChannelStore (for channel name lookup)
+
+ChannelGateway → fanOut() returns hasTracked → MessageService defers signal post-commit
 ```
 
 `DeliverySignalQueue` is a thin `@ApplicationScoped` bean owning the `LinkedBlockingDeque<UUID>`. `MessageService.dispatch()` signals the queue after its transaction commits (post-commit synchronization). DeliveryService calls `poll()`/`drainTo()`.
