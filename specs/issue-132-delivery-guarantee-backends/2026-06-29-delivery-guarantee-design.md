@@ -128,14 +128,14 @@ CREATE TABLE delivery_cursor (
     updated_at        TIMESTAMP,
     created_at        TIMESTAMP    NOT NULL DEFAULT now(),
     CONSTRAINT uq_delivery_cursor_channel_backend UNIQUE (channel_id, backend_id),
-    CONSTRAINT fk_delivery_cursor_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
+    CONSTRAINT fk_delivery_cursor_channel FOREIGN KEY (channel_id) REFERENCES channel(id) ON DELETE CASCADE
 );
 ```
 
 **Cursor lifecycle:**
 - Created lazily on first pump cycle for a backend (set to current message head)
 - Preserved across deregistration/re-registration (keyed by backendId)
-- Deleted on channel deletion (`closeChannel()`)
+- Deleted automatically on channel deletion via `ON DELETE CASCADE` on the FK constraint — no application-level cleanup needed in `closeChannel()`
 
 ### 3. Persistence Seam
 
@@ -166,6 +166,7 @@ ChannelGateway → DeliverySignalQueue ← DeliveryService
                                         ↓
                                    ChannelGateway (for trackedEntries — one-directional)
                                    @CrossTenant CrossTenantMessageStore (for message queries)
+                                   @CrossTenant CrossTenantChannelStore (for channel name lookup)
 ```
 
 `DeliverySignalQueue` is a thin `@ApplicationScoped` bean owning the `LinkedBlockingDeque<UUID>`. ChannelGateway calls `signal()`. DeliveryService calls `poll()`/`drainTo()`.
@@ -248,16 +249,22 @@ void deliverPending(UUID channelId, ChannelBackend backend) {
 
 @Transactional
 BatchResult deliverBatch(UUID channelId, ChannelBackend backend) {
+    // Resolve channel name — one query per batch, needed for ChannelRef
+    Channel channel = channelStore.findById(channelId).orElse(null);
+    if (channel == null) return BatchResult.FAILED; // channel deleted
+
     DeliveryCursor cursor = cursorStore.findByChannelAndBackend(channelId, backend.backendId())
         .orElseGet(() -> initializeCursor(channelId, backend.backendId()));
     if (cursor == null) return BatchResult.FAILED; // channel deleted during init
+
     List<Message> batch = messageStore.scan(
         MessageQuery.poll(channelId, cursor.lastDeliveredId, batchSize));
     if (batch.isEmpty()) return BatchResult.EMPTY;
 
+    ChannelRef ref = new ChannelRef(channelId, channel.name);
     for (Message m : batch) {
         try {
-            backend.post(toChannelRef(channelId), toOutbound(m));
+            backend.post(ref, toOutbound(m));
             cursor.lastDeliveredId = m.id;
             cursor.updatedAt = Instant.now();
         } catch (Exception e) {
@@ -314,7 +321,7 @@ DeliveryCursor initializeCursor(UUID channelId, String backendId) {
 }
 ```
 
-The `PersistenceException` catch handles the race between `closeChannel()` (which deletes the channel and its cursors) and `initializeCursor()` (which creates a cursor with a FK to the channel). See §5 `closeChannel()` for the full race mitigation.
+The `PersistenceException` catch handles the race where `initializeCursor()` attempts to create a cursor after the channel row has been deleted. The complementary race — cursor created just before channel deletion — is handled by `ON DELETE CASCADE` on the FK constraint, which atomically removes the new cursor when the channel row is deleted. Together, these two mechanisms cover all timing windows.
 
 **Message → OutboundMessage conversion:**
 
@@ -337,12 +344,14 @@ The pump operates across tenants (it delivers messages regardless of which tenan
 
 ```java
 @Inject @CrossTenant CrossTenantMessageStore messageStore;
+@Inject @CrossTenant CrossTenantChannelStore channelStore;
 
-// Equivalent to findAfterCursor:
+// Message queries:
 List<Message> batch = messageStore.scan(MessageQuery.poll(channelId, cursor.lastDeliveredId, batchSize));
-
-// Equivalent to findLastMessageId:
 Optional<Long> head = messageStore.findLastMessage(channelId).map(m -> m.id);
+
+// Channel name resolution (one query per batch for ChannelRef construction):
+Channel channel = channelStore.findById(channelId).orElse(null);
 ```
 
 `MessageQuery.poll(channelId, afterId, limit)` already builds a query with `channelId`, `afterId`, and `limit` — ordered by `id ASC` (the default). No new repository needed. This follows ARC42STORIES §4: "Services inject store interfaces, never Panache entity statics."
@@ -405,7 +414,7 @@ public void fanOut(UUID channelId, String channelName, OutboundMessage message) 
 }
 ```
 
-Signature unchanged — no caller migration. `closeChannel()` gains one line: `deliveryCursorStore.deleteByChannel(channelId)`.
+Signature unchanged — no caller migration. `closeChannel()` requires no changes — cursor cleanup is handled automatically by `ON DELETE CASCADE` on the `delivery_cursor.channel_id` FK constraint when the channel row is deleted.
 
 ### 6. Configuration
 
