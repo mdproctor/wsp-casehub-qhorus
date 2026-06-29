@@ -22,13 +22,15 @@ The message store IS the durable outbox. Messages are already persisted before d
 
 ## Approach Evaluation
 
-### A — Inline Retry Only
+**Mapping to issue #132:** Issue #132 defines three options: A (at-most-once + client catch-up), B (retry with exponential backoff — recommended), and C (dead-letter queue per backend). The spec evaluates these but reframes around the key insight that the message store IS the durable outbox, making both retry-in-fanOut and a separate DLQ unnecessary. The spec's Option A corresponds to the issue's Option B; the spec's Option B is a new variant not in the issue; the spec's Option C (the chosen approach) supersedes all three issue options.
 
-Add retry with exponential backoff inside `fanOut()` virtual threads.
+### A — Inline Retry Only (Issue #132 Option B)
 
-Handles transient failures within a single JVM lifetime. Does NOT survive JVM restarts. Does NOT handle "backend not registered at fanOut time." After max retries, message is permanently lost.
+Add retry with exponential backoff inside `fanOut()` virtual threads. This is the approach recommended by issue #132.
 
-**Rejected:** Incomplete — only addresses failure mode 1.
+Handles transient failures within a single JVM lifetime. Does NOT survive JVM restarts. Does NOT handle "backend not registered at fanOut time." After max retries, message is permanently lost. The issue's suggestion to "accumulate messages in-memory... for that backend within a bounded window" adds memory pressure and still loses messages on JVM restart.
+
+**Rejected:** Incomplete — only addresses failure mode 1. The issue's recommendation was made before the key insight that the message store itself is the durable outbox.
 
 ### B — Cursor + Dual Delivery (fanOut + Reconciler)
 
@@ -40,7 +42,7 @@ Creates a concurrency problem: fanOut and reconciler can deliver the same messag
 
 ### C — Delivery Pump (Chosen)
 
-fanOut handles BEST_EFFORT backends only (current behavior, zero overhead). AT_LEAST_ONCE backends are served exclusively by an event-driven delivery pump.
+fanOut handles BEST_EFFORT backends only (current behavior, zero overhead). AT_LEAST_ONCE backends are served exclusively by an event-driven delivery pump. This supersedes the issue's Option C (DLQ per backend) — the message store IS the durable log, so a separate DLQ table is unnecessary.
 
 Eliminates all concurrency problems: no duplicate delivery, no cursor races, no in-memory tracking. The pump is the sole delivery path for tracked backends.
 
@@ -115,7 +117,7 @@ public class DeliveryCursor extends PanacheEntityBase {
 
 Keyed by `(channelId, backendId)`. Channels are tenant-scoped, so no separate `tenancyId` needed. `lastDeliveredId` is the message store Long ID — messages with `id > lastDeliveredId` are pending delivery.
 
-Flyway V25 at `db/qhorus/migration/V25__delivery_cursor.sql`:
+Flyway V23 at `db/qhorus/migration/V23__delivery_cursor.sql`:
 
 ```sql
 CREATE TABLE delivery_cursor (
@@ -150,19 +152,20 @@ public interface DeliveryCursorStore {
 ```
 
 Implementations:
-- `JpaDeliveryCursorStore` — `@ApplicationScoped`, standard Panache repo pattern. `save()` uses `@Transactional(REQUIRES_NEW)` — each cursor advance is independently durable.
+- `JpaDeliveryCursorStore` — `@ApplicationScoped`, standard Panache repo pattern.
 - `InMemoryDeliveryCursorStore` — in `casehub-qhorus-testing`, `@Alternative @Priority(1)`.
-- `ReactiveDeliveryCursorStore` — `Uni<>` returns, gated by `@IfBuildProperty(casehub.qhorus.reactive.enabled)`.
+- `ReactiveDeliveryCursorStore` — `Uni<>` returns, gated by `@IfBuildProperty(casehub.qhorus.reactive.enabled)`. For reactive consumers that need cursor access from reactive code (e.g., health endpoints). Not used by the pump itself (see Known Limitations).
 
 ### 4. DeliveryService (the Pump)
 
-`DeliveryService` in `io.casehub.qhorus.runtime.gateway` — `@ApplicationScoped`. Pump thread started in `@PostConstruct` via `ManagedExecutor.execute()` (integrates with Quarkus lifecycle — tasks cancelled on shutdown). The thread blocks on `signalQueue.poll()` immediately, so no queries run before other beans are ready. Shutdown: `@PreDestroy` sets `volatile running = false`; pump thread exits on next poll timeout (5s max).
+`DeliveryService` in `io.casehub.qhorus.runtime.gateway` — `@ApplicationScoped`. Pump thread started in `@PostConstruct` via `ManagedExecutor.execute()` (integrates with Quarkus lifecycle — tasks cancelled on shutdown). The thread blocks on `signalQueue.poll()` immediately, so no queries run before other beans are ready. Per-backend delivery tasks also use `ManagedExecutor` for CDI context propagation and shutdown integration. Shutdown: `@PreDestroy` sets `volatile running = false` and awaits completion of active deliveries (bounded by `activeDeliveries` set emptying within 30s timeout); pump thread exits on next poll timeout (5s max).
 
 **Dependency graph (no cycles):**
 ```
 ChannelGateway → DeliverySignalQueue ← DeliveryService
                                         ↓
                                    ChannelGateway (for trackedEntries — one-directional)
+                                   @CrossTenant CrossTenantMessageStore (for message queries)
 ```
 
 `DeliverySignalQueue` is a thin `@ApplicationScoped` bean owning the `LinkedBlockingDeque<UUID>`. ChannelGateway calls `signal()`. DeliveryService calls `poll()`/`drainTo()`.
@@ -205,82 +208,113 @@ void pumpLoop() {
 
 **Per-backend processing:**
 
-Each (channelId, backendId) pair gets its own virtual thread. `activeDeliveries` concurrent guard prevents duplicate processing by pump and reconciler:
+Each (channelId, backendId) pair gets its own managed task. `activeDeliveries` concurrent guard prevents duplicate processing by pump and reconciler. Per-backend threads use `ManagedExecutor` (not bare `Thread.ofVirtual().start()`) for CDI request context propagation and Quarkus shutdown integration:
 
 ```java
 private final Set<String> activeDeliveries = ConcurrentHashMap.newKeySet();
 
+@Inject ManagedExecutor managedExecutor;
+
 void processChannel(UUID channelId) {
     for (BackendEntry entry : gateway.trackedEntries(channelId)) {
+        if (isUnhealthy(entry.backend().backendId())) continue; // circuit breaker — reconciler retries
         String key = channelId + ":" + entry.backend().backendId();
         if (activeDeliveries.add(key)) {
-            try {
-                Thread.ofVirtual().start(() -> {
-                    try {
-                        deliverPending(channelId, entry.backend());
-                    } finally {
-                        activeDeliveries.remove(key);
-                    }
-                });
-            } catch (Exception e) {
-                activeDeliveries.remove(key);
-                LOG.errorf(e, "Failed to start delivery thread for %s", key);
-            }
+            managedExecutor.execute(() -> {
+                try {
+                    deliverPending(channelId, entry.backend());
+                } finally {
+                    activeDeliveries.remove(key);
+                }
+            });
         }
     }
 }
 ```
+
+**Transactional strategy:**
+
+`deliverPending()` is non-transactional. Each loop iteration calls a `@Transactional` helper (`deliverBatch()`) on a CDI-managed bean. This gives each iteration its own persistence context and transaction, avoiding L1 cache staleness across iterations. `ManagedExecutor` propagates the CDI request context to the task thread, so `@Transactional` and `@Inject` work correctly.
 
 **Self-driving delivery loop:**
 
 ```java
 void deliverPending(UUID channelId, ChannelBackend backend) {
     while (running) {
-        DeliveryCursor cursor = cursorStore.findByChannelAndBackend(channelId, backend.backendId())
-            .orElseGet(() -> initializeCursor(channelId, backend.backendId()));
-        List<Message> batch = messageRepo.findAfterCursor(channelId, cursor.lastDeliveredId, batchSize);
-        if (batch.isEmpty()) break;
-        for (Message m : batch) {
-            try {
-                backend.post(toChannelRef(channelId), toOutbound(m));
-                cursor.lastDeliveredId = m.id;
-                cursor.updatedAt = Instant.now();
-                cursor = cursorStore.save(cursor); // REQUIRES_NEW — use returned entity
-                resetHealth(backend.backendId());
-            } catch (Exception e) {
-                recordFailure(backend.backendId());
-                if (isUnhealthy(backend.backendId())) {
-                    LOG.warnf("Backend %s marked unhealthy after %d consecutive failures",
-                        backend.backendId(), maxConsecutiveFailures);
-                }
-                return; // stop on failure — preserve ordering
+        BatchResult result = deliverBatch(channelId, backend);
+        if (result == BatchResult.EMPTY || result == BatchResult.FAILED) break;
+    }
+}
+
+@Transactional
+BatchResult deliverBatch(UUID channelId, ChannelBackend backend) {
+    DeliveryCursor cursor = cursorStore.findByChannelAndBackend(channelId, backend.backendId())
+        .orElseGet(() -> initializeCursor(channelId, backend.backendId()));
+    if (cursor == null) return BatchResult.FAILED; // channel deleted during init
+    List<Message> batch = messageStore.scan(
+        MessageQuery.poll(channelId, cursor.lastDeliveredId, batchSize));
+    if (batch.isEmpty()) return BatchResult.EMPTY;
+
+    for (Message m : batch) {
+        try {
+            backend.post(toChannelRef(channelId), toOutbound(m));
+            cursor.lastDeliveredId = m.id;
+            cursor.updatedAt = Instant.now();
+        } catch (Exception e) {
+            recordFailure(backend.backendId());
+            if (isUnhealthy(backend.backendId())) {
+                LOG.warnf("Backend %s marked unhealthy after %d consecutive failures",
+                    backend.backendId(), maxConsecutiveFailures);
             }
+            // Advance cursor to last successfully delivered message before returning
+            if (!m.id.equals(batch.get(0).id) || !cursor.lastDeliveredId.equals(batch.get(0).id)) {
+                cursorStore.save(cursor);
+            }
+            return BatchResult.FAILED; // stop on failure — preserve ordering
         }
     }
+    // Advance cursor once per batch — all messages delivered successfully
+    cursorStore.save(cursor);
+    resetHealth(backend.backendId());
+    return BatchResult.MORE;
 }
 ```
 
 Key properties:
 - Sequential delivery — messages in store order (by id ASC)
 - Stop on failure — preserves ordering guarantee
-- Cursor advances per message — partial batch delivery is durable
+- Cursor advances per batch — reduces transaction overhead by batch-size factor while maintaining AT_LEAST_ONCE semantics (on mid-batch failure, successfully delivered messages before the failure point are still recorded; on process crash, at most one batch is re-delivered — acceptable given backends must tolerate duplicates)
+- Each `deliverBatch()` call gets a fresh persistence context — no L1 cache staleness
 - Self-driving — loops until caught up or failure, no re-signaling needed
-- `cursor = cursorStore.save(cursor)` — uses returned entity after REQUIRES_NEW merge
+- `ManagedExecutor` provides CDI context propagation and shutdown cancellation
 
-**Cursor initialization:**
+**Cursor initialization (start from HEAD):**
+
+New cursors are initialized to the current message HEAD — all existing messages are skipped. This is a deliberate "start from now" policy:
+- The pump is being added to a system where backends previously received fire-and-forget delivery. Retroactively delivering all historical messages would flood Slack threads and external webhooks with stale content.
+- AT_LEAST_ONCE backends are registered at channel creation time. They don't miss messages unless `post()` fails (which the pump will catch going forward) or the JVM restarts (the pump catches up from HEAD at init, then tracks from that point).
+- Cursor initialization only happens once per (channel, backend) pair — after that, the cursor is preserved across deregistration/re-registration cycles.
 
 ```java
 DeliveryCursor initializeCursor(UUID channelId, String backendId) {
-    Long head = messageRepo.findLastMessageId(channelId).orElse(0L);
+    Long head = messageStore.findLastMessage(channelId).map(m -> m.id).orElse(0L);
     DeliveryCursor cursor = new DeliveryCursor();
     cursor.channelId = channelId;
     cursor.backendId = backendId;
     cursor.lastDeliveredId = head;
     cursor.createdAt = Instant.now();
     cursor.updatedAt = Instant.now();
-    return cursorStore.save(cursor);
+    try {
+        return cursorStore.save(cursor);
+    } catch (PersistenceException e) {
+        // Channel deleted between check and save — abort delivery for this channel
+        LOG.debugf("Channel %s deleted during cursor init for backend %s — aborting", channelId, backendId);
+        return null;
+    }
 }
 ```
+
+The `PersistenceException` catch handles the race between `closeChannel()` (which deletes the channel and its cursors) and `initializeCursor()` (which creates a cursor with a FK to the channel). See §5 `closeChannel()` for the full race mitigation.
 
 **Message → OutboundMessage conversion:**
 
@@ -297,42 +331,30 @@ OutboundMessage toOutbound(Message m) {
 
 Uses `ActorTypeResolver.resolve(sender)` — no Message entity migration needed.
 
-**Message queries (tenant-context-free):**
+**Message queries via CrossTenantMessageStore:**
 
-Package-private `DeliveryMessageRepository` with direct JPQL on the qhorus EntityManager, scoped by channelId only (inherently tenant-scoped, no tenant filter needed):
+The pump operates across tenants (it delivers messages regardless of which tenant created them). The `@CrossTenant` pattern already exists for this — `CrossTenantProducer` produces `@CrossTenant`-qualified stores for background services. `CrossTenantMessageStore.scan(MessageQuery)` and `findLastMessage(UUID)` already provide the exact query primitives the pump needs:
 
 ```java
-@ApplicationScoped
-class DeliveryMessageRepository {
-    @Inject @PersistenceUnit("qhorus") EntityManager em;
+@Inject @CrossTenant CrossTenantMessageStore messageStore;
 
-    List<Message> findAfterCursor(UUID channelId, Long afterId, int limit) {
-        return em.createQuery(
-            "FROM Message m WHERE m.channelId = :cid AND m.id > :aid ORDER BY m.id ASC",
-            Message.class)
-            .setParameter("cid", channelId)
-            .setParameter("aid", afterId)
-            .setMaxResults(limit)
-            .getResultList();
-    }
+// Equivalent to findAfterCursor:
+List<Message> batch = messageStore.scan(MessageQuery.poll(channelId, cursor.lastDeliveredId, batchSize));
 
-    Optional<Long> findLastMessageId(UUID channelId) {
-        return em.createQuery(
-            "SELECT MAX(m.id) FROM Message m WHERE m.channelId = :cid", Long.class)
-            .setParameter("cid", channelId)
-            .getResultStream().findFirst();
-    }
-}
+// Equivalent to findLastMessageId:
+Optional<Long> head = messageStore.findLastMessage(channelId).map(m -> m.id);
 ```
 
-**Health tracking (in-memory):**
+`MessageQuery.poll(channelId, afterId, limit)` already builds a query with `channelId`, `afterId`, and `limit` — ordered by `id ASC` (the default). No new repository needed. This follows ARC42STORIES §4: "Services inject store interfaces, never Panache entity statics."
+
+**Health tracking (in-memory circuit breaker):**
 
 ```java
 private final ConcurrentHashMap<String, Integer> consecutiveFailures = new ConcurrentHashMap<>();
 private final Set<String> unhealthy = ConcurrentHashMap.newKeySet();
 ```
 
-Keyed by backendId. Threshold: `casehub.qhorus.delivery.max-consecutive-failures` (default 10). Resets on successful delivery or backend re-registration.
+Keyed by backendId. Threshold: `casehub.qhorus.delivery.max-consecutive-failures` (default 10). Acts as a circuit breaker: unhealthy backends are skipped by the event-driven pump (`processChannel()` checks `isUnhealthy()` before spawning delivery tasks). The scheduled reconciler retries ALL backends including unhealthy ones — when a retry succeeds, `resetHealth()` clears the unhealthy flag, reopening the circuit. This prevents a permanently-failing backend from consuming pump thread time on every signal while ensuring recovery is automatic.
 
 **Scheduled backup (30s):**
 
@@ -398,9 +420,11 @@ Signature unchanged — no caller migration. `closeChannel()` gains one line: `d
 
 ### 7. Testing Strategy
 
-**Unit tests (CDI-free):** DeliveryService core logic — cursor init, ordered delivery, failure handling, health tracking, independent backend processing. fanOut changes — BEST_EFFORT direct, AT_LEAST_ONCE skipped+signaled, mixed.
+**Unit tests (CDI-free):** DeliveryService core logic — cursor init, ordered delivery, failure handling, health circuit breaker, independent backend processing. fanOut changes — BEST_EFFORT direct, AT_LEAST_ONCE skipped+signaled, mixed.
 
-**Integration tests (@QuarkusTest):** End-to-end pump — dispatch to tracked backend, verify delivery via RecordingChannelBackend + cursor advancement. Reconciler catch-up — first delivery fails, reconciler retries. Channel deletion — cursor cleanup.
+**Integration tests (@QuarkusTest):** End-to-end pump — dispatch to tracked backend, verify delivery via RecordingChannelBackend + cursor advancement. Reconciler catch-up — first delivery fails, reconciler retries. Channel deletion — cursor cleanup. closeChannel race — verify graceful handling when channel is deleted during active delivery.
+
+**RecordingChannelBackend enhancement:** `RecordingChannelBackend` currently implements bare `ChannelBackend` and will return `BEST_EFFORT` from the default `deliveryGuarantee()` method. Add a `deliveryGuarantee` constructor parameter (defaulting to `BEST_EFFORT`) so integration tests can create `new RecordingChannelBackend("test-tracked", ActorType.SYSTEM, DeliveryGuarantee.AT_LEAST_ONCE)` for pump tests.
 
 **Contract tests:** DeliveryCursorStoreContractTest — abstract base with blocking + reactive runners.
 
@@ -411,6 +435,8 @@ OpenClawChannelBackend: override to AT_LEAST_ONCE (file issue on casehub-opencla
 ## Known Limitations
 
 - **Single-node only.** Multi-node concurrent reconciliation may cause duplicate delivery. #162 tracks cross-node delivery as a separate concern. Cursor design is compatible with optimistic locking for future multi-node support.
+- **Blocking-only pump.** The delivery pump runs as a blocking background service and has no reactive counterpart. This is intentional: the pump is not on the request hot path, runs on its own managed threads, and performs sequential cursor-based I/O. The reactive dual-stack pattern (§4 in ARC42STORIES) exists for request-path services where the caller may use reactive HTTP. `ReactiveDeliveryCursorStore` exists for reactive consumers that need cursor access from reactive code (e.g., health check endpoints), but the pump itself does not need a reactive variant. The `casehub.qhorus.reactive.enabled` build-time property does not affect the pump — it runs in both blocking and reactive builds.
 - **LAST_WRITE channels unsupported** for AT_LEAST_ONCE. Content-change detection is a different problem than cursor-based catch-up. No current AT_LEAST_ONCE backend uses LAST_WRITE.
-- **Shutdown edge case.** Successful `post()` followed by failed cursor save during JVM shutdown causes duplicate delivery on restart. Inherent to at-least-once semantics; window is milliseconds.
-- **AT_LEAST_ONCE backends must tolerate duplicate delivery.** Inherent property of at-least-once guarantees, same as Kafka consumers.
+- **EVENT messages delivered to AT_LEAST_ONCE backends.** The pump delivers all message types including EVENT (null content, telemetry-only), consistent with current `fanOut()` behavior. Backends are responsible for filtering message types they don't handle. Changing the pump to filter EVENTs would create an inconsistency between normal delivery (fanOut sends EVENTs) and catch-up delivery (pump skips EVENTs).
+- **Shutdown edge case.** Successful `post()` followed by failed cursor save during JVM shutdown causes duplicate delivery on restart. Inherent to at-least-once semantics; window is milliseconds. Mitigated by `ManagedExecutor` shutdown integration and `@PreDestroy` awaiting active deliveries.
+- **AT_LEAST_ONCE backends must tolerate duplicate delivery.** Inherent property of at-least-once guarantees, same as Kafka consumers. Per-batch cursor advancement means at most one batch (default 100 messages) may be re-delivered on mid-batch failure.
