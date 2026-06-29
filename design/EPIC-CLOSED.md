@@ -1,5 +1,5 @@
-# Branch Closed: issue-261-slack-channel-backend
+# Branch Closed: issue-132-delivery-guarantee-backends
 
-**Date:** 2026-06-20
-**Issues:** 261
+**Date:** 2026-06-29
+**Issues:** 132
 **Status:** merged to main
