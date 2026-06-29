@@ -169,19 +169,25 @@ ChannelGateway → DeliverySignalQueue ← DeliveryService
                                    @CrossTenant CrossTenantChannelStore (for channel name lookup)
 ```
 
-`DeliverySignalQueue` is a thin `@ApplicationScoped` bean owning the `LinkedBlockingDeque<UUID>`. ChannelGateway calls `signal()`. DeliveryService calls `poll()`/`drainTo()`.
+`DeliverySignalQueue` is a thin `@ApplicationScoped` bean owning the `LinkedBlockingDeque<UUID>`. `MessageService.dispatch()` signals the queue after its transaction commits (post-commit synchronization). DeliveryService calls `poll()`/`drainTo()`.
 
 **Event-driven path:**
 
 ```
 dispatch() → persist message → fanOut()
-                                  ├── BEST_EFFORT backends: post() in virtual thread (unchanged)
-                                  └── AT_LEAST_ONCE backends: signal DeliverySignalQueue(channelId)
-                                                                  ↓
-                                              pump thread wakes → processChannel(channelId)
-                                                                → per-backend virtual thread
-                                                                → deliverPending() self-drives until caught up
+               |                  ├── BEST_EFFORT backends: post() in virtual thread (unchanged)
+               |                  └── AT_LEAST_ONCE backends: skipped (returns hasTracked=true)
+               |
+               └── TRANSACTION COMMITS
+                       ↓
+                   post-commit: deliverySignalQueue.signal(channelId)
+                       ↓
+                   pump thread wakes → processChannel(channelId)
+                                     → per-backend managed task
+                                     → deliverPending() self-drives until caught up
 ```
+
+**Post-commit signaling:** `fanOut()` returns `boolean hasTracked`. `dispatch()` uses the existing `TransactionSynchronizationRegistry` (already injected for observer fan-out) to defer the signal to after-commit. This ensures the pump always sees the committed message on wakeup — under PostgreSQL READ COMMITTED, a signal fired within the uncommitted transaction would cause the pump's query to return empty.
 
 Pump thread loop:
 ```java
@@ -392,7 +398,7 @@ List<BackendEntry> trackedEntries(UUID channelId) {
 ### 5. fanOut() Changes
 
 ```java
-public void fanOut(UUID channelId, String channelName, OutboundMessage message) {
+public boolean fanOut(UUID channelId, String channelName, OutboundMessage message) {
     ChannelRef ref = new ChannelRef(channelId, Objects.requireNonNull(channelName, "channelName"));
     List<BackendEntry> entries = registry.getOrDefault(channelId, List.of());
     boolean hasTracked = false;
@@ -401,7 +407,7 @@ public void fanOut(UUID channelId, String channelName, OutboundMessage message) 
         ChannelBackend backend = entry.backend();
         if (deliveryEnabled && backend.deliveryGuarantee() == DeliveryGuarantee.AT_LEAST_ONCE) {
             hasTracked = true;
-            continue; // pump handles delivery
+            continue; // pump handles delivery — signaled post-commit by dispatch()
         }
         // BEST_EFFORT backends always get fire-and-forget.
         // AT_LEAST_ONCE backends also get fire-and-forget when delivery is disabled
@@ -415,13 +421,27 @@ public void fanOut(UUID channelId, String channelName, OutboundMessage message) 
             }
         });
     }
-    if (hasTracked) {
-        deliverySignalQueue.signal(channelId);
-    }
+    return hasTracked; // caller (dispatch) defers signal to post-commit
 }
 ```
 
-Signature unchanged — no caller migration. `closeChannel()` requires no changes — cursor cleanup is handled automatically by `ON DELETE CASCADE` on the `delivery_cursor.channel_id` FK constraint when the channel row is deleted.
+Return type changed from `void` to `boolean` — backward compatible (existing callers that ignore the return value still compile). `fanOut()` no longer signals the queue directly; `dispatch()` defers the signal to after the transaction commits via `TransactionSynchronizationRegistry`:
+
+```java
+// In MessageService.dispatch(), after fanOut():
+boolean hasTracked = channelGateway.fanOut(ch.id, ch.name, outbound);
+if (hasTracked) {
+    final UUID signalChannelId = ch.id;
+    tsr.registerInterposedSynchronization(new Synchronization() {
+        @Override public void beforeCompletion() {}
+        @Override public void afterCompletion(int status) {
+            if (status == STATUS_COMMITTED) {
+                deliverySignalQueue.signal(signalChannelId);
+            }
+        }
+    });
+}
+``` `closeChannel()` requires no changes — cursor cleanup is handled automatically by `ON DELETE CASCADE` on the `delivery_cursor.channel_id` FK constraint when the channel row is deleted.
 
 ### 6. Configuration
 
