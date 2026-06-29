@@ -1,0 +1,9 @@
+branch: issue-132-delivery-guarantee-backends
+project-sha: 9e3514215203dd18c9eb88d9b58b08542cfde164
+date: 2026-06-29
+issue: 132
+issue-repo: casehubio/qhorus
+covers: 132
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
