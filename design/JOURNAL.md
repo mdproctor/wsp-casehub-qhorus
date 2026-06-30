@@ -1,13 +1,38 @@
-# Design Journal — issue-243-denied-types-enforcement
+# Design Journal — issue-314-store-spi-to-api
 
-### 2026-06-04 · §Domain Model
+## 2026-06-30 — Session 1: Structural architecture + partial implementation
 
-`ChannelCreateRequest` is the single enforcement gate (D1) for channel type constraint invariants. Its compact constructor validates that `allowedTypes` and `deniedTypes` contain only valid `MessageType` names (via `MessageType.parseTypes()`) and that their intersection is empty — making invalid state unrepresentable regardless of which code path constructs the request. This decision was chosen over a static `StoredMessageTypePolicy.validateNoOverlap()` to avoid a package cycle (`runtime/channel/` ↔ `runtime/message/`) and to eliminate escape hatches from callers that bypass the MCP layer. `AutoChannelSpec` gains a `deniedTypes` field for symmetry with `allowedTypes` — without it, the connector auto-creation SPI cannot express denial, forcing a future breaking change.
+### Design decisions
 
-### 2026-06-04 · §Services
+1. **Domain records own clean names** — `Channel`, `Message`, `Commitment` etc. are immutable Java records in `api/`. JPA entities renamed to `*Entity` suffix in `runtime/`. Rationale: domain model IS the concept; persistence is an implementation detail.
 
-`StoredMessageTypePolicy.validate()` is restructured with denial-first ordering: the `deniedTypes` check runs before the `allowedTypes` check, so denial wins even when both constraints are set. The early return on `allowedTypes == null` is moved below the denial check, allowing open channels (no allowedTypes) to still enforce denial. `ReactiveChannelService` gains structural parity with `ChannelService` through a `create(ChannelCreateRequest)` primary method and a `populateChannel(ChannelCreateRequest)` private helper. Previously, entity construction was inlined in every reactive overload, meaning any new `Channel` field had to be updated in two places with no compiler enforcement. The entity is populated outside the Panache transaction (intentional: JPA entities are transient POJOs until persisted; only the DB write needs the session context). `MessageType.parseTypes()` is extracted to the `api` enum as the canonical parser, eliminating the duplicated `Arrays.stream(...).map(String::trim).map(MessageType::valueOf)` pattern that previously appeared in `StoredMessageTypePolicy` and would have been needed again in `ChannelCreateRequest`.
+2. **CSV entity fields → typed collections** — Entity fields like `allowedTypes` (CSV String) become `Set<MessageType>` on domain records. Conversion happens at the JPA boundary via `fromDomain()`/`toDomain()`. Consistent with `ChannelCreateRequest` which already uses typed sets.
 
-### 2026-06-04 · §MCP Tool Surface
+3. **`Channel.fromRequest()` factory on the domain record** — generates UUID and timestamps, replacing `@PrePersist` as the primary source. Entity `@PrePersist` remains as JPA safety net.
 
-`create_channel` gains `denied_types` as an optional `ToolArg` in both `QhorusMcpTools` and `ReactiveQhorusMcpTools`. A pre-existing bug in `ReactiveQhorusMcpTools` was fixed: the tool previously constructed a `ChannelCreateRequest` for routing decisions, then destructured it back into named parameters when calling `ReactiveChannelService` — silently losing any field not explicitly named (including `deniedTypes`). The fix passes `req` directly to `channelService.create(req)`, which required adding `create(ChannelCreateRequest)` to `ReactiveChannelService` as part of the D5 structural parity work.
+4. **`@Entity(name = "OldName")` on all renamed entities** — preserves JPQL entity names. Discovered necessity when IntelliJ incorrectly renamed JPQL string literals.
+
+5. **ADR-0017 needed** — reverses ADR-0002 "No Info record layer". The original rationale ("Panache entities are POJOs") no longer holds — entities carry JPA annotations that force persistence-memory/ to depend on full runtime/.
+
+### What was implemented
+
+- **Task 1** ✅ — 10 JPA entities renamed to `*Entity` via IntelliJ refactor (253 files, committed)
+- **Task 2** ✅ — 9 domain records created in api/ with builders, TDD (63 files, committed)
+- **Task 3** ✅ — `fromDomain()`/`toDomain()` conversion on all 9 entities, round-trip tests (37 files, committed)
+- **Task 4** 🟡 — Store SPIs (18) + Query types (5) moved to api/store/. SPI signatures updated to domain records. JpaChannelStore updated as reference. **Not compiling** — remaining JPA stores, InMemory stores, services, and tests need the same mechanical entity→record boundary updates.
+
+### Design review
+
+8-round adversarial design review ($22.80). 18 issues raised, 15 verified (spec updated), 3 accepted. Key review-driven improvements: typed CSV fields, `Capability` entity inclusion, `@Entity(name=...)` convention, cross-tenant store signatures, cross-repo consumer audit (found casehub-ops, drafthouse, clinical consumers), Maven dependency inversion as primary outcome statement, Mutiny `provided` dep for reactive SPIs.
+
+### Remaining work
+
+The pattern is established (see `JpaChannelStore` reference implementation). Remaining is mechanical — apply the same fromDomain/toDomain boundary conversion to:
+- 17 more JPA stores (7 blocking, 6 reactive, 4 cross-tenant)
+- ~19 InMemory stores in persistence-memory/ (change to use domain records directly)
+- ~9 service files (change entity field access to record accessors)
+- ~95 test files
+- persistence-memory/pom.xml (dep from casehub-qhorus → casehub-qhorus-api)
+- FindOrCreateResult (ChannelEntity → Channel)
+- testing/ duplicate cleanup (Task 5)
+- CLAUDE.md, ADR-0017, cross-repo issues (Task 6)
