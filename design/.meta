@@ -1,0 +1,9 @@
+branch: issue-314-store-spi-to-api
+project-sha: 84bba77e84034b3c6c50849528290db5408dddde
+date: 2026-06-30
+issue: 314
+issue-repo: casehubio/qhorus
+covers: 314
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
