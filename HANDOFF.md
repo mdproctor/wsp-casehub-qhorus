@@ -1,35 +1,40 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-29 — #310 closed (isActive sweep), #132 closed (delivery guarantee for channel backends)
+**Date:** 2026-06-30 — #311, #312, #313, #169 closed. #314 filed (Store SPI → api/).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `040e1db`. Two issues closed this session (#310, #132). Three follow-up issues filed (#312, #313, openclaw#57).
+Main is clean. Both remotes at `84bba77`. Four issues closed, one follow-up filed.
 
 Cross-repo follow-up still pending from prior session: `MessageReceivedEvent` constructor changed (added `Instant occurredAt`). Claudony (3 test sites) and engine (7 test sites) will fail at next compile — mechanical fix (`Instant.now()` as 7th arg).
+
+Parent repo doc sync issue filed: casehubio/parent#330 (persistence-memory, delivery metrics, LAST_WRITE version in deep-dive).
 
 Next candidates:
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #312 | Delivery metrics — Micrometer counters/gauges for pump | S | Low | Follow-up from #132 |
-| #169 | Extract persistence-memory/ module from testing/ | M | Low | Standalone |
+| #314 | Move Store SPI interfaces from runtime/ to api/ (Tier 1) | L | Med | Filed this session. Cross-repo migration. |
 | ops#14 | Enrich ChannelDriftChecker — full field comparison, tenancy fix | S | Low | Cross-repo (casehub-ops) |
 | openclaw#57 | Override deliveryGuarantee → AT_LEAST_ONCE on OpenClawChannelBackend | XS | Low | Propagation from #132 |
-| #313 | AT_LEAST_ONCE delivery for LAST_WRITE channel semantics | S | Med | Limitation from #132 |
 
 ## What Was Done This Session
 
-**isActive sweep (#310):** Replaced 11 `!isTerminal()` call sites with `isActive()`. Added 2 resolveToken direct tests for SlackChannelBackend.
+**CI dispatch (#311):** Added `blocks` to publish.yml downstream dispatch list.
 
-**Delivery guarantee (#132):** L/High — cursor-based delivery pump for AT_LEAST_ONCE backends. Adversarial design review (24 issues, all resolved, $27). Subagent-driven development (7 tasks). Key architecture: message store IS the durable outbox; per-backend cursors track delivery; event-driven pump (post-commit TSR signal) + 30s reconciler backup; BEST_EFFORT backends keep fire-and-forget with zero overhead. SlackChannelBackend and ConnectorChannelBackend declare AT_LEAST_ONCE.
+**persistence-memory extraction (#169):** Created `persistence-memory/` module. Moved 18 InMemory store implementations + 23 test files from `testing/`. Package rename `io.casehub.qhorus.testing` → `io.casehub.qhorus.persistence.memory`. testing/ depends on persistence-memory/ transitively.
+
+**Delivery metrics (#312):** 4 Micrometer metrics on DeliveryService — `messages.delivered` counter, `failures` counter, `backends.unhealthy` gauge, `cursor.lag` gauge. BatchResult changed from enum to record with deliveredCount. MeterRegistry via `Instance<>` for optional injection.
+
+**LAST_WRITE delivery (#313):** Version counter on Message, `lastDeliveredVersion` on DeliveryCursor, version-aware batch query, delivery signal on overwrite via post-commit TSR. V26 migration.
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec (adversarial-reviewed) | `docs/specs/2026-06-29-delivery-guarantee-design.md` |
-| Blog entry | `blog/2026-06-29-mdp01-the-log-was-already-there.md` |
-| Garden entry | `GE-20260629-bb1440` — post-commit TSR signaling technique |
+| Design specs | `docs/specs/2026-06-30-*.md` (3 specs) |
+| Blog entry | `blog/2026-06-30-mdp01-the-module-that-wasnt-a-module.md` |
+| Garden entry | `GE-20260630-6c2515` — CDI Instance<T> provided scope classloading gotcha |
+| Parent doc sync | `casehubio/parent#330` |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
