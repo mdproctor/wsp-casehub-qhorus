@@ -237,6 +237,11 @@ longer call it — they receive `List<String>` directly.
 - **New test:** `ChannelService.findOrCreate()` name-based lookup path (no connector
   binding). The binding-based path is already tested by `ChannelServiceFindOrCreateTest`.
 - **New test:** `ReactiveChannelService.findOrCreate()` — name-based lookup path
+- **New test:** `ReactiveChannelService.findOrCreate()` — binding-based lookup path
+  (worker-pool wrapped `ChannelBindingStore` calls). Must verify: (1) returns existing
+  channel when binding exists, (2) creates channel and binding when not found, (3)
+  self-healing concurrency contract works through the reactive pipeline
+  (`PersistenceException` recovery via catch-retry)
 - MCP tool tests updated for the `List<String>` boundary adaptation (both
   `set_allowed_writers`/`set_admin_instances` and `create_channel`)
 - `ChannelCreateRequest` builder call sites updated from `String` to `List<String>` — affects
