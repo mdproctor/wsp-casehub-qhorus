@@ -1,0 +1,9 @@
+branch: issue-315-message-dispatcher-channel-lifecycle-spi
+project-sha: 10d2816cc1eeb54fdf6e6c66a96375c3812574c1
+date: 2026-07-02
+issue: 315
+issue-repo: casehubio/qhorus
+covers: 315
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
