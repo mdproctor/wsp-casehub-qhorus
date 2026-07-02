@@ -148,6 +148,13 @@ This makes `findOrCreate` genuinely general — consumers without connector bind
 can use it for idempotent channel creation by name, while the connector backend
 continues to use the binding-based path.
 
+**Concurrency contract:** `findOrCreate` is self-healing on concurrent creation.
+When two callers race to create the same channel (by name or by binding key), one
+succeeds and the other catches the `PersistenceException` from the unique constraint
+violation `(tenancy_id, name)`, retries with a lookup, and returns the existing
+channel (`wasCreated=false`). This makes the method genuinely idempotent — callers
+never see a constraint violation exception.
+
 ### Excluded from SPI
 
 | Method | Why excluded |
@@ -161,6 +168,16 @@ continues to use the binding-based path.
 
 `FindOrCreateResult` moves from `runtime/channel/` to `api/channel/`. Record unchanged.
 
+### Dead code removal
+
+`ChannelEntity.fromRequest(ChannelCreateRequest, String)` is removed. It has zero
+production callers — only 3 test methods in `ChannelFromRequestTest`. The production
+path goes through `Channel.fromRequest()` → `ChannelEntity.fromDomain()`, which is
+the canonical domain-record-first construction. The method would also fail to compile
+after the `ChannelCreateRequest` `String` → `List<String>` change (`barrierContributors`,
+`allowedWriters`, `adminInstances` all assign directly to entity `String` fields via
+`blankToNull()`). The 3 tests are updated to use the canonical path.
+
 ### Runtime implementation
 
 - `ChannelService implements ChannelManager` — `List<String>` params are passed through
@@ -171,11 +188,13 @@ continues to use the binding-based path.
 - `ReactiveChannelService implements ReactiveChannelManager` — same pass-through for
   existing methods. **`findOrCreate` is a new method** — `ReactiveChannelService` does
   not currently have it. The name-based lookup path uses `ReactiveChannelStore.findByName()`
-  (already injected). The binding-based path requires injecting a reactive channel binding
-  store (currently only blocking `ChannelBindingStore` exists); if no reactive consumer
-  needs binding-based `findOrCreate` at launch, this path can be deferred behind an
-  `UnsupportedOperationException("Binding-based findOrCreate not yet supported on reactive path")`
-  until a reactive consumer requires it.
+  (already injected). The binding-based path injects blocking `ChannelBindingStore` and
+  wraps calls using the established worker-pool pattern:
+  `Uni.createFrom().item(() -> channelBindingStore.findByKey(...)).runSubscriptionOn(Infrastructure.getDefaultWorkerPool())`.
+  This is the same pattern `ReactiveMessageService` uses for the blocking
+  `ObligorTrustPolicy` SPI (line 215-216). No new `ReactiveChannelBindingStore` is needed.
+  `BlockingTierPurityTest` is unaffected — it checks blocking→Uni direction only; reactive
+  services are already allowed to inject blocking dependencies.
 - `MessageService implements MessageDispatcher` — no signature change
 - `ReactiveMessageService implements ReactiveMessageDispatcher` — no signature change
 
@@ -187,7 +206,10 @@ allowed_writers, admin_instances). They split to `List<String>` at the MCP tool 
 before calling `ChannelManager` or constructing `ChannelCreateRequest`. This is the
 correct place for string parsing — the MCP tool is the system boundary.
 
-**Splitting logic:** use `Channel.splitCsv()` at the MCP boundary. Semantics:
+**Splitting logic:** `Channel.splitCsv()` moves from `Channel` (Tier 1) to
+`QhorusMcpToolsBase` (Tier 3) as a `protected static` helper — after this spec's
+changes its only callers are MCP tools, and a CSV parsing utility on a Tier 1 domain
+record with zero domain callers is an inverted dependency. Semantics are preserved:
 
 | Input | Result | Meaning |
 |-------|--------|---------|
@@ -197,7 +219,6 @@ correct place for string parsing — the MCP tool is the system boundary.
 | `"alice,bob"` | `["alice", "bob"]` | Multiple entries, trimmed |
 | `"alice,,bob"` | `["alice", "bob"]` | Empty segments filtered |
 
-After this change, `Channel.splitCsv()` is called exclusively in the MCP tool layer.
 `Channel.fromRequest()` and `ChannelService.setAllowedWriters/setAdminInstances` no
 longer call it — they receive `List<String>` directly.
 
