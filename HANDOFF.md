@@ -1,40 +1,34 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-06-30 — #311, #312, #313, #169 closed. #314 filed (Store SPI → api/).
+**Date:** 2026-07-01 — #314 closed (Store SPI migration complete).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `84bba77`. Four issues closed, one follow-up filed.
+Main is clean. Both remotes at `10d2816`. #314 merged and closed.
 
-Cross-repo follow-up still pending from prior session: `MessageReceivedEvent` constructor changed (added `Instant occurredAt`). Claudony (3 test sites) and engine (7 test sites) will fail at next compile — mechanical fix (`Instant.now()` as 7th arg).
-
-Parent repo doc sync issue filed: casehubio/parent#330 (persistence-memory, delivery metrics, LAST_WRITE version in deep-dive).
+Cross-repo follow-up pending:
+- `MessageReceivedEvent` constructor changed (added `Instant occurredAt`) — Claudony (3 sites) and engine (7 sites) need `Instant.now()` as 7th arg
+- Store SPI imports moved from `runtime/store/` to `api/store/` — casehub-engine (actor-state), casehub-ops (drift checker), casehub-drafthouse (4 files), casehub-clinical (1 file) need mechanical import + field-access updates
+- Parent repo doc sync: casehubio/parent#330
 
 Next candidates:
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #314 | Move Store SPI interfaces from runtime/ to api/ (Tier 1) | L | Med | Filed this session. Cross-repo migration. |
-| ops#14 | Enrich ChannelDriftChecker — full field comparison, tenancy fix | S | Low | Cross-repo (casehub-ops) |
+| — | Cross-repo Store SPI migration (engine, ops, drafthouse, clinical) | M | Low | Mechanical — same entity→record pattern |
+| ops#14 | Enrich ChannelDriftChecker — full field comparison, tenancy fix | S | Low | Simplifies with domain record typed fields |
 | openclaw#57 | Override deliveryGuarantee → AT_LEAST_ONCE on OpenClawChannelBackend | XS | Low | Propagation from #132 |
 
 ## What Was Done This Session
 
-**CI dispatch (#311):** Added `blocks` to publish.yml downstream dispatch list.
-
-**persistence-memory extraction (#169):** Created `persistence-memory/` module. Moved 18 InMemory store implementations + 23 test files from `testing/`. Package rename `io.casehub.qhorus.testing` → `io.casehub.qhorus.persistence.memory`. testing/ depends on persistence-memory/ transitively.
-
-**Delivery metrics (#312):** 4 Micrometer metrics on DeliveryService — `messages.delivered` counter, `failures` counter, `backends.unhealthy` gauge, `cursor.lag` gauge. BatchResult changed from enum to record with deliveredCount. MeterRegistry via `Instance<>` for optional injection.
-
-**LAST_WRITE delivery (#313):** Version counter on Message, `lastDeliveredVersion` on DeliveryCursor, version-aware batch query, delivery signal on overwrite via post-commit TSR. V26 migration.
+**Store SPI migration (#314):** Completed the full migration — 336 files, 12 modules. Domain records in api/, Store SPIs in api/store/, JPA entities renamed to *Entity in runtime/. Conversion at JPA store boundary via fromDomain()/toDomain(). All tests pass.
 
 ## References
 
 | What | Path |
 |------|------|
-| Design specs | `docs/specs/2026-06-30-*.md` (3 specs) |
-| Blog entry | `blog/2026-06-30-mdp01-the-module-that-wasnt-a-module.md` |
-| Garden entry | `GE-20260630-6c2515` — CDI Instance<T> provided scope classloading gotcha |
-| Parent doc sync | `casehubio/parent#330` |
+| Design spec | `docs/specs/issue-314-store-spi-to-api/2026-06-30-store-spi-to-api-design.md` |
+| Blog entry | `blog/2026-06-30-mdp02-the-roots-not-the-leaves.md` |
+| Journal | `design/JOURNAL.md` — §store-spi-boundary |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
