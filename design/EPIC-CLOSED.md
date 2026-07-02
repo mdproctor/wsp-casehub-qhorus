@@ -1,5 +1,5 @@
-# Branch Closed: issue-261-slack-channel-backend
+# Branch Closed: issue-314-store-spi-to-api
 
-**Date:** 2026-06-20
-**Issues:** 261
+**Date:** 2026-07-01
+**Issues:** 314
 **Status:** merged to main
