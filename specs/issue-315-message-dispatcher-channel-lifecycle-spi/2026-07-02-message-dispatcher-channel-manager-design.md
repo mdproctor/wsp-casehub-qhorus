@@ -108,6 +108,19 @@ public interface ReactiveChannelManager {
 }
 ```
 
+### ChannelCreateRequest — CSV strings → `List<String>`
+
+`ChannelCreateRequest` currently uses `String` (CSV) for `barrierContributors`,
+`allowedWriters`, and `adminInstances`. `Channel` already uses `List<String>` for
+these fields — the conversion happens inside `Channel.fromRequest()` via
+`Channel.splitCsv()`. This is a type mismatch within the Tier 1 API.
+
+**Change:** `ChannelCreateRequest.barrierContributors`, `.allowedWriters`, and
+`.adminInstances` change from `String` to `List<String>`. The Builder methods update
+accordingly. `Channel.fromRequest()` passes these fields through directly instead of
+calling `splitCsv()`. `Channel.splitCsv()` moves entirely to the MCP tool boundary
+(see MCP tool boundary adaptation below).
+
 ### Signature changes from current ChannelService
 
 | Method | Current (ChannelService) | New (ChannelManager) | Reason |
@@ -115,6 +128,25 @@ public interface ReactiveChannelManager {
 | `setAllowedWriters` | `(UUID, String)` — CSV | `(UUID, List<String>)` | Match domain record type |
 | `setAdminInstances` | `(UUID, String)` — CSV | `(UUID, List<String>)` | Match domain record type |
 | `findOrCreateWithBinding` | name includes impl detail | `findOrCreate` | Binding info is in ChannelCreateRequest |
+
+### findOrCreate semantics
+
+The current `findOrCreateWithBinding` requires a connector binding and uses
+`(inboundConnectorId, externalKey)` as the lookup key. The renamed `findOrCreate`
+generalises this to dual-mode lookup:
+
+1. **With connector binding** (`request.hasConnectorBinding() == true`): look up by
+   `(inboundConnectorId, externalKey)` via `ChannelBindingStore`. If found, return
+   existing channel (`wasCreated=false`). If not found, create channel and binding
+   (`wasCreated=true`). This preserves current `findOrCreateWithBinding` behavior.
+
+2. **Without connector binding**: look up by channel name via `ChannelStore.findByName()`.
+   If found, return existing channel (`wasCreated=false`). If not found, create channel
+   (`wasCreated=true`).
+
+This makes `findOrCreate` genuinely general — consumers without connector bindings
+can use it for idempotent channel creation by name, while the connector backend
+continues to use the binding-based path.
 
 ### Excluded from SPI
 
@@ -133,22 +165,45 @@ public interface ReactiveChannelManager {
 
 - `ChannelService implements ChannelManager` — `List<String>` params are passed through
   to `Channel` domain record construction (which already uses `List<String>`); CSV
-  conversion happens at the JPA entity boundary in `ChannelEntity.fromDomain()`
-- `ReactiveChannelService implements ReactiveChannelManager` — same pass-through
+  conversion happens at the JPA entity boundary in `ChannelEntity.fromDomain()`.
+  `setAllowedWriters` and `setAdminInstances` drop their `Channel.splitCsv()` calls
+  and accept `List<String>` directly.
+- `ReactiveChannelService implements ReactiveChannelManager` — same pass-through for
+  existing methods. **`findOrCreate` is a new method** — `ReactiveChannelService` does
+  not currently have it. The name-based lookup path uses `ReactiveChannelStore.findByName()`
+  (already injected). The binding-based path requires injecting a reactive channel binding
+  store (currently only blocking `ChannelBindingStore` exists); if no reactive consumer
+  needs binding-based `findOrCreate` at launch, this path can be deferred behind an
+  `UnsupportedOperationException("Binding-based findOrCreate not yet supported on reactive path")`
+  until a reactive consumer requires it.
 - `MessageService implements MessageDispatcher` — no signature change
 - `ReactiveMessageService implements ReactiveMessageDispatcher` — no signature change
 
 ### MCP tool boundary adaptation
 
 `QhorusMcpTools` and `ReactiveQhorusMcpTools` receive String from the LLM for
-`set_allowed_writers` and `set_admin_instances`. They split to `List<String>` at the
-MCP tool boundary before calling `ChannelManager`. This is the correct place for
-string parsing — the MCP tool is the system boundary.
+`set_allowed_writers`, `set_admin_instances`, `create_channel` (barrier_contributors,
+allowed_writers, admin_instances). They split to `List<String>` at the MCP tool boundary
+before calling `ChannelManager` or constructing `ChannelCreateRequest`. This is the
+correct place for string parsing — the MCP tool is the system boundary.
+
+**Splitting logic:** use `Channel.splitCsv()` at the MCP boundary. Semantics:
+
+| Input | Result | Meaning |
+|-------|--------|---------|
+| `null` | `null` | Open — no restriction |
+| `""` (blank) | `null` | Same as null — open |
+| `"alice"` | `["alice"]` | Single entry |
+| `"alice,bob"` | `["alice", "bob"]` | Multiple entries, trimmed |
+| `"alice,,bob"` | `["alice", "bob"]` | Empty segments filtered |
+
+After this change, `Channel.splitCsv()` is called exclusively in the MCP tool layer.
+`Channel.fromRequest()` and `ChannelService.setAllowedWriters/setAdminInstances` no
+longer call it — they receive `List<String>` directly.
 
 ### What does NOT change
 
 - No Flyway migrations
-- No new test infrastructure
 - No new dependencies (mutiny already `provided` in api/)
 - No changes to `persistence-memory/` — no in-memory service layer exists
 - Store interfaces unchanged
@@ -157,7 +212,13 @@ string parsing — the MCP tool is the system boundary.
 ## Testing
 
 - Existing `ChannelServiceTest` and `MessageServiceTest` continue to pass — the services
-  now implement interfaces but behavior is identical
-- MCP tool tests updated for the `List<String>` boundary adaptation
+  now implement interfaces but behavior is identical for existing methods
+- **New test:** `ChannelService.findOrCreate()` name-based lookup path (no connector
+  binding). The binding-based path is already tested by `ChannelServiceFindOrCreateTest`.
+- **New test:** `ReactiveChannelService.findOrCreate()` — name-based lookup path
+- MCP tool tests updated for the `List<String>` boundary adaptation (both
+  `set_allowed_writers`/`set_admin_instances` and `create_channel`)
+- `ChannelCreateRequest` builder call sites updated from `String` to `List<String>` — affects
+  `QhorusMcpTools.createChannel()`, `ReactiveQhorusMcpTools.createChannel()`, and test fixtures
 - `FindOrCreateResult` import changes are mechanical — compile verifies correctness
 - Full `mvn install` from project root to catch cross-module breakage (per CLAUDE.md)
