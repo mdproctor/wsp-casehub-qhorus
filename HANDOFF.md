@@ -1,3 +1,5 @@
+*Updated: ops#14 closed — removed from backlog.*
+
 # CaseHub Qhorus — Session Handover
 **Date:** 2026-07-03 — #315 closed (MessageDispatcher and ChannelManager SPIs extracted).
 
@@ -23,7 +25,6 @@ Next candidates:
 | — | Cross-repo Store SPI migration (engine, ops, drafthouse, clinical) | M | Low | Mechanical — same entity→record pattern |
 | #317 | Fix findOrCreate PostgreSQL race recovery | S | Med | Move catch outside REQUIRES_NEW boundary |
 | #318 | Reactive create() missing gateway.initChannel() | XS | Low | One-line addition |
-| ops#14 | Enrich ChannelDriftChecker — full field comparison, tenancy fix | S | Low | Simplifies with domain record typed fields |
 | openclaw#57 | Override deliveryGuarantee → AT_LEAST_ONCE on OpenClawChannelBackend | XS | Low | Propagation from #132 |
 
 ## What Was Done This Session
