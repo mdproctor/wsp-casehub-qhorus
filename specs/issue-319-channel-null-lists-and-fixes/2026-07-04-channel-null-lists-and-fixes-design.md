@@ -61,6 +61,8 @@ private static String joinCsv(List<String> list) {
 }
 ```
 
+**Comment update:** `ChannelCreateRequest`'s compact constructor has an inline comment (lines 53–56) that reads "Null is preserved (not normalized to Set.of()) — null means 'open' and is a meaningful contract distinct from 'empty allowed set (nothing permitted)'." This comment spans all five defensive-copy lines (three list fields + two set fields). After this fix, it's only correct for the set fields. Update the comment to clarify: set fields preserve null (open vs empty are semantically distinct), list fields normalize null→`List.of()` (null and empty are equivalent).
+
 **Test impact:** Tests asserting `assertNull(ch.allowedWriters())` change to `assertThat(ch.allowedWriters()).isEmpty()`. Mechanical migration.
 
 ### 2. findOrCreate PostgreSQL race recovery (#317)
@@ -229,6 +231,6 @@ This is already offloaded to the worker pool, so the blocking `initChannel()` ca
 
 - Set field (`allowedTypes`/`deniedTypes`) null semantics — preserved
 - `ChannelService.findOrCreate()` public API contract — still self-contained, still REQUIRES_NEW
-- `ChannelService.create()` public API contract — still `@Transactional`, still returns Channel
+- `ChannelService.create()` public API signature — still `@Transactional`, still returns Channel (note: transaction isolation semantics changed from REQUIRED to effective REQUIRES_NEW — see §2 "Transaction isolation change")
 - Reactive beans' build-time gating — unchanged
 - Message dispatch enforcement gate — unchanged
