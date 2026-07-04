@@ -1,41 +1,34 @@
-*Updated: ops#14 closed — removed from backlog.*
-
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-07-03 — #315 closed (MessageDispatcher and ChannelManager SPIs extracted).
+**Date:** 2026-07-04 — #319, #317, #318 closed (Channel null lists, findOrCreate race, reactive create parity).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `b906782`. #315 merged and closed.
+Main is clean. Both remotes at `4b995e9`. All three issues merged and closed.
 
-Cross-repo follow-up pending (carried from #314):
+Cross-repo follow-up pending (carried from #314/#315):
 - `MessageReceivedEvent` constructor changed (added `Instant occurredAt`) — Claudony (3 sites) and engine (7 sites) need `Instant.now()` as 7th arg
 - Store SPI imports moved from `runtime/store/` to `api/store/` — casehub-engine (actor-state), casehub-ops (drift checker), casehub-drafthouse (4 files), casehub-clinical (1 file)
 - Parent repo doc sync: casehubio/parent#330 (from #314), casehubio/parent#341 (from #315)
-
-New follow-up issues from #315:
-- #317: findOrCreate name-based concurrency recovery fails on PostgreSQL (PersistenceException retry within rollback-marked REQUIRES_NEW tx)
-- #318: ReactiveChannelService.create() does not call channelGateway.initChannel()
 
 Next candidates:
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Cross-repo Store SPI migration (engine, ops, drafthouse, clinical) | M | Low | Mechanical — same entity→record pattern |
-| #317 | Fix findOrCreate PostgreSQL race recovery | S | Med | Move catch outside REQUIRES_NEW boundary |
-| #318 | Reactive create() missing gateway.initChannel() | XS | Low | One-line addition |
+| — | Cross-repo Store SPI migration (engine, ops, drafthouse, clinical) | M | Low | Mechanical — update imports from `runtime/store/` to `api/store/` + `MessageReceivedEvent` constructor |
 | openclaw#57 | Override deliveryGuarantee → AT_LEAST_ONCE on OpenClawChannelBackend | XS | Low | Propagation from #132 |
 
 ## What Was Done This Session
 
-**Service facade SPI extraction (#315):** Four interfaces (`MessageDispatcher`, `ReactiveMessageDispatcher`, `ChannelManager`, `ReactiveChannelManager`) in api/ domain packages. `ChannelCreateRequest` CSV→List<String> type alignment. `findOrCreate` generalised to dual-mode lookup. Dead code removed. Garden entry GE-20260703-30313f submitted (PostgreSQL transaction gotcha).
+**Three Channel creation fixes (#319, #317, #318):** Null list normalization (compact constructors default to `List.of()`), ChannelCreateHelper with `REQUIRES_NEW` for PostgreSQL race recovery, ReactiveChannelService.create() brought to full parity (binding, initChannel, race recovery). Design-reviewed spec (11 issues, all resolved). Protocol PP-20260704-d0b9f3 captured (`@TestTransaction` + `REQUIRES_NEW` helper unique names).
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `specs/issue-315-message-dispatcher-channel-lifecycle-spi/` (promoted to project) |
-| Blog entry | `blog/2026-07-03-mdp01-the-fourth-category.md` |
-| Garden entry | `GE-20260703-30313f` (jvm) — PersistenceException H2 vs PostgreSQL |
+| Design spec | `docs/specs/issue-319-channel-null-lists-and-fixes/` (promoted to project) |
+| Blog entry | `blog/2026-07-04-mdp01-the-null-that-bit-every-caller.md` |
+| Protocol | `PP-20260704-d0b9f3` (universal) — @TestTransaction + REQUIRES_NEW unique names |
+| Protocol updated | `PP-20260609-fe1300` — channel-create-requires-init-channel (both paths now internal) |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
