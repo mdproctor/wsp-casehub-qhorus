@@ -38,8 +38,8 @@ Applied to: `barrierContributors`, `allowedWriters`, `adminInstances`.
 **Rationale:** For all three list fields, null and empty have identical runtime semantics across the entire platform:
 - `AllowedWritersPolicy`: `if (allowedWriters == null || allowedWriters.isEmpty()) return true;`
 - `QhorusMcpToolsBase`: `if (ch.adminInstances() == null || ch.adminInstances().isEmpty())`
-- `WatchdogEvaluationService`: `ch.barrierContributors() != null ? new HashSet<>(...) : List.of()`
-- `ReactiveMessageService`: `ch.allowedWriters() != null && !ch.allowedWriters().isEmpty()`
+- `WatchdogEvaluationService`: `ch.barrierContributors() != null ? ch.barrierContributors() : List.of()`
+- `ReactiveMessageService`: `ch != null && ch.allowedWriters() != null && !ch.allowedWriters().isEmpty()` (pre-check before `AllowedWritersPolicy`)
 
 No code path distinguishes null from empty for these fields.
 
@@ -52,6 +52,14 @@ private static String joinCsv(List<String> list) {
 ```
 
 Prevents `""` appearing in the DB column where null was stored before. `splitCsv(null)` returns null, which Channel's constructor normalizes to `List.of()` on read.
+
+**QhorusEntityMapper alignment:** `QhorusEntityMapper.joinCsv()` (line 121) has the same pattern — after null→`List.of()` normalization, `String.join(",", List.of())` returns `""` instead of null, changing the MCP API contract for `ChannelDetail` fields. `ChannelDetail`'s Javadoc documents null semantics explicitly: "or null if management is open to any caller." Apply the same empty-list→null fix:
+
+```java
+private static String joinCsv(List<String> list) {
+    return list == null || list.isEmpty() ? null : String.join(",", list);
+}
+```
 
 **Test impact:** Tests asserting `assertNull(ch.allowedWriters())` change to `assertThat(ch.allowedWriters()).isEmpty()`. Mechanical migration.
 
@@ -74,8 +82,11 @@ class ChannelCreateHelper {
     @Inject CurrentPrincipal currentPrincipal;
 
     @Transactional(Transactional.TxType.REQUIRES_NEW)
-    Channel createInNewTransaction(ChannelCreateRequest req) {
+    Channel createInNewTransaction(ChannelCreateRequest req, boolean autoCreated) {
         Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
+        if (autoCreated) {
+            channel = channel.toBuilder().autoCreated(true).build();
+        }
         channel = channelStore.put(channel);
         if (req.hasConnectorBinding()) {
             channelBindingStore.findByKey(req.inboundConnectorId(), req.externalKey())
@@ -96,9 +107,11 @@ class ChannelCreateHelper {
 
 **ChannelService changes:**
 
-- `create()` delegates to `channelCreateHelper.createInNewTransaction(req)`. Its `@Transactional` annotation remains (no-op shell around the helper's REQUIRES_NEW for standalone calls).
+- `create()` delegates to `channelCreateHelper.createInNewTransaction(req, false)`. Its `@Transactional` annotation remains (no-op shell around the helper's REQUIRES_NEW for standalone calls).
 - `findOrCreateByName()` calls the helper via CDI. On `PersistenceException`, the helper's REQUIRES_NEW rolls back independently; `findOrCreate`'s outer REQUIRES_NEW stays clean for the retry query.
-- `findOrCreateWithBinding()` delegates to the helper for the create path — single source of truth for channel creation.
+- `findOrCreateWithBinding()` delegates to `channelCreateHelper.createInNewTransaction(req, true)` — the `autoCreated` flag is passed through, preserving the existing behavior where connector-triggered channels are marked as auto-created.
+
+**Transaction isolation change:** Standalone callers of `create()` previously participated in the caller's transaction (REQUIRED). With the helper's REQUIRES_NEW, channel creation is always isolated — if the caller's outer transaction rolls back, the channel persists. This is intentional: `findOrCreate` already used REQUIRES_NEW, and channel creation should be atomic and independent. The `initChannel()` CDI event fires during the helper's transaction, so rolling back the channel after observers have already registered backends would leave ghost state. All current production call paths to `create()` route through `findOrCreateByName()` (already REQUIRES_NEW) or the MCP tool layer (no outer transaction), so the effective behavior for current callers is unchanged.
 
 **Transaction flow on race:**
 
@@ -135,7 +148,7 @@ private Uni<FindOrCreateResult> findOrCreateByName(ChannelCreateRequest req) {
 
 **Missing from reactive `create()`:** connector binding creation and `channelGateway.initChannel()`.
 
-**Fix:** Add both inside the `withTransaction`, matching the blocking path's timing:
+**Fix:** Add both inside the `withTransaction`, offloaded to the worker pool. `channelBindingStore` is a blocking JPA store, and `channelGateway.initChannel()` fires synchronous CDI events whose observers (`ConnectorChannelBackend.onChannelInitialised`, `SlackChannelBackend.onChannelInitialised`) perform blocking I/O (database lookups, cache warming). Both must be offloaded via `runSubscriptionOn(Infrastructure.getDefaultWorkerPool())`, matching the existing pattern in `findOrCreateWithBinding`. `ReactiveChannelService` also needs `@Inject ChannelGateway channelGateway` added (currently not injected).
 
 ```java
 @Override
@@ -143,7 +156,7 @@ public Uni<Channel> create(ChannelCreateRequest req) {
     Channel channel = Channel.fromRequest(req, currentPrincipal.tenancyId());
     return Panache.withTransaction("qhorus", () ->
             channelStore.put(channel)
-                    .invoke(ch -> {
+                    .chain(ch -> Uni.createFrom().item(() -> {
                         if (req.hasConnectorBinding()) {
                             channelBindingStore.findByKey(
                                     req.inboundConnectorId(), req.externalKey())
@@ -159,15 +172,29 @@ public Uni<Channel> create(ChannelCreateRequest req) {
                         }
                         channelGateway.initChannel(ch.id(),
                                 new ChannelRef(ch.id(), ch.name()));
-                    }));
+                        return ch;
+                    }).runSubscriptionOn(Infrastructure.getDefaultWorkerPool())));
 }
 ```
 
-`channelBindingStore` operations are blocking but short. `channelGateway.initChannel()` is purely in-memory (ConcurrentHashMap + synchronous CDI event fire).
+**Also fix: reactive `findOrCreateWithBinding` create path** — add `initChannel()` call inside the existing worker pool block, after binding creation:
 
-**Also fix:** `findOrCreateWithBinding` create path — add `initChannel()` call after persist.
+```java
+return Panache.withTransaction("qhorus", () ->
+        channelStore.put(autoCreated)
+                .chain(saved -> Uni.createFrom().item(() -> {
+                    channelBindingStore.put(new ChannelConnectorBinding(
+                            saved.id(), req.inboundConnectorId(), req.externalKey(),
+                            req.outboundConnectorId(), req.outboundDestination()));
+                    channelGateway.initChannel(saved.id(),
+                            new ChannelRef(saved.id(), saved.name()));
+                    return new FindOrCreateResult(saved, true);
+                }).runSubscriptionOn(Infrastructure.getDefaultWorkerPool())));
+```
 
-**Protocol update:** PP-20260609-fe1300 (`channel-create-requires-init-channel`) documented this as a caller responsibility. After this fix, both `create()` implementations call initChannel internally. The protocol should be updated to reflect that callers no longer need to call initChannel after create.
+This is already offloaded to the worker pool, so the blocking `initChannel()` call (with its CDI event observers) is safe here.
+
+**Protocol update:** PP-20260609-fe1300 (`channel-create-requires-init-channel`) documented this as a caller responsibility. The blocking `ChannelService.create()` already calls `initChannel()` internally (pre-dates this spec). This fix brings the reactive `ReactiveChannelService.create()` into alignment. After this fix, both `create()` implementations call initChannel internally. The protocol should be updated to mark both paths as internally handled, noting that the blocking path was already fixed.
 
 ---
 
@@ -179,7 +206,8 @@ public Uni<Channel> create(ChannelCreateRequest req) {
 - `runtime/src/main/java/.../channel/ChannelEntity.java` — `joinCsv` empty list handling
 - `runtime/src/main/java/.../channel/ChannelCreateHelper.java` — new bean
 - `runtime/src/main/java/.../channel/ChannelService.java` — delegate to helper
-- `runtime/src/main/java/.../channel/ReactiveChannelService.java` — create parity + race recovery
+- `runtime/src/main/java/.../channel/ReactiveChannelService.java` — create parity + race recovery + `@Inject ChannelGateway channelGateway`
+- `runtime/src/main/java/.../QhorusEntityMapper.java` — `joinCsv` empty list handling
 
 **Files modified (test):**
 - `api/src/test/java/.../channel/ChannelTest.java` — null → isEmpty assertions
