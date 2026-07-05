@@ -1,0 +1,9 @@
+branch: issue-316-service-facade-protocol
+project-sha: 4b995e9f9c8b0545550c177e99ca423284f603b3
+date: 2026-07-05
+issue: 316
+issue-repo: casehubio/qhorus
+covers: 316
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
