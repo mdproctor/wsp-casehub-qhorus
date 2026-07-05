@@ -1,39 +1,32 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-07-05 — #316 closed (API interface taxonomy protocol).
+**Date:** 2026-07-05 — #321, #320 closed (CDI persistence-memory cleanup + ARC42STORIES alignment).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `4ed6d7d`. Issue #316 merged and closed.
+Main is clean. Both remotes at `37569773`. Issues #321 and #320 merged and closed.
 
-Cross-repo follow-up still pending (carried from #314/#315):
-- `MessageReceivedEvent` constructor changed (added `Instant occurredAt`) — Claudony (3 sites) and engine (7 sites) need `Instant.now()` as 7th arg
-- Store SPI imports moved from `runtime/store/` to `api/store/` — casehub-engine (actor-state), casehub-ops (drift checker), casehub-drafthouse (4 files), casehub-clinical (1 file)
-- Parent repo doc sync: casehubio/parent#330 (from #314), casehubio/parent#341 (from #315)
+Cross-repo follow-up issues filed and pending:
+- claudony#167 — 9 test files: `io.casehub.qhorus.testing.InMemory*` → `io.casehub.qhorus.persistence.memory.InMemory*`
+- devtown#140 — remove ghost `exclude-types` for deleted classes + CrossTenantProducer
+- openclaw#62 — 1 test file: same import change as claudony
 
-New deferred issues from this session:
-- qhorus#320 — ARC42STORIES.MD §5 stale (api module table lists 5 packages, 9 exist)
-- parent#348 — Create `module-tier-structure.md` protocol (dangling PLATFORM.md reference)
+Ledger API drift from prior sessions was fixed on this branch (imports + JOINED inheritance). casehub-ledger was rebuilt from source — consumers resolving 0.2-SNAPSHOT locally will get the correct version.
 
-Next candidates:
-
-| # | Description | Scale | Complexity | Notes |
-|---|-------------|-------|------------|-------|
-| — | Cross-repo Store SPI migration (engine, ops, drafthouse, clinical) | M | Low | Mechanical — update imports from `runtime/store/` to `api/store/` + `MessageReceivedEvent` constructor |
-| openclaw#57 | Override deliveryGuarantee → AT_LEAST_ONCE on OpenClawChannelBackend | XS | Low | Propagation from #132 |
-| #320 | ARC42STORIES.MD §5 alignment | XS | Low | From design review of #316 |
-| parent#348 | module-tier-structure.md protocol | S | Low | Dangling PLATFORM.md reference |
+Garden entries submitted: GE-20260705-2a5555 (LedgerAttestation MappedSuperclass vs Entity), GE-20260705-a910c0 (JOINED inheritance break when parent becomes MappedSuperclass). Push to garden GitHub failed (auth) — committed locally, push on next session.
 
 ## What Was Done This Session
 
-**API interface taxonomy protocol (#316):** Created `api-interface-taxonomy.md` in garden documenting the four categories of `api/` interfaces (store, SPI, gateway, service facade) with placement rules and decision flowchart. Design-reviewed (5 rounds, 13 issues, 11 verified, 2 accepted). Fixed dangling `consumer-spi-placement.md` reference in PLATFORM.md. Also committed PLATFORM.md update to parent `issue-331-docs-sync-batch` branch.
+**CDI persistence-memory cleanup (#321):** Deleted 40 duplicate InMemory stores from testing/ (copied not moved during extraction). Eliminated CrossTenantProducer, @CrossTenant qualifier, QhorusSystemCurrentPrincipal, @QhorusSystem — qualifier was redundant on distinct types, admin assertion was tautological. Fixed MessageLedgerEntry to extend JpaLedgerEntry (JOINED inheritance broke when LedgerEntry became @MappedSuperclass). Fixed LedgerAttestation creation to use runtime @Entity class. Updated 3 protocols, ARC42STORIES.MD, DESIGN.md, CLAUDE.md. Design-reviewed (6 rounds, 16 issues, 16 verified).
+
+**ARC42STORIES.MD alignment (#320):** Expanded §5 api module table from 5 to 9 packages, added persistence-memory/ module, removed CrossTenantProducer from §4-§13. Updated in workspace.
 
 ## References
 
 | What | Path |
 |------|------|
-| Protocol | `~/.hortora/garden/docs/protocols/casehub/api-interface-taxonomy.md` |
-| Design spec | `docs/specs/issue-316-service-facade-protocol/` (promoted to project) |
-| PLATFORM.md update | `casehub-parent` on branch `issue-331-docs-sync-batch` |
+| Design spec | `docs/specs/issue-321-cdi-persistence-memory/` |
+| Garden entries | `GE-20260705-2a5555`, `GE-20260705-a910c0` |
+| Cross-repo issues | claudony#167, devtown#140, openclaw#62 |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
