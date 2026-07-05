@@ -101,8 +101,10 @@ Delete all store classes from `testing/src/main/java/io/casehub/qhorus/testing/`
 | `MessageService.java` | Remove `@CrossTenant` from its cross-tenant injection |
 | `WatchdogEvaluationService.java` | Remove `@CrossTenant` from all 4 cross-tenant store injections |
 
-**Deprecate (do not delete) the annotation class:**
-- `api/.../qualifier/CrossTenant.java` — add `@Deprecated` with javadoc explaining the type-based injection pattern. Retained because external code may reference it; removing it is a separate cross-repo issue.
+**Delete the annotation class:**
+- `api/.../qualifier/CrossTenant.java` — verified no external consumer uses the qhorus `@CrossTenant` qualifier (claudony: 0 references; devtown, openclaw: application-tier consumers that interact via MCP tools and standard store interfaces, never via `@CrossTenant`-qualified injection). The annotation is dead after the producer and all qualified injection points are removed.
+
+**Resolved TODO:** `QhorusSystemCurrentPrincipal.java` carries an interim marker: *"delete when casehub-platform ships a platform-level system-actor principal with isCrossTenantAdmin()=true."* This spec takes a different path — eliminating the need for a system-actor principal entirely. The cross-tenant stores already implement `CrossTenantChannelStore` (etc.) as distinct interfaces that ignore tenancy filtering at the query level. No system principal is needed to bypass tenancy; the store type itself determines the query behavior. The platform-level principal path is superseded.
 
 ### A3. Update `selected-alternatives` in properties files
 
@@ -111,15 +113,15 @@ Delete all store classes from `testing/src/main/java/io/casehub/qhorus/testing/`
 | File | Entries |
 |------|---------|
 | `examples/agent-communication/src/main/resources/application.properties` | 5 store references |
-| `slack-channel/src/test/resources/application.properties` | 12 store references (fix duplicate `InMemoryWatchdogStore`) |
+| `slack-channel/src/test/resources/application.properties` | 12 store references |
 
 Files already using correct package (no change): `examples/normative-layout`, `examples/type-system`, `connector-backend`.
 
-### B. ARC42STORIES.MD §5 Alignment (#320)
+### B. ARC42STORIES.MD Alignment (#320)
 
-**B1. Module structure** — add `persistence-memory/` module entry. Update `testing/` description: "Test utilities — RecordingChannelBackend, MessageLedgerEntryTestFactory" (no longer InMemory stores).
+**B1. Module structure (§5)** — add `persistence-memory/` module entry. Update `testing/` description: "Test utilities — RecordingChannelBackend, MessageLedgerEntryTestFactory" (no longer InMemory stores).
 
-**B2. Api module table** — add missing packages:
+**B2. Api module table (§5)** — add missing packages:
 
 | Package | Contents |
 |---------|----------|
@@ -128,19 +130,32 @@ Files already using correct package (no change): `examples/normative-layout`, `e
 | `api.gateway` | `ChannelBackend` hierarchy, `MessageObserver`, `MessageReceivedEvent`, `ChannelInitialisedEvent`, inbound/outbound records |
 | `api.instance` | `InstanceInfo` |
 | `api.message` | `MessageResult`, `MessageType`, `MessageDispatcher`, `ReactiveMessageDispatcher`, `CommitmentState`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent` |
-| `api.qualifier` | `@CrossTenant` (deprecated) |
+| `api.qualifier` | *(empty after `@CrossTenant` deletion)* |
 | `api.spi` | `CommitmentAttestationPolicy`, `CommitmentContext`, `ObligorTrustPolicy`, `ObligorTrustContext`, `InstanceActorIdProvider` |
 | `api.store` | `ChannelStore`, `MessageStore`, `CommitmentStore`, `InstanceStore`, `DataStore`, `WatchdogStore`, `DeliveryCursorStore`, `ChannelBindingStore` + Reactive variants + CrossTenant variants |
 | `api.store.query` | `ChannelQuery`, `DataQuery`, `InstanceQuery`, `MessageQuery`, `WatchdogQuery` |
 | `api.watchdog` | `Watchdog`, `WatchdogConditionType`, `WatchdogAlertRouter` SPI, `WatchdogAlertEvent`, alert context records (`AlertContext`, `AgentStaleContext`, `BarrierStuckContext`, `ChannelIdleContext`, `QueueDepthContext`, `ApprovalPendingContext`, `AlertDeliveryTarget`) |
 
+**B3. §4 Solution Strategy** — update the `*Store` persistence seam paragraph: change "InMemory*Store from `casehub-qhorus-testing`" to "InMemory*Store from `casehub-qhorus-persistence-memory`".
+
+**B4. §5 runtime module table** — remove `CrossTenantProducer` from the `runtime.identity` row.
+
+**B5. §6 Scenario 3 (Multi-tenancy enforcement)** — remove the `@CrossTenant` / `CrossTenantProducer` / `QhorusSystemCurrentPrincipal` runtime view. Background services inject `CrossTenant*Store` directly (unqualified).
+
+**B6. §8 Chapter 8 (Multi-Tenancy)** — remove `CrossTenantProducer` and `QhorusSystemCurrentPrincipal` from the narrative. Update: background services inject `CrossTenant*Store` interfaces directly; tenancy bypass is a property of the store type, not a CDI qualifier or system principal.
+
+**B7. §11 Quality Requirements** — update Tenant isolation row: "Background services inject `CrossTenant*Store` interfaces directly — tenancy bypass is a property of the store interface contract, not a runtime qualifier." Remove reference to `isCrossTenantAdmin()` assertion.
+
+**B8. §13 Glossary** — update `InMemoryStore` entry: change "`casehub-qhorus-testing`" to "`casehub-qhorus-persistence-memory`". Remove `@CrossTenant` references from glossary if present.
+
 ### C. Verification
 
 1. `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` — full build of all modules
-2. All tests must pass: runtime, persistence-memory, testing, connector-backend, slack-channel, examples/type-system, examples/normative-layout
-3. No CDI ambiguity errors in any module
+2. `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test-compile -Pwith-llm-examples` — verify `examples/agent-communication` compiles (profile-gated, not exercised by standard build)
+3. All tests must pass: runtime, persistence-memory, testing, connector-backend, slack-channel, examples/type-system, examples/normative-layout
+4. No CDI ambiguity errors in any module
 
-### Cross-repo follow-up (out of scope — issues filed)
+### Cross-repo follow-up (out of scope — issues to file during implementation)
 
 | Consumer | What changes | Nature |
 |----------|-------------|--------|
