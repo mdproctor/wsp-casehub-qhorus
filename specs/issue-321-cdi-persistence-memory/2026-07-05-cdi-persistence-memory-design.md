@@ -154,6 +154,15 @@ Files already using correct package (no change): `examples/normative-layout`, `e
 - `violation_hint`: update to reference direct `CrossTenant*Store` injection instead of `@CrossTenant`-qualified injection
 - Update INDEX.md entry to match new title
 
+**B10. Protocol PP-20260618-131cdf** (`docs/protocols/casehub/reactive-inmemory-store-selected-alternatives.md`) — update module references from `casehub-qhorus-testing` to `casehub-qhorus-persistence-memory`. The rule (reactive consumers must list InMemoryReactive*Store in `selected-alternatives`) is unchanged.
+- `applies_to`: change "casehub-qhorus-testing" to "casehub-qhorus-persistence-memory"
+- Body: change "InMemoryReactive*Store beans from `casehub-qhorus-testing`" to "from `casehub-qhorus-persistence-memory`"
+- Update INDEX.md entry (line 15) to match
+
+**B11. Protocol PP-20260618-100368** (`docs/protocols/casehub/inmemory-store-no-entity-mutation-in-session.md`) — update module reference from `casehub-qhorus-testing` to `casehub-qhorus-persistence-memory`. The rule (InMemory stores must not mutate PanacheEntity fields in session scope) is unchanged.
+- `applies_to`: change "casehub-qhorus-testing" to "casehub-qhorus-persistence-memory"
+- Update INDEX.md entry (line 81) to match
+
 ### C. Verification
 
 1. `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` — full build of all modules
