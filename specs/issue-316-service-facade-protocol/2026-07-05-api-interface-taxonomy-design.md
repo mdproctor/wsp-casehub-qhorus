@@ -8,13 +8,26 @@
 
 ## Problem
 
-PLATFORM.md references `casehub/garden: docs/protocols/casehub/consumer-spi-placement.md` (line 54) but the file does not exist. The inline guidance covers SPI placement only. The service facade category — introduced by qhorus#315 (MessageDispatcher, ChannelManager) — is undocumented. The full four-category taxonomy of `api/` interfaces has no protocol.
+PLATFORM.md references `casehub/garden: docs/protocols/casehub/consumer-spi-placement.md` (line 54) but the file does not exist. Similarly, `docs/protocols/universal/module-tier-structure.md` is referenced (lines 59–60) but neither the file nor the `universal/` directory exists (parent#348). The inline guidance covers SPI placement only. The service facade category — introduced by qhorus#315 (MessageDispatcher, ChannelManager) — is undocumented. The full four-category taxonomy of `api/` interfaces has no protocol.
 
 ## Deliverable
 
 A single protocol document: `api-interface-taxonomy.md` in `~/.hortora/garden/docs/protocols/casehub/`.
 
 Replaces the dangling `consumer-spi-placement.md` reference with a broader document covering all four categories.
+
+### Scope: `casehub/` (not `universal/`)
+
+The four-package taxonomy with service facades is a CaseHub convention, specifically realised in qhorus. Other foundation repos (casehub-work, casehub-engine) have different `api/` structures appropriate to their interface mix — casehub-work-api uses a flat layout with `spi/` as the only sub-package; casehub-engine-common uses `spi/`, `qualifier/`, and `internal/`. The universal principle that SPIs go in `api/spi/` is already shared across repos; the full four-category structure is qhorus-specific and aspirational for repos that develop all four kinds of interfaces.
+
+### Tier model integration
+
+The `api/` module IS Tier 1 of the three-tier module structure (pure-Java SPI / core library / full extension — see `module-tier-structure.md`, currently a dangling PLATFORM.md reference, tracked as parent#348). All four interface categories are Tier 1 contracts:
+
+- Stores, SPIs, gateways → Tier 1 contracts that consumers **implement** (pure-Java signatures, no JPA or Quarkus runtime types)
+- Service facades → Tier 1 contracts that consumers **call** (never implement)
+
+Service facades are a new kind of Tier 1 interface — consumed rather than implemented — but they share the same Tier 1 constraint: no JPA, no Quarkus runtime dependencies in the interface signature.
 
 ## The Four Categories
 
@@ -25,9 +38,11 @@ Replaces the dangling `consumer-spi-placement.md` reference with a broader docum
 | **Gateway** | `api/gateway/` | Consumer **provides** integration backend | `AgentChannelBackend`, `MessageObserver`, `InboundNormaliser` |
 | **Service facade** | `api/<domain>/` | Consumer **calls** (never implements) | `ChannelManager`, `MessageDispatcher`, `ReactiveChannelManager` |
 
-### Key distinction
+### Key distinction — placement rule
 
-Stores, SPIs, and gateways are **provided by** consumers. Service facades are **consumed by** consumers. The consumer relationship is inverted.
+Stores, SPIs, and gateways are **provided by** consumers (the consumer supplies the implementation). Service facades are **consumed by** consumers (the consumer calls the interface; the runtime provides the implementation). This inverted relationship drives the placement decision.
+
+Stores have a dual relationship: the consumer provides the JPA store implementation, but the consumer also calls store methods for reads and queries (e.g. `ChannelStore.findByIds()`). For placement purposes, the **primary** relationship — consumer provides the implementation — is what determines placement in `api/store/`.
 
 ### Placement rule
 
@@ -83,12 +98,20 @@ When adding a new interface to `api/`:
    - Connects to an external service or reacts to runtime events → gateway
 
 4. **Ambiguity: SPI vs gateway**
-   - Single-bean replacement (one active impl at a time) → SPI
-   - Multiple implementations coexist, runtime iterates them → gateway
+   - Behavioural extension (policy, computation, fold logic) → **SPI** → `api/spi/`
+   - Infrastructure integration (external system bridge, event observation) → **gateway** → `api/gateway/`
 
-### Domain types
+   Multiplicity is a secondary consideration — both SPIs and gateways can support single or multiple instances. `RenderableProjection` has multiple coexisting implementations selected by name (`projectionName()`), yet it is an SPI because it provides consumer-owned fold logic. `ChannelBackend` has multiple coexisting implementations selected by name (`backendId()`), yet it is a gateway because it bridges external messaging infrastructure. `MessageObserver` uses fan-out (all observers receive every event) — also a gateway.
 
-Records, enums, and value objects (e.g. `Channel`, `MessageDispatch`, `ChannelSemantic`) are not a category — they are the vocabulary the four categories operate on. They colocate with the category that owns them.
+### Domain types and non-interface packages
+
+Records, enums, and value objects (e.g. `Channel`, `MessageDispatch`, `ChannelSemantic`) are not a category — they are the vocabulary the four categories operate on. Three placement patterns exist in qhorus's `api/`:
+
+1. **Colocated with a service facade** — domain types live alongside the facade in `api/<domain>/`. Examples: `Channel` in `api/channel/` with `ChannelManager`; `Message` in `api/message/` with `MessageDispatcher`.
+2. **Standalone domain package** — domain types whose sub-domain is significant but which have no facade or SPI of their own. Examples: `api/data/` (`ArtefactClaim`, `SharedData`), `api/instance/` (`Instance`, `InstanceInfo`). Their associated stores live in `api/store/`.
+3. **Domain-scoped sub-package with its own SPI** — a sub-domain package that combines domain types AND an SPI interface tightly coupled to those types. Example: `api/watchdog/` contains the `Watchdog` record, alert context types, `WatchdogConditionType` enum, AND `WatchdogAlertRouter` (an SPI with a `@DefaultBean` implementation in runtime — see ADR-0011). Domain-scoped SPIs colocate with their domain package when the SPI's method signatures are tightly coupled to the domain types; cross-cutting SPIs go in `api/spi/`.
+
+**CDI qualifiers and framework annotations** (e.g. `@CrossTenant` in `api/qualifier/`) are infrastructure, not domain types or interface categories. They may exist in `api/` as needed.
 
 ## Changes Required
 
@@ -105,3 +128,11 @@ Add entry for the new protocol in the garden index.
 ### 3. Update PLATFORM.md
 
 In `casehub-parent/docs/PLATFORM.md` line 54, change the dangling `consumer-spi-placement.md` reference to `api-interface-taxonomy.md` and expand the bullet to cover all four categories.
+
+### 4. Update ARC42STORIES.MD §5 (deferred)
+
+The `api module` table in ARC42STORIES.MD §5 is stale — lists five packages but nine exist. Tracked as qhorus#320.
+
+### 5. Create `module-tier-structure.md` protocol (deferred)
+
+PLATFORM.md references `docs/protocols/universal/module-tier-structure.md` but neither the file nor the `universal/` directory exists. Tracked as parent#348.
