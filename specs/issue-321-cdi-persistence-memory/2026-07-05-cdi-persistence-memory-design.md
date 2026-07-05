@@ -101,8 +101,9 @@ Delete all store classes from `testing/src/main/java/io/casehub/qhorus/testing/`
 | `MessageService.java` | Remove `@CrossTenant` from its cross-tenant injection |
 | `WatchdogEvaluationService.java` | Remove `@CrossTenant` from all 4 cross-tenant store injections |
 
-**Delete the annotation class:**
+**Delete the annotation class and package:**
 - `api/.../qualifier/CrossTenant.java` — verified no external consumer uses the qhorus `@CrossTenant` qualifier (claudony: 0 references; devtown, openclaw: application-tier consumers that interact via MCP tools and standard store interfaces, never via `@CrossTenant`-qualified injection). The annotation is dead after the producer and all qualified injection points are removed.
+- `api/src/main/java/io/casehub/qhorus/api/qualifier/` — delete directory. `CrossTenant.java` is the sole file; the package is empty after deletion.
 
 **Resolved TODO:** `QhorusSystemCurrentPrincipal.java` carries an interim marker: *"delete when casehub-platform ships a platform-level system-actor principal with isCrossTenantAdmin()=true."* This spec takes a different path — eliminating the need for a system-actor principal entirely. The cross-tenant stores already implement `CrossTenantChannelStore` (etc.) as distinct interfaces that ignore tenancy filtering at the query level. No system principal is needed to bypass tenancy; the store type itself determines the query behavior. The platform-level principal path is superseded.
 
@@ -130,7 +131,6 @@ Files already using correct package (no change): `examples/normative-layout`, `e
 | `api.gateway` | `ChannelBackend` hierarchy, `MessageObserver`, `MessageReceivedEvent`, `ChannelInitialisedEvent`, inbound/outbound records |
 | `api.instance` | `InstanceInfo` |
 | `api.message` | `MessageResult`, `MessageType`, `MessageDispatcher`, `ReactiveMessageDispatcher`, `CommitmentState`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent` |
-| `api.qualifier` | *(empty after `@CrossTenant` deletion)* |
 | `api.spi` | `CommitmentAttestationPolicy`, `CommitmentContext`, `ObligorTrustPolicy`, `ObligorTrustContext`, `InstanceActorIdProvider` |
 | `api.store` | `ChannelStore`, `MessageStore`, `CommitmentStore`, `InstanceStore`, `DataStore`, `WatchdogStore`, `DeliveryCursorStore`, `ChannelBindingStore` + Reactive variants + CrossTenant variants |
 | `api.store.query` | `ChannelQuery`, `DataQuery`, `InstanceQuery`, `MessageQuery`, `WatchdogQuery` |
@@ -147,6 +147,12 @@ Files already using correct package (no change): `examples/normative-layout`, `e
 **B7. §11 Quality Requirements** — update Tenant isolation row: "Background services inject `CrossTenant*Store` interfaces directly — tenancy bypass is a property of the store interface contract, not a runtime qualifier." Remove reference to `isCrossTenantAdmin()` assertion.
 
 **B8. §13 Glossary** — update `InMemoryStore` entry: change "`casehub-qhorus-testing`" to "`casehub-qhorus-persistence-memory`". Remove `@CrossTenant` references from glossary if present.
+
+**B9. Protocol PP-20260609-67996e** (`docs/protocols/casehub/scheduled-service-cross-tenant-stores.md`) — update to reflect the new injection pattern. The underlying rule remains valid: `@Scheduled` methods and startup observers must not inject tenant-filtered stores. The mechanism changes:
+- Title: remove `@CrossTenant` — becomes "...must use `CrossTenant*Store` interfaces and explicit tenancyId"
+- Body: replace "inject `@CrossTenant`-qualified stores (produced by `CrossTenantProducer`) for all reads" with "inject `CrossTenant*Store` interfaces directly for all reads"
+- `violation_hint`: update to reference direct `CrossTenant*Store` injection instead of `@CrossTenant`-qualified injection
+- Update INDEX.md entry to match new title
 
 ### C. Verification
 
