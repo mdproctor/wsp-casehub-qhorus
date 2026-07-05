@@ -163,12 +163,18 @@ Files already using correct package (no change): `examples/normative-layout`, `e
 - `applies_to`: change "casehub-qhorus-testing" to "casehub-qhorus-persistence-memory"
 - Update INDEX.md entry (line 81) to match
 
+**B12. Living documentation** — update `casehub-qhorus-testing` → `casehub-qhorus-persistence-memory` references in:
+- `docs/DESIGN.md` (lines 31, 221, 238, 252): module table and 3 body references attributing InMemory stores to `testing/`
+- `CLAUDE.md` (line 355): change "adds `casehub-qhorus-testing` (or `casehub-qhorus-persistence-memory` directly)" to "adds `casehub-qhorus-persistence-memory`" — the parenthetical alternative is now the only path
+- Note: `CLAUDE.md` lines 367, 386 reference `RecordingChannelBackend` and `MessageLedgerEntryTestFactory` in `casehub-qhorus-testing` — these are correct (both utilities are retained in `testing/`)
+
 ### C. Verification
 
 1. `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` — full build of all modules
 2. `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test-compile -Pwith-llm-examples` — verify `examples/agent-communication` compiles (profile-gated, not exercised by standard build)
 3. All tests must pass: runtime, persistence-memory, testing, connector-backend, slack-channel, examples/type-system, examples/normative-layout
 4. No CDI ambiguity errors in any module
+5. Documentation sweep: search all `.md` files for `casehub-qhorus-testing` and verify that any remaining references correctly refer to utilities retained in `testing/` (RecordingChannelBackend, MessageLedgerEntryTestFactory, CommitmentServiceTest) — not to InMemory stores
 
 ### Cross-repo follow-up (out of scope — issues to file during implementation)
 
