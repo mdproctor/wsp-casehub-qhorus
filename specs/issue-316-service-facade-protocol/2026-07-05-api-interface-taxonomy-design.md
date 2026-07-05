@@ -54,9 +54,9 @@ Service facades colocate with domain types in `api/<domain>/` (e.g. `api/channel
 
 - Data access contracts — CRUD operations over domain entities.
 - Blocking and reactive pairs: `ChannelStore` + `ReactiveChannelStore`.
-- `@DefaultBean` no-op in a `persistence-memory/` module (not a working in-memory implementation — that is `@Alternative @Priority(1)`).
-- JPA implementations live in `runtime/` (they depend on Panache/Hibernate).
-- Consumer test isolation via `InMemory*Store` from `persistence-memory/`.
+- JPA implementations live in `runtime/` (they depend on Panache/Hibernate) — always present since qhorus is a Quarkus extension.
+- Working `@Alternative @Priority(1)` in-memory implementations in `persistence-memory/` — activated by classpath presence for consumer test isolation without a datasource.
+- Note: the `@DefaultBean` no-op store pattern from PLATFORM.md (`persistence-backend-cdi-priority.md`) applies to platform-level store SPIs where no implementation may be present. Qhorus domain stores use `@Alternative` because the JPA implementation is always available.
 
 ### SPIs (`api/spi/`)
 
