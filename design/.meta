@@ -1,0 +1,9 @@
+branch: issue-162-cross-node-delivery-gap
+project-sha: 375697732e7db44fd43dd571d409f9becf25c8e0
+date: 2026-07-06
+issue: 162
+issue-repo: casehubio/qhorus
+covers: 162
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
