@@ -141,7 +141,7 @@ All JPA entities and repositories use the `qhorus` named persistence unit. This 
 The taxonomy is grounded in a four-layer normative framework: speech act theory (illocutionary classification), deontic logic (obligation each type creates or discharges), social commitment semantics (who owes what to whom), and defeasible deontic logic (contrary-to-duty cases, HANDOFF defeat). The nine types cover the obligation lifecycle without overlap or gap — this completeness is a theoretical guarantee, not a design preference.
 
 **`*Store` persistence seam**
-Services inject store interfaces (`ChannelStore`, `MessageStore`, `CommitmentStore`, `InstanceStore`, `DataStore`, `WatchdogStore`), never Panache entity statics. This enables CDI-free unit tests via `InMemory*Store` from `casehub-qhorus-testing`, and contract tests via abstract base classes with two concrete runners (blocking and reactive).
+Services inject store interfaces (`ChannelStore`, `MessageStore`, `CommitmentStore`, `InstanceStore`, `DataStore`, `WatchdogStore`), never Panache entity statics. This enables CDI-free unit tests via `InMemory*Store` from `casehub-qhorus-persistence-memory`, and contract tests via abstract base classes with two concrete runners (blocking and reactive).
 
 **CDI `@DefaultBean` displacement for all SPIs**
 Every consumer-facing SPI has a `@DefaultBean` implementation in the runtime module. Consumers replace it by declaring an `@Alternative @Priority(N)` bean — no configuration key, no fork. The four SPIs: `ObligorTrustPolicy`, `CommitmentAttestationPolicy`, `InstanceActorIdProvider`, `MessageTypePolicy`. The CDI principal (`QhorusInboundCurrentPrincipal`) uses plain `@ApplicationScoped` (Tier 2 in the CDI priority ladder) rather than `@DefaultBean` — this avoids `AmbiguousDependencies` when two `@DefaultBean` implementations of the same type are on the classpath.
@@ -166,7 +166,8 @@ casehub-qhorus/
 ├── api/                    SPI contracts and DTOs — no JPA, no CDI, no runtime deps
 ├── runtime/                All CDI beans, JPA entities, MCP tools, REST endpoints
 ├── deployment/             Build-time processors — FeatureBuildItem only
-├── testing/                InMemory*Store and InMemoryReactive*Store (@Alternative @Priority(1))
+├── persistence-memory/     InMemory*Store and InMemoryReactive*Store (@Alternative @Priority(1)); zero-config ephemeral installs and test isolation
+├── testing/                Test utilities — RecordingChannelBackend, MessageLedgerEntryTestFactory
 ├── connector-backend/      Optional: bridges casehub-connectors InboundMessage events into Qhorus dispatch
 ├── slack-channel/          Optional: SlackBotClient HumanParticipatingChannelBackend
 └── examples/
@@ -181,11 +182,15 @@ Consumer-facing contracts. No JPA, no CDI, no Quarkus runtime dependencies.
 
 | Package | Contents |
 |---|---|
-| `api.channel` | `ChannelDetail` (DTO record) |
-| `api.instance` | `InstanceInfo` (DTO record) |
-| `api.gateway` | `ChannelBackend` hierarchy, `MessageObserver` SPI, `MessageReceivedEvent`, `ChannelInitialisedEvent`, `NormalisedMessage`, `InboundHumanMessage`, `OutboundMessage` |
-| `api.message` | `MessageResult`, `MessageType` enum, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, `CommitmentState` enum |
-| `api.spi` | `ObligorTrustPolicy`, `ObligorTrustContext`, `CommitmentAttestationPolicy`, `InstanceActorIdProvider` |
+| `api.channel` | `Channel`, `ChannelDetail`, `ChannelManager`, `ReactiveChannelManager`, `FindOrCreateResult` |
+| `api.data` | `SharedData`, `ArtefactClaim` domain types |
+| `api.gateway` | `ChannelBackend` hierarchy, `MessageObserver` SPI, `MessageReceivedEvent`, `ChannelInitialisedEvent`, inbound/outbound records |
+| `api.instance` | `InstanceInfo` |
+| `api.message` | `MessageResult`, `MessageType`, `MessageDispatcher`, `ReactiveMessageDispatcher`, `CommitmentState`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent` |
+| `api.spi` | `CommitmentAttestationPolicy`, `CommitmentContext`, `ObligorTrustPolicy`, `ObligorTrustContext`, `InstanceActorIdProvider` |
+| `api.store` | `ChannelStore`, `MessageStore`, `CommitmentStore`, `InstanceStore`, `DataStore`, `WatchdogStore`, `DeliveryCursorStore`, `ChannelBindingStore` + Reactive + CrossTenant variants |
+| `api.store.query` | `ChannelQuery`, `DataQuery`, `InstanceQuery`, `MessageQuery`, `WatchdogQuery` |
+| `api.watchdog` | `Watchdog`, `WatchdogConditionType`, `WatchdogAlertRouter` SPI, `WatchdogAlertEvent`, alert context records |
 
 ### runtime module — key packages
 
@@ -196,7 +201,7 @@ Consumer-facing contracts. No JPA, no CDI, no Quarkus runtime dependencies.
 | `runtime.message` | `Message` entity, `Commitment` entity, `MessageService`, `CommitmentService`, `MessageObserverDispatcher` |
 | `runtime.instance` | `Instance` entity, `Capability` entity, `InstanceService` |
 | `runtime.data` | `SharedData` entity, `ArtefactClaim` entity, `DataService` |
-| `runtime.identity` | `QhorusInboundCurrentPrincipal`, `TenancyContextFilter`, `InboundTenancyContext`, `CrossTenantProducer` |
+| `runtime.identity` | `QhorusInboundCurrentPrincipal`, `TenancyContextFilter`, `InboundTenancyContext` |
 | `runtime.audit` | `EvidentialChecker` — vocabulary violation detection (I_df: false DONE; I_ec: wrong terminal type) |
 | `runtime.ledger` | `MessageLedgerEntry`, `LedgerWriteService`, `QhorusLedgerEntryRepository`, `QhorusSequenceAllocator`, attestation policy impls |
 | `runtime.mcp` | `QhorusMcpToolsBase`, `QhorusMcpTools` (~53 `@Tool` methods), `ReactiveQhorusMcpTools` |
@@ -285,8 +290,7 @@ MessageService.dispatch()
   → all store queries filter: WHERE tenancy_id = :tenancyId
 
 Background services (WatchdogEvaluationService, ChannelGateway startup):
-  → inject @CrossTenant stores via CrossTenantProducer
-  → QhorusSystemCurrentPrincipal.isCrossTenantAdmin() == true
+  → inject CrossTenant*Store interfaces directly
   → stores issue queries without tenancy filter
 ```
 
@@ -609,7 +613,7 @@ Also shipped: `casehub-ledger` trust score fix — `TrustScoreComputer` had been
 **Issues:** #260, #265, #269, #276
 **What shipped:** `tenancyId` column on `Channel`, `Message`, `Commitment`, `Watchdog`, and `MessageLedgerEntry` (V18–V21 migrations). All JPA store queries filter by tenancyId. `TenancyContextFilter` (`@PreMatching @Priority(100)`) reads `X-Tenancy-ID` from HTTP requests and populates `InboundTenancyContext`. `QhorusInboundCurrentPrincipal` reads from `InboundTenancyContext`; null/blank headers resolve to `DEFAULT_TENANT_ID`.
 
-`CrossTenantProducer` produces `@CrossTenant`-qualified stores for background services (`WatchdogEvaluationService`, `ChannelGateway` startup) that must operate across all tenants. `QhorusSystemCurrentPrincipal` (`isCrossTenantAdmin() == true`) is injected by `CrossTenantProducer`.
+Background services (`WatchdogEvaluationService`, `ChannelGateway` startup) inject `CrossTenant*Store` interfaces directly to operate across all tenants.
 
 `X-Tenancy-ID` is **not a security boundary** — it is a routing hint for data isolation in development and multi-tenant staging. Production deployments pair it with OIDC principal extraction (`OidcCurrentPrincipal @Alternative @Priority(100)`).
 
@@ -617,12 +621,11 @@ Also shipped: `casehub-ledger` trust score fix — `TrustScoreComputer` had been
 - `runtime/src/main/java/io/casehub/qhorus/runtime/identity/TenancyContextFilter.java`
 - `runtime/src/main/java/io/casehub/qhorus/runtime/identity/InboundTenancyContext.java`
 - `runtime/src/main/java/io/casehub/qhorus/runtime/identity/QhorusInboundCurrentPrincipal.java`
-- `runtime/src/main/java/io/casehub/qhorus/runtime/identity/CrossTenantProducer.java`
 - `runtime/src/main/resources/db/qhorus/migration/V18__tenancy_id_channel.sql` — first tenancy migration
 
 #### Design decisions
 - Plain `@ApplicationScoped` for `QhorusInboundCurrentPrincipal` (not `@DefaultBean`) — avoids `AmbiguousDependencies` in consumers with multiple CurrentPrincipal implementations
-- Background services use `@CrossTenant` stores explicitly — prevents accidental single-tenant scoping in scheduled tasks
+- Background services inject `CrossTenant*Store` interfaces directly — prevents accidental single-tenant scoping in scheduled tasks
 
 #### Status
 ✅ Complete
@@ -750,7 +753,7 @@ This is an intentional asymmetry: LAST_WRITE channels are designed for EPHEMERAL
 |---|---|
 | **Commitment correctness** | Every COMMAND dispatch produces exactly one `Commitment` in OPEN state. DONE/DECLINE/FAILURE on the same `correlationId` transitions it to a terminal state. `CommitmentStoreContractTest` verifies this for both blocking and reactive stores. |
 | **Audit completeness** | Every speech act that passes the enforcement gate produces a `MessageLedgerEntry`. The only exception is LAST_WRITE overwrites (#195 — tracked). `LedgerWriteService.record()` is unconditional. |
-| **Tenant isolation** | All JPA store queries carry a `tenancyId` filter. `TenantIsolationTest` verifies that tenant A cannot read tenant B's channels, messages, or commitments. Background services use `@CrossTenant` stores with explicit `isCrossTenantAdmin()` assertion. |
+| **Tenant isolation** | All JPA store queries carry a `tenancyId` filter. `TenantIsolationTest` verifies that tenant A cannot read tenant B's channels, messages, or commitments. Background services inject `CrossTenant*Store` interfaces directly. |
 | **CDI extensibility** | Every SPI has a `@DefaultBean` implementation. A consumer can replace any SPI with an `@Alternative @Priority(N)` bean without modifying qhorus source. Verified by consumer integration tests in claudony. |
 | **Enforcement gate integrity** | No channel write bypasses `MessageService.dispatch()`. MCP tools, A2A bridge, and connector-backend all route through the same gate. `BlockingTierPurityTest` verifies that `ReactiveMessageService` injects `ObligorTrustPolicy` (SPI) rather than `TrustGateService` (internal). |
 
@@ -800,7 +803,7 @@ This is an intentional asymmetry: LAST_WRITE channels are designed for EPHEMERAL
 | `BenchmarkContext` | Context passed to `EvidentialChecker.check()` carrying channel state, artefact registry, and message history for the benchmark V1–V4 violation handlers. |
 | `BenchmarkViolation` | Result type from `EvidentialChecker.check()` — I_df (false DONE: artefact absent, obligation unfulfilled) or I_ec (wrong terminal type: RESPONSE or QUERY used in place of DONE/FAILURE/DECLINE). |
 | Named datasource `qhorus` | The Qhorus persistence unit. Always configured as `quarkus.datasource.qhorus.*`. All Qhorus JPA entities live here. Reactive code must use `Panache.withTransaction("qhorus", ...)`. |
-| `InMemoryStore` | Test-double implementations of `*Store` interfaces in `casehub-qhorus-testing`. `@Alternative @Priority(1)` — selected over JPA stores in `@QuarkusTest`. Must not mutate `PanacheEntity` fields in-place within `Panache.withSession()` scope. |
+| `InMemoryStore` | Test-double implementations of `*Store` interfaces in `casehub-qhorus-persistence-memory`. `@Alternative @Priority(1)` — selected over JPA stores in `@QuarkusTest`. Must not mutate `PanacheEntity` fields in-place within `Panache.withSession()` scope. |
 | `*Store` seam | Services inject store interfaces, never Panache entity statics. This enables CDI-free unit tests and contract tests with two concrete runners (blocking, reactive). |
 | `DEFAULT_TENANT_ID` | Sentinel tenancyId used when no `X-Tenancy-ID` header is present. Null/blank headers resolve to this value. |
 
