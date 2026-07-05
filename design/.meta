@@ -1,0 +1,9 @@
+branch: issue-321-cdi-persistence-memory
+project-sha: 4ed6d7d73c5deaad5217f7a6f74fd35a8b1f6d7f
+date: 2026-07-05
+issue: 321
+issue-repo: casehubio/qhorus
+covers: 321,320
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
