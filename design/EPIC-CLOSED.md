@@ -1,5 +1,5 @@
-# Branch Closed: issue-319-channel-null-lists-and-fixes
+# Branch Closed: issue-321-cdi-persistence-memory
 
-**Date:** 2026-07-04
-**Issues:** 319,317,318
+**Date:** 2026-07-05
+**Issues:** 321,320
 **Status:** merged to main
