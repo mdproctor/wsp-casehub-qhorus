@@ -1,0 +1,9 @@
+branch: issue-326-binding-first-putifabsent
+project-sha: 4c177454c1ce582ec4b96003da04741150f9901f
+date: 2026-07-06
+issue: 326
+issue-repo: casehubio/qhorus
+covers: 326
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
