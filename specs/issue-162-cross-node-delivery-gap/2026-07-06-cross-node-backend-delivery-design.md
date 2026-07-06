@@ -283,6 +283,19 @@ encounters an unknown `channelId`, it calls `initChannel()`, which fires
 `ClaudonyChannelBackend`, which observes this event) a chance to register
 before delivery proceeds.
 
+**Known limitation:** lazy initialization adds registry entries but has no
+corresponding cleanup for remote channel deletion. `closeChannel()` only
+fires locally (called by `ChannelService.delete()`); the broadcaster has no
+`channel_deleted` notification. Stale entries accumulate between restarts
+for channels created remotely then deleted remotely. This is acceptable
+because: channel creation/deletion is a heavyweight governance operation
+(not high-frequency), stale entries are cleaned on restart (`onStart()`
+re-initializes from the database), and the per-entry cost is small (a
+`List<BackendEntry>` with one `agentBackend` entry). Periodic
+reconciliation (compare registry keys against
+`crossTenantChannelStore.listAll()`) is a future improvement if the
+accumulation proves problematic in long-running deployments.
+
 ---
 
 ## PostgreSQL Implementation Module
@@ -334,12 +347,25 @@ re-LISTEN after reconnection produces a silent failure: the connection
 looks healthy but no notifications arrive.
 
 On notification:
-1. Parse `channelId:messageId` from payload
-2. Check self-notification filter (skip if this node dispatched it)
-3. Call `channelGateway.deliverRemote(channelId, messageId)` — the gateway
-   resolves `channelName` from the shared DB and lazy-initializes the
-   channel if needed (see § Receiving side: `ChannelGateway.deliverRemote()`)
-4. Signal `deliverySignalQueue.signal(channelId)` for AT_LEAST_ONCE backends
+1. Parse `channelId:messageId` from payload (non-blocking string split)
+2. Check self-notification filter (non-blocking set lookup — skip if this
+   node dispatched it)
+3. Offload blocking work to a virtual thread:
+
+```java
+Thread.ofVirtual().start(() -> {
+    channelGateway.deliverRemote(channelId, messageId);
+    deliverySignalQueue.signal(channelId);
+});
+```
+
+Steps 1–2 run on the Vert.x event loop (non-blocking). Step 3 offloads to
+a virtual thread because `deliverRemote()` performs blocking JPA queries
+(`crossTenantMessageStore.find()`, `crossTenantChannelStore.findById()`)
+and potentially fires synchronous CDI events via `initChannel()`. Blocking
+the event loop would stall all concurrent notification handling. Virtual
+threads are the natural fit — cheap, handle blocking I/O correctly, and
+already used inside `deliverRemote()` for backend dispatch.
 
 ### Self-notification filtering
 
