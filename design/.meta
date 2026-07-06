@@ -1,0 +1,9 @@
+branch: issue-322-testing-persistence-memory-cdi-fix
+project-sha: a13c5ee2180feb7516d9532cb43b4b91612bb07f
+date: 2026-07-06
+issue: 322
+issue-repo: casehubio/qhorus
+covers: 322,325
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
