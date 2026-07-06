@@ -1,0 +1,9 @@
+branch: issue-324-attestation-try-catch
+project-sha: 72fd4a3f2461cf268f9c7f900e0f5bab6c02c764
+date: 2026-07-07
+issue: 324
+issue-repo: casehubio/qhorus
+covers: 324
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
