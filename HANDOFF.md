@@ -1,14 +1,14 @@
 # CaseHub Qhorus — Session Handover
-**Date:** 2026-07-06 — #322 closed (testing CDI fix), #325 closed (review cleanup).
+**Date:** 2026-07-06 — #322, #325, #326 closed; #323 closed (already fixed by #319).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `4c177454`. Issues #322, #325 merged and closed.
+Main is clean. Both remotes at `72fd4a3f`. Four issues closed this session.
 
 Cross-repo follow-up issues filed and pending:
-- life#58 — remove persistence-memory Maven exclusion workaround (no longer needed)
+- life#58 — remove persistence-memory Maven exclusion workaround
 - claudony#169 — update OutboundMessage construction in 2 test files (correlationId UUID→String)
 - drafthouse#102 — remove redundant .toString() on OutboundMessage.correlationId()
 
@@ -19,19 +19,23 @@ Prior session follow-ups still open:
 
 ## What Was Done This Session
 
-**OutboundMessage.correlationId UUID→String (#325):** Fixed the type mismatch at the root — 3 duplicated parseCorrelationUuid methods deleted, latent IllegalArgumentException in DeliveryBatchExecutor fixed. Cascade through A2A (case-normalized String keys), Slack (SlackThreadCacheId + V27 migration), and ~15 test files. Design-reviewed: A2A case-sensitivity regression and broadcaster connection leak caught and fixed.
+**OutboundMessage.correlationId UUID→String (#325):** Fixed type mismatch at the root — 3 duplicated parseCorrelationUuid methods deleted, latent IllegalArgumentException in DeliveryBatchExecutor fixed. A2A SSE case-normalization for String keys. SlackThreadCacheId migrated via Flyway V27. Design-reviewed (2 rounds, 13 issues, all resolved).
 
-**Testing CDI fix (#322):** Changed persistence-memory from compile to test scope in testing/pom.xml. Added direct test-scope deps to 5 sibling modules that relied on the transitive path.
+**Testing CDI fix (#322):** persistence-memory compile→test scope in testing/pom.xml. 5 sibling modules given direct deps.
 
-**Broadcaster exponential backoff (#325):** Replaced fixed 5s retry with 1s→60s capped backoff. Added AtomicBoolean reconnection guard and shutdown leak prevention.
+**Broadcaster exponential backoff (#325):** 1s→60s capped backoff, AtomicBoolean reconnection guard, shutdown leak prevention, stale closeHandler guard.
 
-**Test sleeps→Awaitility (#325):** 4 Thread.sleep(100) replaced with Awaitility polling in ChannelGatewayDeliverRemoteTest.
+**Test sleeps→Awaitility (#325):** 4 Thread.sleep(100) replaced in ChannelGatewayDeliverRemoteTest.
+
+**Binding-first putIfAbsent (#326):** Eliminated findOrCreateWithBinding race — binding is the coordination primitive, created before the channel. No orphan channels, no TOCTOU. Catch-and-retry backup for belt-and-suspenders.
+
+**allowedWriters NPE (#323):** Investigated, found already fixed by #319 compact constructor normalization. Claudony needs SNAPSHOT rebuild. Closed.
 
 ## References
 
 | What | Path |
 |------|------|
 | Design spec | `docs/specs/2026-07-06-testing-cdi-fix-and-review-cleanup.md` |
-| Garden entry | `GE-20260706-16293f` (Maven transitive scope narrowing gotcha) |
+| Garden entries | `GE-20260706-16293f` (Maven transitive scope), `GE-20260706-b56877` (Collections.synchronizedSet) |
 | Cross-repo issues | life#58, claudony#169, drafthouse#102 |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
