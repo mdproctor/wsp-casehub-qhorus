@@ -87,6 +87,11 @@ public interface ChannelActivityBroadcaster {
 }
 ```
 
+`channelName` is for broadcaster-local use (logging, metrics, filtering).
+It is not part of any wire protocol — each broadcaster decides what to
+transmit. The PostgreSQL implementation sends only `channelId:messageId`;
+the receiving side resolves the name from the shared database.
+
 **Placement:** `api/gateway/` — this is an integration contract (bridges
 external transport infrastructure into the runtime). Follows the
 api-interface-taxonomy protocol.
@@ -94,15 +99,31 @@ api-interface-taxonomy protocol.
 **Default:** `NoOpChannelActivityBroadcaster` in `runtime/`, annotated
 `@DefaultBean @ApplicationScoped`. Single-node deployments pay zero overhead.
 
-### Wiring into `MessageService.dispatch()`
+### API Additions
 
-After the message is persisted and `fanOut()` completes, register a JTA
-`afterCompletion` synchronization that calls `broadcaster.broadcast()` on
-`STATUS_COMMITTED`. This guarantees the message is visible in the shared
-database before any receiving node tries to read it.
+**`CrossTenantMessageStore.find(Long id)`** — new method on the existing
+interface, with a corresponding JPA implementation. `deliverRemote()` runs
+without tenant context (the message could originate from any tenant), so the
+cross-tenant store is the correct home. The tenant-scoped `MessageStore.find()`
+already exists — the cross-tenant variant mirrors it.
+
+### Wiring into dispatch paths
+
+The broadcaster fires after the message transaction commits in all dispatch
+paths. `MessageService` (blocking) and `ReactiveMessageService` (reactive)
+use different post-commit mechanisms. Both also add `fanOut()` to the
+LAST_WRITE overwrite path, fixing a pre-existing gap where local
+BEST_EFFORT backends were not notified of overwrites.
+
+#### Blocking path (`MessageService.dispatch()`)
+
+After `fanOut()` completes, register a JTA `afterCompletion` synchronization
+that calls `broadcaster.broadcast()` on `STATUS_COMMITTED`. This guarantees
+the message is visible in the shared database before any receiving node
+tries to read it.
 
 ```java
-// In MessageService.dispatch(), consolidating post-commit signals:
+// Consolidating post-commit signals:
 tsr.registerInterposedSynchronization(new Synchronization() {
     @Override public void beforeCompletion() {}
     @Override public void afterCompletion(int status) {
@@ -115,23 +136,99 @@ tsr.registerInterposedSynchronization(new Synchronization() {
 });
 ```
 
-The same wiring applies to `ReactiveMessageService.dispatch()` — the
-broadcaster fires after the reactive transaction commits.
+This synchronization always registers — even when the broadcaster is
+`NoOpChannelActivityBroadcaster`. The overhead of a JTA interposed
+synchronization registration is negligible (list append), and gating on
+broadcaster type would couple `MessageService` to implementation details.
 
-The LAST_WRITE overwrite path also fires the broadcaster — the existing
-separate `afterCompletion` registration for that path is consolidated into
-the same pattern.
+`MessageObserverDispatcher` registers its own separate JTA synchronization
+for observer dispatch (refs #166). Ordering between interposed
+synchronizations is undefined in JTA, but irrelevant here — observer
+dispatch, broadcaster notification, and delivery signaling are independent
+side effects with no ordering dependency.
+
+#### Blocking LAST_WRITE overwrite path
+
+Currently, the LAST_WRITE overwrite branch returns early before `fanOut()`,
+so local BEST_EFFORT backends miss content updates. This is a pre-existing
+gap: a browser connected to the dispatching node never sees the overwrite
+until it polls. Fix: add `fanOut()` and the broadcaster sync to the
+overwrite path.
+
+```java
+// In the LAST_WRITE overwrite branch, after messageStore.put(updated):
+channelGateway.fanOut(ch.id(), ch.name(), new OutboundMessage(...));
+tsr.registerInterposedSynchronization(new Synchronization() {
+    @Override public void beforeCompletion() {}
+    @Override public void afterCompletion(int status) {
+        if (status == STATUS_COMMITTED) {
+            deliverySignalQueue.signal(channelId);
+            broadcaster.broadcast(new ChannelActivityEvent(
+                channelId, channelName, saved.id()));
+        }
+    }
+});
+```
+
+Observer dispatch (`MessageObserverDispatcher`) is intentionally excluded
+from the overwrite path — an overwrite is a content update, not a new
+message event.
+
+#### Reactive path (`ReactiveMessageService.dispatch()`)
+
+The reactive path has no JTA `TransactionSynchronizationRegistry`.
+Post-commit side effects run in the `.flatMap()` chain after
+`Panache.withTransaction()` returns — a Mutiny pipeline stage, not a JTA
+synchronization callback. The broadcaster fires here alongside `fanOut()`
+and `deliverySignalQueue`:
+
+```java
+// In Phase 4 (post-commit), after fanOut and deliverySignalQueue.signal:
+broadcaster.broadcast(new ChannelActivityEvent(
+    ch.id(), ch.name(), ctx.messageId()));
+```
+
+#### Reactive LAST_WRITE overwrite path
+
+Currently, the reactive overwrite path (the `OverwriteResult` branch) skips
+Phase 4 entirely — no `fanOut()`, no `deliverySignalQueue.signal()`, no
+observers. This is asymmetric with the blocking overwrite path which at
+least signals `deliverySignalQueue`. Fix: add `deliverySignalQueue`,
+`fanOut()`, and `broadcaster.broadcast()` to the reactive overwrite path:
+
+```java
+if (result instanceof OverwriteResult or) {
+    if (ch != null && dispatch.type() != MessageType.EVENT) {
+        rateLimiter.recordSend(ch.id(), dispatch.sender(),
+                ch.rateLimitPerChannel(), ch.rateLimitPerInstance());
+    }
+    if (ch != null) {
+        channelGateway.fanOut(ch.id(), ch.name(), new OutboundMessage(...));
+        deliverySignalQueue.signal(ch.id());
+        broadcaster.broadcast(new ChannelActivityEvent(
+            ch.id(), ch.name(), or.result().messageId()));
+    }
+    return Uni.createFrom().item(or.result());
+}
+```
 
 ### Receiving side: `ChannelGateway.deliverRemote()`
 
-A new package-private method on `ChannelGateway`:
+A new public method on `ChannelGateway`:
 
 ```java
-void deliverRemote(UUID channelId, Long messageId) {
+public void deliverRemote(UUID channelId, Long messageId) {
     Message msg = crossTenantMessageStore.find(messageId).orElse(null);
     if (msg == null) return;
     Channel ch = crossTenantChannelStore.findById(channelId).orElse(null);
     if (ch == null) return; // channel deleted between dispatch and delivery
+
+    // Lazy channel initialization: if this node has no registry entry,
+    // initialize the channel so backends can register via
+    // ChannelInitialisedEvent before delivery is attempted.
+    if (!registry.containsKey(channelId)) {
+        initChannel(channelId, new ChannelRef(channelId, ch.name()));
+    }
 
     ChannelRef ref = new ChannelRef(channelId, ch.name());
     OutboundMessage outbound = new OutboundMessage(
@@ -158,16 +255,33 @@ void deliverRemote(UUID channelId, Long messageId) {
 }
 ```
 
+`deliverRemote()` is public because the broadcaster (in
+`postgres/broadcaster/` package) and the gateway (in `runtime/gateway/`
+package) are in different modules. Access restriction is by convention —
+callers are broadcaster implementations only.
+
 Mirrors `fanOut()`: same virtual thread dispatch, same error handling, same
 agent backend skip. Differences:
 
 1. Reads the message AND channel from the shared DB (fanOut receives them
-   from the caller)
+   from the caller). **Requires** `CrossTenantMessageStore.find(Long id)` —
+   see § API Additions.
 2. Skips AT_LEAST_ONCE backends (the delivery pump handles them — the
    broadcaster signals `DeliverySignalQueue` separately)
-3. Package-private (called by broadcaster implementations, not by consumers)
+3. Lazy-initializes the channel if this node's registry has no entry for it
+   (handles dynamic channel creation on remote nodes — see below)
 4. Takes `(channelId, messageId)` not `(channelId, channelName, outbound)`
    — resolves everything from the shared DB
+
+**Lazy channel initialization** solves the dynamic-creation gap:
+`ChannelGateway.onStart()` initializes the registry from
+`crossTenantChannelStore.listAll()` at startup, but channels created on
+other nodes after startup are invisible. `ChannelInitialisedEvent` is a
+local CDI event — it does not propagate across nodes. When `deliverRemote()`
+encounters an unknown `channelId`, it calls `initChannel()`, which fires
+`ChannelInitialisedEvent` locally, giving backends (e.g.,
+`ClaudonyChannelBackend`, which observes this event) a chance to register
+before delivery proceeds.
 
 ---
 
@@ -208,22 +322,44 @@ Holds a persistent `PgConnection` via `@PostConstruct`:
 ```java
 pgConn.notificationHandler(this::handleNotification);
 pgConn.query("LISTEN qhorus_channel_activity").execute();
+pgConn.closedFuture().onComplete(ar -> reconnect());
 ```
+
+The `closedFuture()` callback detects connection loss (network failure,
+PostgreSQL restart, idle timeout). Reconnection sequence: acquire a new
+`PgConnection` from the pool, re-register the notification handler, and
+re-issue `LISTEN qhorus_channel_activity`. PostgreSQL LISTEN is
+session-scoped — a new connection has no active subscriptions. Missing the
+re-LISTEN after reconnection produces a silent failure: the connection
+looks healthy but no notifications arrive.
 
 On notification:
 1. Parse `channelId:messageId` from payload
 2. Check self-notification filter (skip if this node dispatched it)
 3. Call `channelGateway.deliverRemote(channelId, messageId)` — the gateway
-   resolves `channelName` from `ChannelStore` (shared DB) inside `deliverRemote()`
+   resolves `channelName` from the shared DB and lazy-initializes the
+   channel if needed (see § Receiving side: `ChannelGateway.deliverRemote()`)
 4. Signal `deliverySignalQueue.signal(channelId)` for AT_LEAST_ONCE backends
 
 ### Self-notification filtering
 
 PostgreSQL NOTIFY delivers to all listeners, including the sender. The
-broadcaster maintains a bounded `Set` (e.g. `LinkedHashSet` capped at 1000)
-of recently-dispatched messageIds. On receiving a notification, if the
-messageId is in the set, skip it — local delivery already happened via
-`fanOut()`.
+broadcaster maintains a bounded set of recently-dispatched messageIds using
+`Collections.synchronizedSet(new LinkedHashSet<>())`, capped at 1000
+entries. On receiving a notification, if the messageId is in the set, skip
+it — local delivery already happened via `fanOut()`.
+
+**Thread safety:** dispatch threads (application threads calling
+`broadcast()`) add entries to the set; the Vert.x event loop (notification
+handler) reads and removes. `Collections.synchronizedSet()` provides mutual
+exclusion. Contention is low — dispatch throughput is bounded by database
+write speed, and the notification handler runs on a single Vert.x event
+loop thread.
+
+The filter is an optimization, not a correctness requirement. If a
+self-notification slips through (e.g., after entry eviction),
+`deliverRemote()` runs unnecessarily — local `fanOut()` already delivered,
+so backends receive a redundant `post()` call, which is harmless.
 
 ### CDI activation
 
@@ -253,7 +389,9 @@ This is acceptable because:
 - **AT_LEAST_ONCE backends** have `DeliveryService` reconciliation every
   30s as a backup — the notification is a latency optimisation, not a
   correctness requirement
-- The subscriber connection auto-reconnects on failure
+- The subscriber connection detects loss via `closedFuture()`, reconnects,
+  and re-issues `LISTEN` (see § Receiving side). Notifications during
+  the reconnection window are lost — acceptable for the same reason
 
 ---
 
@@ -269,9 +407,14 @@ Once `casehub-qhorus-postgres-broadcaster` is on claudony's classpath:
 This is the same end result as the current fleet relay, but owned by qhorus
 infrastructure rather than claudony-specific code.
 
-**Migration:** Both mechanisms can coexist (browsers get two ticks —
-idempotent). Remove `FleetMessageRelayObserver` in a separate claudony
-issue after the broadcaster is stable.
+**Migration:** Both mechanisms can coexist during transition.
+`ClaudonyChannelBackend.post()` emits a channel-name tick to the SSE
+event bus — it is a poll trigger, not message content. Browsers receiving
+two ticks from different delivery paths make two poll requests; the second
+returns nothing new. No client-side dedup is needed for correctness —
+duplicate polls are harmless, not duplicate messages. Remove
+`FleetMessageRelayObserver` in a separate claudony issue after the
+broadcaster is stable.
 
 ### Documentation updates
 
@@ -288,7 +431,7 @@ issue after the broadcaster is stable.
 
 | Issue | Effect |
 |-------|--------|
-| #162 | Closed by this work |
+| #162 | Closed with a comment explaining the architectural ruling: shared-DB topology is the only supported multi-node configuration. Independent-database topologies (Options 2/3 from the issue body) are architecturally invalid. If independent-DB topology becomes a future concern, open a separate issue. |
 | #163 (Kafka/WebSocket/Webhook CLUSTER observers) | Remains open — independent concern (MessageObserver transports, not backend fan-out). Urgency drops. |
 | #165 (SmallRye bridge) | Remains open — independent |
 | New claudony issue | Remove `FleetMessageRelayObserver`, add `casehub-qhorus-postgres-broadcaster` dep |
@@ -304,8 +447,9 @@ issue after the broadcaster is stable.
   messageIds and evicts oldest entries when full
 - **`ChannelGateway.deliverRemote()`** — verify: reads from store, skips
   agent backend, skips AT_LEAST_ONCE, calls `post()` on BEST_EFFORT
-  backends with correct `OutboundMessage` fields. Uses
-  `InMemoryMessageStore` + inline backend stubs.
+  backends with correct `OutboundMessage` fields. Verify lazy channel
+  initialization: unknown channelId triggers `initChannel()` before
+  delivery. Uses `InMemoryMessageStore` + inline backend stubs.
 
 ### Integration tests (`@QuarkusTest`, H2)
 
@@ -314,8 +458,9 @@ issue after the broadcaster is stable.
   channelId/channelName/messageId. Use `@InjectMock ChannelActivityBroadcaster`.
 - **No broadcast on rollback:** Verify broadcaster is NOT called when the
   dispatch transaction rolls back.
-- **LAST_WRITE path:** Verify broadcaster fires for LAST_WRITE overwrite
-  dispatches.
+- **LAST_WRITE path:** Verify broadcaster fires AND `fanOut()` is called
+  for LAST_WRITE overwrite dispatches (both blocking and reactive paths).
+  Verify `deliverySignalQueue` is signaled in both paths.
 
 ### PostgreSQL integration tests (DevServices, `postgres-broadcaster/`)
 
@@ -326,9 +471,12 @@ issue after the broadcaster is stable.
   the notification.
 - **Concurrent dispatch:** Multiple rapid dispatches → verify all
   notifications arrive and all backends fire.
-- **Connection drop recovery:** Document behaviour — missed notifications
-  during reconnection are caught by `DeliveryService` reconciliation for
-  AT_LEAST_ONCE backends; BEST_EFFORT backends accept the loss.
+- **Connection drop and reconnection:** Simulate connection loss → verify
+  `closedFuture()` fires → verify reconnection acquires new connection →
+  verify `LISTEN` re-issued → verify notifications resume. Missed
+  notifications during reconnection are caught by `DeliveryService`
+  reconciliation for AT_LEAST_ONCE backends; BEST_EFFORT backends accept
+  the loss.
 
 Pattern follows `casehub-work` `PostgresBroadcasterIT` — Quarkus DevServices
 starts `postgres:17-alpine` automatically.
@@ -381,3 +529,15 @@ synchronization) reflects the existing wiring in each module — casehub-work
 uses CDI lifecycle events, qhorus uses JTA directly. Both achieve the same
 guarantee: notification fires only after the message is committed and
 visible in the shared database.
+
+The SPI shapes differ intentionally. `WorkItemEventBroadcaster.stream()`
+returns `Multi<WorkItemLifecycleEvent>` — a streaming interface where the
+broadcaster IS the SSE delivery mechanism. `ChannelActivityBroadcaster.broadcast()`
+is fire-and-forget — it notifies, then the receiving node's existing
+`ChannelGateway` infrastructure handles delivery. The casehub-work default
+(`LocalWorkItemEventBroadcaster`) is active (provides local in-process
+streaming); the qhorus default (`NoOpChannelActivityBroadcaster`) is a
+no-op. This reflects different integration patterns: casehub-work's
+broadcaster replaces the delivery path, while qhorus's broadcaster
+augments it. The module structure and activation pattern
+(`@Alternative @Priority(1)`, classpath presence) are genuine parallels.
