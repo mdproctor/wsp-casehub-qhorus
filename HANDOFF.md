@@ -1,4 +1,5 @@
 # CaseHub Qhorus — Session Handover
+*Updated: claudony#167, devtown#140 closed — removed from backlog.*
 **Date:** 2026-07-06 — #162 closed (cross-node backend delivery via ChannelActivityBroadcaster SPI).
 
 ---
@@ -13,8 +14,6 @@ Cross-repo follow-up issues filed and pending:
 - qhorus#325 — review cleanup follow-ups (test sleeps→Awaitility, parseCorrelationUuid duplication, exponential backoff)
 
 Prior session follow-ups still open:
-- claudony#167 — 9 test files: persistence-memory import change
-- devtown#140 — remove ghost exclude-types for deleted classes
 - openclaw#62 — 1 test file: same import change
 
 Garden entry GE-20260706-b56877 committed locally (Collections.synchronizedSet compound operations gotcha). Push to garden GitHub failed (auth) — push on next session (also GE-20260705-2a5555, GE-20260705-a910c0 from prior session).
