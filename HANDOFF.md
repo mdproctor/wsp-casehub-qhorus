@@ -1,33 +1,37 @@
 # CaseHub Qhorus — Session Handover
-*Updated: claudony#167, devtown#140 closed — removed from backlog.*
-**Date:** 2026-07-06 — #162 closed (cross-node backend delivery via ChannelActivityBroadcaster SPI).
+**Date:** 2026-07-06 — #322 closed (testing CDI fix), #325 closed (review cleanup).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `a13c5ee2`. Issue #162 merged and closed.
+Main is clean. Both remotes at `4c177454`. Issues #322, #325 merged and closed.
 
 Cross-repo follow-up issues filed and pending:
-- parent#353 — update PLATFORM.md capability ownership for cross-node backend delivery
-- claudony#168 — migrate from FleetMessageRelayObserver to casehub-qhorus-postgres-broadcaster
-- qhorus#325 — review cleanup follow-ups (test sleeps→Awaitility, parseCorrelationUuid duplication, exponential backoff)
+- life#58 — remove persistence-memory Maven exclusion workaround (no longer needed)
+- claudony#169 — update OutboundMessage construction in 2 test files (correlationId UUID→String)
+- drafthouse#102 — remove redundant .toString() on OutboundMessage.correlationId()
 
 Prior session follow-ups still open:
-- openclaw#62 — 1 test file: same import change
-
-Garden entry GE-20260706-b56877 committed locally (Collections.synchronizedSet compound operations gotcha). Push to garden GitHub failed (auth) — push on next session (also GE-20260705-2a5555, GE-20260705-a910c0 from prior session).
+- parent#353 — update PLATFORM.md for cross-node delivery
+- claudony#168 — migrate FleetMessageRelayObserver to postgres-broadcaster
+- openclaw#62 — 1 test file persistence-memory import change
 
 ## What Was Done This Session
 
-**Cross-node backend delivery (#162):** Established that shared PostgreSQL is the only valid multi-node topology (ADR-0017). Built `ChannelActivityBroadcaster` SPI in `api/gateway/`, `NoOpChannelActivityBroadcaster` @DefaultBean, `ChannelGateway.deliverRemote()` with lazy channel init, wired broadcaster into both MessageService and ReactiveMessageService (normal + LAST_WRITE paths). Created `postgres-broadcaster/` module with PostgreSQL LISTEN/NOTIFY, self-notification filter, virtual thread offload, connection reconnection. Fixed pre-existing gap where LAST_WRITE overwrites skipped fanOut(). Design-reviewed (3 rounds, 18 issues, all resolved). Full branch code review — 1 Important fixed (correlationId UUID parse). Blog entry written.
+**OutboundMessage.correlationId UUID→String (#325):** Fixed the type mismatch at the root — 3 duplicated parseCorrelationUuid methods deleted, latent IllegalArgumentException in DeliveryBatchExecutor fixed. Cascade through A2A (case-normalized String keys), Slack (SlackThreadCacheId + V27 migration), and ~15 test files. Design-reviewed: A2A case-sensitivity regression and broadcaster connection leak caught and fixed.
+
+**Testing CDI fix (#322):** Changed persistence-memory from compile to test scope in testing/pom.xml. Added direct test-scope deps to 5 sibling modules that relied on the transitive path.
+
+**Broadcaster exponential backoff (#325):** Replaced fixed 5s retry with 1s→60s capped backoff. Added AtomicBoolean reconnection guard and shutdown leak prevention.
+
+**Test sleeps→Awaitility (#325):** 4 Thread.sleep(100) replaced with Awaitility polling in ChannelGatewayDeliverRemoteTest.
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/issue-162-cross-node-delivery-gap/` |
-| ADR | `docs/adr/0017-shared-database-multi-node-prerequisite.md` |
-| Garden entry | `GE-20260706-b56877` (Collections.synchronizedSet compound ops) |
-| Cross-repo issues | parent#353, claudony#168, qhorus#325 |
+| Design spec | `docs/specs/2026-07-06-testing-cdi-fix-and-review-cleanup.md` |
+| Garden entry | `GE-20260706-16293f` (Maven transitive scope narrowing gotcha) |
+| Cross-repo issues | life#58, claudony#169, drafthouse#102 |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
