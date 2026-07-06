@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-06-mdp01-four-copies-one-broken.md](2026-07-06-mdp01-four-copies-one-broken.md) | 2026-07-06 | OutboundMessage.correlationId UUID→String eliminates 4 parse sites + latent bug; testing scope fix breaks 5 transitive consumers; broadcaster reconnection race caught in design review |
 | [2026-07-04-mdp01-the-null-that-bit-every-caller.md](2026-07-04-mdp01-the-null-that-bit-every-caller.md) | 2026-07-04 | Null list normalization, findOrCreate PostgreSQL race recovery via ChannelCreateHelper, ReactiveChannelService create parity |
 | [2026-06-30-mdp02-the-roots-not-the-leaves.md](2026-06-30-mdp02-the-roots-not-the-leaves.md) | 2026-06-30 | Store SPI migration — contract test hierarchy insight, domain records replace entities across 140 files |
 | [2026-06-30-mdp01-the-module-that-wasnt-a-module.md](2026-06-30-mdp01-the-module-that-wasnt-a-module.md) | 2026-06-30 | persistence-memory/ extraction, provided-scope classloading gotcha, LAST_WRITE version counter |
