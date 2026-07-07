@@ -1,0 +1,9 @@
+branch: issue-197-otel-trace-context
+project-sha: b8dce24f5b0618c3313782e8a2a857e6b2a08034
+date: 2026-07-07
+issue: 197
+issue-repo: casehubio/qhorus
+covers: 197
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
