@@ -55,10 +55,10 @@ In the blocking version:
 
 If `em.persist(attestation)` inside `saveAttestation()` throws `PersistenceException`,
 JPA spec §3.3.7.1 requires the provider to mark the transaction for rollback.
-`JpaLedgerEntryRepository.saveAttestation()` uses `@Transactional` (default `REQUIRED`),
-so it joins the `REQUIRES_NEW` transaction from `record()`. A PersistenceException from
-the attestation persist marks that transaction for rollback — the entry save is rolled
-back even though the exception is caught in `writeAttestation()`.
+`QhorusLedgerEntryRepository.saveAttestation()` has no `@Transactional` annotation — it
+runs directly in the caller's `REQUIRES_NEW` transaction from `record()`. A
+PersistenceException from the attestation persist marks that transaction for rollback —
+the entry save is rolled back even though the exception is caught in `writeAttestation()`.
 
 This violates the Javadoc contract: "Attestation write failures are caught and logged —
 attestation is a trust-scoring signal, not a correctness requirement." The reactive version
@@ -68,13 +68,7 @@ without JTA rollback semantics — a blocking/reactive parity gap.
 In practice the risk is low: UUID auto-generated, FK validated by prior SELECT, entry in
 L1 cache. The realistic failure scenario is a database connectivity failure between the
 SELECT and persist within the same transaction. Nevertheless, the contract violation is
-real and the fix is mandatory.
-
-**Fix:** `@Transactional(REQUIRES_NEW)` on `saveAttestation()` in `JpaLedgerEntryRepository`
-(casehub-ledger). This isolates the attestation persist in its own transaction — if it fails,
-only the attestation is lost. The referenced command entry (from a prior committed transaction)
-remains visible to the new transaction. This is a cross-module change filed as a mandatory
-follow-up (see Change 5).
+real and is fixed in this spec (see Change 5).
 
 ---
 
@@ -177,13 +171,19 @@ Not in scope for this change but noted for a separate fix.
 Update the class Javadoc to reflect that the entry is saved before attestation, and
 document the PersistenceException edge case as a known limitation.
 
-### Change 5 — Mandatory follow-up issue
+### Change 5 — Transaction isolation for attestation writes
 
-File issue for `REQUIRES_NEW` transaction isolation of attestation writes in
-`JpaLedgerEntryRepository.saveAttestation()` (casehub-ledger). This is mandatory — the
-PersistenceException/rollback gap violates the stated Javadoc contract (see Known
-limitation). The fix is `@Transactional(REQUIRES_NEW)` on `saveAttestation()`, which
-requires cross-module design consideration for impact on other callers of that method.
+Add `@Transactional(TxType.REQUIRES_NEW)` to `QhorusLedgerEntryRepository.saveAttestation()`.
+This isolates the attestation persist in its own transaction — if `em.persist(attestation)`
+throws `PersistenceException`, only the attestation transaction rolls back. The outer
+`REQUIRES_NEW` transaction from `record()` is unaffected, and the entry save is preserved.
+
+The referenced command entry (looked up by `attestation.ledgerEntryId`) is from a prior
+committed transaction, so it remains visible to the new `REQUIRES_NEW` transaction.
+
+**Follow-up issue:** `JpaLedgerEntryRepository.saveAttestation()` in casehub-ledger has
+the same gap (`@Transactional(REQUIRED)` instead of `REQUIRES_NEW`). This is a cross-module
+change affecting all non-qhorus callers — filed as a separate follow-up issue.
 
 ---
 
@@ -192,7 +192,8 @@ requires cross-module design consideration for impact on other callers of that m
 | File | Change |
 |------|--------|
 | `runtime/src/.../ledger/LedgerWriteService.java` | Reorder + restructure writeAttestation() |
-| `runtime/src/test/.../ledger/LedgerWriteServiceTest.java` | Add test for attestationFor() throwing |
+| `runtime/src/.../ledger/QhorusLedgerEntryRepository.java` | Add `@Transactional(REQUIRES_NEW)` on saveAttestation() |
+| `runtime/src/test/.../ledger/LedgerWriteServiceTest.java` | Add error isolation and ordering tests |
 
 ---
 
@@ -213,6 +214,7 @@ requires cross-module design consideration for impact on other callers of that m
    preserves all behaviour.
 6. **Full build**: `mvn clean install` — verify no regressions across all modules.
 
-**Note:** The PersistenceException/transaction-rollback behaviour (Known limitation) cannot
-be fully tested with `StubLedgerEntryRepository` (no real JTA). A test comment will note
-this gap to anchor the mandatory follow-up issue.
+**Note:** The `REQUIRES_NEW` transaction isolation (Change 5) is not exercised in unit tests
+with `StubLedgerEntryRepository` (no real JTA). The try/catch tests (items 1–3) verify error
+isolation at the application level; transaction-level isolation requires an integration test
+with a real JTA container.
