@@ -1,5 +1,5 @@
 # CaseHub Qhorus — Session Handover
-*Updated: parent#353 closed — removed from backlog.*
+*Updated: parent#353, openclaw#62 closed — removed from backlog.*
 **Date:** 2026-07-06 — #322, #325, #326 closed; #323 closed (already fixed by #319).
 
 ---
@@ -15,7 +15,6 @@ Cross-repo follow-up issues filed and pending:
 
 Prior session follow-ups still open:
 - claudony#168 — migrate FleetMessageRelayObserver to postgres-broadcaster
-- openclaw#62 — 1 test file persistence-memory import change
 
 ## What Was Done This Session
 
