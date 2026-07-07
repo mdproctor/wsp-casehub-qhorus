@@ -1,0 +1,9 @@
+branch: issue-327-reactive-attestation-log
+project-sha: 9a7ed5202e17cb1e759c07aa454d925935607151
+date: 2026-07-07
+issue: 327
+issue-repo: casehubio/qhorus
+covers: 327
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
