@@ -1,25 +1,28 @@
 # CaseHub Qhorus — Session Handover
-*Updated: openclaw#62 closed — removed from backlog.*
-**Date:** 2026-07-07 — #327 closed.
+
+**Date:** 2026-07-09 — #197 closed (OTel trace instrumentation).
 
 ---
 
 ## Immediate Next Step
 
-Main is clean. Both remotes at `b8dce24f`. One issue closed this session (#327 — reactive attestation log fix).
+Main is clean. Both remotes at `18d3c946`. Issue #197 closed.
 
 Cross-repo follow-up issues still open:
 - life#58 — remove persistence-memory Maven exclusion workaround
-- claudony#169 — update OutboundMessage construction in 2 test files (correlationId UUID→String)
-- drafthouse#102 — remove redundant .toString() on OutboundMessage.correlationId()
+- claudony#169 — update OutboundMessage construction (correlationId UUID→String)
+- drafthouse#102 — remove redundant .toString() on correlationId
 - claudony#168 — migrate FleetMessageRelayObserver to postgres-broadcaster
 
 ## What Was Done This Session
 
-**Reactive attestation log fix (#327):** Added caught exception `e` to `LOG.warnf()` in `ReactiveLedgerWriteService.writeAttestation()` recovery handler — aligns with blocking LedgerWriteService fix from #324. XS fix, 1 file, 1 line.
+**OTel trace instrumentation (#197):** Full OpenTelemetry span instrumentation across 9 Qhorus services (4 blocking + 4 reactive + ChannelGateway). Design spec → adversarial review (3 rounds, 11 issues, $12.54) → 7-task SDD implementation. Added `QhorusTracingConfig` (6 config switches), dispatch/commitment/fanout/delivery/ledger-write spans with cross-request span links. `Instance<Tracer>` for optional OTel dependency. Protocol PP-20260709-7b9c1b (Mutiny operator ordering). Two garden entries: GE-20260709-16094e (operator ordering gotcha), GE-20260709-520b0b (Instance<T> technique).
 
 ## References
 
 | What | Path |
 |------|------|
+| Design spec | `docs/specs/2026-07-07-otel-trace-instrumentation-design.md` |
+| Protocol | `docs/protocols/casehub/reactive-otel-span-operator-ordering.md` |
+| Design review | `~/adr/casehub-qhorus/otel-trace-instrumentation-20260707-205123/` |
 | Previous session | `git show HEAD~1:HANDOFF.md` |
