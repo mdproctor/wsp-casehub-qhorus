@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-09-mdp01-the-plumbing-was-already-there.md](2026-07-09-mdp01-the-plumbing-was-already-there.md) | 2026-07-09 | OTel trace instrumentation — existing ledger pipeline, Instance<Tracer> optional injection, Mutiny operator ordering gotcha |
 | [2026-07-04-mdp01-the-null-that-bit-every-caller.md](2026-07-04-mdp01-the-null-that-bit-every-caller.md) | 2026-07-04 | Null list normalization, findOrCreate PostgreSQL race recovery via ChannelCreateHelper, ReactiveChannelService create parity |
 | [2026-06-30-mdp02-the-roots-not-the-leaves.md](2026-06-30-mdp02-the-roots-not-the-leaves.md) | 2026-06-30 | Store SPI migration — contract test hierarchy insight, domain records replace entities across 140 files |
 | [2026-06-30-mdp01-the-module-that-wasnt-a-module.md](2026-06-30-mdp01-the-module-that-wasnt-a-module.md) | 2026-06-30 | persistence-memory/ extraction, provided-scope classloading gotcha, LAST_WRITE version counter |
