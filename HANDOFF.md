@@ -9,10 +9,8 @@
 Main is clean. Both remotes at `18d3c946`. Issue #197 closed.
 
 Cross-repo follow-up issues still open:
-- life#58 — remove persistence-memory Maven exclusion workaround
 - claudony#169 — update OutboundMessage construction (correlationId UUID→String)
 - drafthouse#102 — remove redundant .toString() on correlationId
-- claudony#168 — migrate FleetMessageRelayObserver to postgres-broadcaster
 
 ## What Was Done This Session
 
