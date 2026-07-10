@@ -455,7 +455,7 @@ Beyond the current epic (#328), several conversation model aids would help LLMs 
 
 3. **Pinned messages per topic.** A pointer from Topic to a specific message ID marking "this is the authoritative requirement" or "this is the agreed approach." Agents joining a topic late read the pin first, not the whole scroll.
 
-4. **Conversation choreographies.** Codified interaction patterns declared on a topic: "code review protocol = COMMAND(review) → STATUS(findings) → RESPONSE(feedback) → DONE(revised)." The system validates agents follow the expected pattern; the UI renders protocol-specific views.
+4. **Engine choreography visibility in conversations.** The engine (casehub-engine) owns workflow definition and enforcement — "code review protocol = COMMAND(review) → STATUS(findings) → RESPONSE(feedback) → DONE(revised)." Qhorus carries the conversation trace. The chat UI renders both together: the message stream with a workflow progress overlay showing "step 3 of 7: waiting for reviewer response" and "this conversation deviated from the protocol at step 4." The dovetail: engine dispatches messages through qhorus with workflow context metadata (workflow ID, step ID), qhorus persists and delivers them, the normative layer validates obligation fulfillment, and the chat UI renders the conversation with the engine's choreography as navigational context — not enforcement (that's the engine's job) but comprehension (which is the UI's job).
 
 5. **Attention/mention signals.** Richer than the current `target` field — explicit `@mentions`, read receipts, "needs your input" markers that reduce polling waste when multiple agents share a channel.
 
