@@ -445,6 +445,21 @@ Testing conventions applied per CLAUDE.md:
 
 ---
 
+## Cross-Repo Integration Test Distribution
+
+Each repo tests its own contribution to the integrated result. Qhorus tests that topics work. Engine tests that choreography flows through topics. Connectors tests that the UI reads topics. Blocks tests that all three compose correctly — the end-to-end story invisible from any single repo.
+
+| Repo | Tests | What they prove |
+|------|-------|-----------------|
+| **qhorus** | Topic/Reaction unit + integration | Primitives work: dispatch flows topic to message and ledger, rename preserves original in ledger, reactions are idempotent, cleanup cascades |
+| **engine** | Choreography-over-channels | Engine workflow dispatches COMMANDs with topic context, tracks which choreography step maps to which topic, workflow metadata flows through MessageDispatch |
+| **connectors** | Chat UI reads topics and reactions | Topic sidebar populated from `list_topics`, messages grouped by topic, reaction pills rendered from `get_reactions`, WebSocket push for `ReactionChangedEvent` |
+| **blocks** | Full stack end-to-end | Engine choreography → qhorus dispatch with topic → `ConversationProjection` scoped by topic → `ConversationRenderer` shows topic grouping with choreography progress overlay. Wires the full path and asserts the rendered conversation matches the engine's workflow definition |
+
+Cross-repo follow-up issues: engine#701, connectors#80, blocks#49.
+
+---
+
 ## Future Directions
 
 Beyond the current epic (#328), several conversation model aids would help LLMs communicate and coordinate more efficiently:
