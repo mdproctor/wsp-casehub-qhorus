@@ -1,0 +1,9 @@
+branch: issue-328-conversation-model-enrichments
+project-sha: 18d3c946f88905dc1cad0076274cdc393327e4a5
+date: 2026-07-10
+issue: 328
+issue-repo: casehubio/qhorus
+covers: 328,329,330,331,332,333,334
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
