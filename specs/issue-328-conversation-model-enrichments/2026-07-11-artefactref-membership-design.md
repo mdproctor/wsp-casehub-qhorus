@@ -192,7 +192,7 @@ public record ChannelMembership(
 
 **`lastReadMessageId` (Long) instead of `lastReadAt` (Instant)** from the original issue spec. Message IDs are sequence-generated and monotonically increasing:
 - No timestamp collision edge cases (sub-millisecond messages)
-- Efficient unread count: `SELECT COUNT(*) FROM message WHERE channel_id = ? AND id > ?`
+- Efficient unread count: `SELECT COUNT(*) FROM message WHERE channel_id = ? AND id > ? AND sender != ? AND message_type != 'EVENT'`
 - Precise cursor semantics — no ambiguity about which messages at the same instant
 
 #### MemberRole
@@ -263,10 +263,10 @@ public class ChannelMembershipService {
 }
 ```
 
-- `join()` is idempotent — if already a member, updates the role and preserves `joinedAt`. Accepts `tenancyId` explicitly; callers derive it from `CurrentPrincipal` or channel context.
+- `join()` is idempotent — if already a member, updates the role and preserves `joinedAt`. Accepts `tenancyId` explicitly; callers derive it from `CurrentPrincipal` or channel context. **On first join, initializes `lastReadMessageId` to the current max message ID for the channel** — "clean slate" semantic (Slack/Discord behavior: history is visible but not marked unread). If the channel has no messages, initializes to 0.
 - `leave()` removes membership; no-op if not a member
 - `markRead()` only advances `lastReadMessageId` forward (never backwards). When `messageId` is null, the MCP tool layer resolves "latest" by querying the max message ID for the channel before calling the service — the service always receives a concrete ID.
-- `getUnreadCounts()` joins membership against message table, scoped by `tenancyId`: for each channel, count messages with `id > lastReadMessageId AND sender != memberId` (own messages excluded — they aren't "unseen")
+- `getUnreadCounts()` joins membership against message table, scoped by `tenancyId`: for each channel, count messages with `id > lastReadMessageId AND sender != memberId AND message_type != 'EVENT'` (own messages excluded — they aren't "unseen"; EVENT messages excluded — they are system telemetry, not user-facing communication, consistent with `check_messages` default behavior)
 
 Plus `ReactiveChannelMembershipService` with `Uni<T>` returns, gated by `@IfBuildProperty`.
 
@@ -279,7 +279,7 @@ Auto-membership is created lazily on first human interaction, NOT at backend reg
 
 `AgentChannelBackend` and custom agent backends do NOT auto-create memberships. Agents join explicitly via `join_channel` MCP tool when they want to be visible as members.
 
-Implementation: `receiveHumanMessage()` calls `membershipService.join()` after normalisation — outside any synchronized block, using the normalised sender ID. `join()` is idempotent, so repeated messages from the same human are no-ops.
+Implementation: `receiveHumanMessage()` calls `membershipService.join()` after normalisation — outside any synchronized block, using the normalised sender ID. `join()` is idempotent, so repeated messages from the same human are no-ops. **Tenancy derivation:** the gateway resolves `tenancyId` from the channel entity via `crossTenantChannelStore.findById(channelId)` — the channel is always available in the gateway context and is the authoritative tenancy source for non-MCP entry points (webhooks, connector callbacks) where `CurrentPrincipal` may not be set.
 
 ### Channel Delete Cascade
 
