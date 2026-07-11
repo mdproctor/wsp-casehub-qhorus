@@ -76,7 +76,12 @@ public record SelectionScope(
 ) {}
 ```
 
-All fields nullable. Use line-based for code, offset-based for text, `selectedText` for display when the source artifact is unavailable. This is extracted from drafthouse's `io.casehub.drafthouse.SelectionScope` as a platform primitive — drafthouse can depend on qhorus API's `SelectionScope` instead of its own copy.
+All fields nullable. Use line-based for code, offset-based for text, `selectedText` for display when the source artifact is unavailable. This is a **generalisation** of drafthouse's `io.casehub.drafthouse.SelectionScope`, not a drop-in replacement. Key differences:
+
+- Drafthouse's `SelectionScope` has a required `DocumentSide` enum (LEFT/RIGHT for diff views), required non-blank `selectedText`, and validated `int` line ranges. These are drafthouse-specific constraints for A/B document comparison.
+- Qhorus's `SelectionScope` is a platform primitive: all fields nullable, adds character offsets for text selections, no domain-specific `DocumentSide`.
+
+The migration path for drafthouse is **composition**: drafthouse retains its `DocumentSide` alongside qhorus's `SelectionScope` (e.g., `DebateContext(DocumentSide side, SelectionScope scope)`), not a simple type swap. The `DocumentSide` concept is inherent to drafthouse's diff-view domain and does not belong in a platform primitive.
 
 ### Pipeline Unification
 
@@ -85,10 +90,15 @@ All fields nullable. Use line-based for code, offset-based for text, `selectedTe
 | `Message.artefactRefs` | `List<UUID>` | `List<ArtefactRef>` |
 | `MessageDispatch.artefactRefs` | `String` (CSV UUIDs) | `List<ArtefactRef>` |
 | `MessageEntity.artefactRefs` | `String` (CSV UUIDs) | `String` (JSON) |
-| `NormalisedMessage.artefactRefs` | `String` (CSV UUIDs) | `List<ArtefactRef>` |
+| `NormalisedMessage.artefactRefs` | `String` (CSV UUIDs) | `List<ArtefactRef>` (nullable) |
 | `MessageView.artefactRefs` | `String` (CSV UUIDs) | `List<ArtefactRef>` |
 | `DispatchResult.artefactRefs` | `List<UUID>` | `List<ArtefactRef>` |
 | `MessageSummary.artefactRefs` | `List<String>` | `List<ArtefactRef>` |
+| `OutboundMessage.artefactRefs` | (not present) | `List<ArtefactRef>` (nullable) |
+
+**OutboundMessage** gains `List<ArtefactRef> artefactRefs` so backends receiving fan-out messages can render artefact references in real-time (essential for connectors#65 chat UI). Backends that don't use artefactRefs simply ignore the field.
+
+**Normaliser handling:** `DefaultInboundNormaliser` continues to pass `null` for artefactRefs — the type change from `String` to `List<ArtefactRef>` is mechanical. Human chat UIs don't produce structured `ArtefactRef` objects in the raw `InboundHumanMessage`. Backend-specific normalisers (e.g., `ConnectorNormaliser`) that receive rich artefact references from their input format construct `List<ArtefactRef>` via `InboundHumanMessage.metadata()` or a future field extension — that's a connector-backend concern.
 
 The entity layer is the sole serialization boundary. `MessageEntity` uses a JPA `@Converter` (`ArtefactRefListConverter`) to handle `List<ArtefactRef>` ↔ JSON `String` — entities aren't CDI beans so ObjectMapper can't be injected; the converter uses a static ObjectMapper instance. `fromDomain()` and `toDomain()` work with `List<ArtefactRef>` directly; the converter handles persistence. The `artefact_refs` column stays `TEXT`.
 
@@ -98,8 +108,8 @@ The entity layer is the sole serialization boundary. `MessageEntity` uses a JPA 
 
 **New:** Selective auto-claim based on URI resolvability.
 1. For each `ArtefactRef`, attempt `UUID.fromString(ref.uri())`
-2. If it parses as UUID, look up in `dataStore.findByIds()` — if found, auto-claim for sender
-3. Non-UUID URIs (`case:123`, `https://...`) bypass claim/release entirely
+2. If it parses as UUID, look up in `dataStore.findByIds()` — if found, auto-claim for sender; if NOT found, reject with `IllegalArgumentException` (preserves existing contract — dangling UUID refs are data integrity violations)
+3. Non-UUID URIs (`case:123`, `https://...`) bypass validation and claim/release entirely
 4. Auto-release on commitment resolution unchanged — scans refs for UUID-backed ones
 
 This preserves the existing lifecycle for SharedData-backed artifacts while allowing opaque cross-system references that have no lifecycle within qhorus.
@@ -110,7 +120,7 @@ The `artefact_refs` column is already `TEXT` (V1__initial_schema.sql). Content f
 
 ### MCP Tool Surface
 
-**`send_message`** — `artefact_refs` parameter changes from `List<String>` (UUID strings) to `String` (JSON-encoded array of ArtefactRef objects). Parsed at the MCP boundary into `List<ArtefactRef>`. Backward-compatible shorthand: a plain UUID string is accepted and auto-wrapped as `ArtefactRef(uri=uuid, type=EXTERNAL, label=null, scope=null)`.
+**`send_message`** — `artefact_refs` parameter changes from `List<String>` (UUID strings) to `String` (JSON-encoded array of ArtefactRef objects). Parsed at the MCP boundary into `List<ArtefactRef>`. Backward-compatible shorthand: a plain UUID string is accepted and auto-wrapped as `ArtefactRef(uri=uuid, type=DOCUMENT, label=null, scope=null)` — `DOCUMENT` because the only valid plain-UUID usage pattern is SharedData document references.
 
 **`check_messages` / `search_messages`** — `MessageSummary.artefactRefs` carries full `List<ArtefactRef>` structure in responses.
 
@@ -146,10 +156,16 @@ The `artefact_refs` column is already `TEXT` (V1__initial_schema.sql). Content f
 - `runtime/mcp/QhorusMcpToolsBase.java` — `MessageSummary.artefactRefs` type change to `List<ArtefactRef>`; `toMessageSummary()` updated
 - `runtime/mcp/QhorusMcpTools.java` — `sendMessage()` artefact_refs parameter and auto-claim logic
 - `runtime/mcp/ReactiveQhorusMcpTools.java` — same for reactive
-- `runtime/gateway/DefaultInboundNormaliser.java` — artefactRefs type change
+- `api/gateway/OutboundMessage.java` — add `List<ArtefactRef> artefactRefs` field
+- `runtime/gateway/ChannelGateway.java` — pass artefactRefs when constructing OutboundMessage in `fanOut()` and `deliverRemote()`
+- `runtime/gateway/DefaultInboundNormaliser.java` — artefactRefs type change (null → null, mechanical)
+- `runtime/mcp/QhorusMcpToolsBase.java` — `ChannelDigest.artefactRefCount` computation updated: iterate `ref.uri()` instead of `ref.toString()` for dedup; rename `artefactUuids` variable
 - `persistence-memory/InMemoryMessageStore.java` — artefactRefs type in stored domain objects
 - `persistence-memory/InMemoryReactiveMessageStore.java` — same
 - All existing artefactRefs tests — updated for new types
+
+**No changes needed (confirmed):**
+- `connector-backend/ConnectorChannelBackend.java` — receives `OutboundMessage` via `post()` but only accesses `message.content()`; no artefactRefs handling
 
 ---
 
@@ -223,7 +239,7 @@ public interface ChannelMembershipStore {
     ChannelMembership put(ChannelMembership membership);
     Optional<ChannelMembership> find(UUID channelId, String memberId);
     List<ChannelMembership> findByChannel(UUID channelId);
-    List<ChannelMembership> findByMember(String memberId);
+    List<ChannelMembership> findByMember(String memberId, String tenancyId);
     void updateRole(UUID channelId, String memberId, MemberRole role);
     void updateLastReadMessageId(UUID channelId, String memberId, Long messageId);
     boolean delete(UUID channelId, String memberId);
@@ -239,30 +255,31 @@ Plus `ReactiveChannelMembershipStore` with `Uni<T>` returns. Standard pattern: `
 // runtime/channel/ChannelMembershipService.java
 @ApplicationScoped
 public class ChannelMembershipService {
-    ChannelMembership join(UUID channelId, String memberId, MemberRole role);
+    ChannelMembership join(UUID channelId, String memberId, MemberRole role, String tenancyId);
     void leave(UUID channelId, String memberId);
     List<ChannelMembership> listMembers(UUID channelId);
     void markRead(UUID channelId, String memberId, Long messageId);
-    Map<UUID, UnreadCount> getUnreadCounts(String memberId);
+    Map<UUID, UnreadCount> getUnreadCounts(String memberId, String tenancyId);
 }
 ```
 
-- `join()` is idempotent — if already a member, updates the role and preserves `joinedAt`
+- `join()` is idempotent — if already a member, updates the role and preserves `joinedAt`. Accepts `tenancyId` explicitly; callers derive it from `CurrentPrincipal` or channel context.
 - `leave()` removes membership; no-op if not a member
-- `markRead()` only advances `lastReadMessageId` forward (never backwards)
-- `getUnreadCounts()` joins membership against message table: for each channel, count messages with `id > lastReadMessageId`
+- `markRead()` only advances `lastReadMessageId` forward (never backwards). When `messageId` is null, the MCP tool layer resolves "latest" by querying the max message ID for the channel before calling the service — the service always receives a concrete ID.
+- `getUnreadCounts()` joins membership against message table, scoped by `tenancyId`: for each channel, count messages with `id > lastReadMessageId AND sender != memberId` (own messages excluded — they aren't "unseen")
 
 Plus `ReactiveChannelMembershipService` with `Uni<T>` returns, gated by `@IfBuildProperty`.
 
 ### Auto-Membership
 
-When `ChannelGateway.registerBackend()` registers a human-facing backend, auto-create membership:
-- `HumanParticipatingChannelBackend` → `MemberRole.PARTICIPANT`
-- `HumanObserverChannelBackend` → `MemberRole.OBSERVER`
+Auto-membership is created lazily on first human interaction, NOT at backend registration time. A backend is infrastructure (e.g., `ConnectorChannelBackend` with backendId `"connector-human"`) — it serves potentially many human users, so creating a single membership for the backend is semantically wrong. Instead:
+
+- **`ChannelGateway.receiveHumanMessage()`** — after normalisation, if no membership exists for the sender (e.g., `"human:alice"`), auto-create with `MemberRole.PARTICIPANT`. The sender ID from `NormalisedMessage.senderInstanceId()` IS the `memberId`.
+- **`ChannelGateway.receiveObserverSignal()`** — auto-create with `MemberRole.OBSERVER` for `"human:" + signal.externalSenderId()`.
 
 `AgentChannelBackend` and custom agent backends do NOT auto-create memberships. Agents join explicitly via `join_channel` MCP tool when they want to be visible as members.
 
-Implementation: `ChannelGateway.registerBackend()` already knows the backend type. After registering, if human-facing, call `membershipService.join()` directly.
+Implementation: `receiveHumanMessage()` calls `membershipService.join()` after normalisation — outside any synchronized block, using the normalised sender ID. `join()` is idempotent, so repeated messages from the same human are no-ops.
 
 ### Channel Delete Cascade
 
@@ -270,10 +287,10 @@ Implementation: `ChannelGateway.registerBackend()` already knows the backend typ
 
 ### Flyway Migration
 
-V31 — `channel_membership` table:
+V32 — `channel_membership` table:
 
 ```sql
--- V31__channel_membership.sql
+-- V32__channel_membership.sql
 CREATE TABLE channel_membership (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     channel_id UUID NOT NULL,
@@ -291,11 +308,11 @@ CREATE INDEX idx_membership_member_id ON channel_membership(member_id);
 ### MCP Tool Surface
 
 ```
-join_channel(channel, role?)           — memberId from caller's registered instance
+join_channel(channel, role?)           — memberId from caller's registered instance; tenancyId from CurrentPrincipal
 leave_channel(channel)
 list_members(channel)                  — returns ChannelMembership[]
-mark_channel_read(channel, message_id?) — updates lastReadMessageId; null = latest
-get_unread_counts()                    — returns unread counts across all channels for caller
+mark_channel_read(channel, message_id?) — updates lastReadMessageId; null = latest (MCP tool resolves to max message ID before calling service)
+get_unread_counts()                    — returns unread counts across all channels for caller, scoped by tenancyId from CurrentPrincipal; excludes caller's own messages
 ```
 
 ### Testing Strategy
@@ -307,10 +324,10 @@ get_unread_counts()                    — returns unread counts across all chan
 | Join idempotency | in service test | runtime | Join twice — role updated, joinedAt preserved |
 | markRead forward-only | in service test | runtime | Advance works, regress is no-op |
 | Unread counts | in service test | runtime | Correct counts after markRead |
-| Auto-membership | `ChannelGatewayMembershipTest` | runtime | `@QuarkusTest` — human backend registration creates membership |
+| Auto-membership | `ChannelGatewayMembershipTest` | runtime | `@QuarkusTest` — first human message auto-creates membership; observer signal auto-creates OBSERVER |
 | Channel delete cascade | extend `ChannelToolTest` | runtime | Verify memberships cleaned up |
 | MCP tools | `MembershipToolTest` | runtime | `@QuarkusTest` — all MCP tool methods |
-| Flyway schema | extend `FlywayMigrationSchemaTest` | runtime | Verify V31 produces correct schema |
+| Flyway schema | extend `FlywayMigrationSchemaTest` | runtime | Verify V32 produces correct schema |
 
 ### File Impact
 
@@ -327,10 +344,10 @@ get_unread_counts()                    — returns unread counts across all chan
 - `runtime/store/jpa/ReactiveJpaChannelMembershipStore.java`
 - `persistence-memory/InMemoryChannelMembershipStore.java`
 - `persistence-memory/InMemoryReactiveChannelMembershipStore.java`
-- `db/qhorus/migration/V31__channel_membership.sql`
+- `db/qhorus/migration/V32__channel_membership.sql`
 
 **Modified files:**
-- `runtime/gateway/ChannelGateway.java` — auto-membership on human backend registration
+- `runtime/gateway/ChannelGateway.java` — auto-membership on first human message via `receiveHumanMessage()` and `receiveObserverSignal()`
 - `runtime/mcp/QhorusMcpTools.java` — new membership tools; delete_channel gains membership cleanup
 - `runtime/mcp/ReactiveQhorusMcpTools.java` — same for reactive
 - `runtime/mcp/QhorusMcpToolsBase.java` — MembershipSummary record
@@ -352,4 +369,5 @@ get_unread_counts()                    — returns unread counts across all chan
 |------|-------|------|
 | connectors | #65 | Rich artefact references with selection scope — depends on #331 |
 | connectors | #68 | Channel membership and presence model — depends on #332 |
-| drafthouse | (new) | Migrate `SelectionScope` to depend on qhorus API's `SelectionScope` |
+| drafthouse | (new) | Migrate `SelectionScope` to compose with qhorus API's `SelectionScope` — replace `SelectionScope(DocumentSide, int, int, String)` with a wrapper holding `DocumentSide` alongside qhorus's `SelectionScope` |
+| qhorus | (new) | Update issue #332 and connectors#68 to reflect `lastReadMessageId` (Long) instead of `lastReadAt` (Instant) |
