@@ -1,0 +1,9 @@
+branch: issue-337-topic-digest-and-fixes
+project-sha: c27700367afd0fe02ffe304effb0e8f5044e2ad1
+date: 2026-07-12
+issue: 337
+issue-repo: casehubio/qhorus
+covers: 337,341,342
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
