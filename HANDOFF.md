@@ -1,22 +1,22 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-12 — Branch `issue-339-conversation-followups` closed. #339, #336, #335, #340, #333 implemented. #341 filed.
+**Date:** 2026-07-12 — Branch `issue-334-space-channel-hierarchy` closed. #334 implemented and pushed.
 
 ---
 
 ## Immediate Next Step
 
-All conversation model followups done. #333 (Presence) and #334 (Space) were the remaining #328 children — #333 is now closed. #334 (Space — channel hierarchy) is the last major piece. Start with `/work` when ready.
+#334 (Space) is done. The last #328 child is closed. Pick from What's Next — #337 (topic-aware digest) and #338 (topic-aware projections) are the natural next pair. Start with `/work` when ready.
 
 ## What Was Done
 
-Five issues on one branch: `get_reactions_batch` MCP tool (#339), `mergeTopics` (#336), `moveTopic` with commitment gate (#335), `ArtefactType.DEBATE` (#340), `Presence` with Caffeine cache and heartbeat degradation (#333). Design review: 5 rounds, 22 issues, 16 verified. Full build green across 13 modules. 7 commits squashed to 5.
+Space — recursive organizational channel hierarchy. Space entity with adjacency-list nesting (parentSpaceId, MAX_DEPTH=10). SpaceService with create, findByName (ambiguity resolution), rename, updateDescription, moveSpace (cycle detection), moveChannelToSpace (tenancy enforcement). 9 MCP tools with resolveSpace dual-identity. ChannelDetail.spaceName batch enrichment. V33/V34 migrations. 30 store contract tests + 32 service tests. Design review: 5 rounds, 16 issues, 13 verified. Full build green across 13 modules. 16 commits squashed to 1.
 
 ## Cross-Module
 
 **We're blocking:**
-- `connectors` — needs topic merge/move + presence + artefactRef + membership APIs (connectors#65, #68, #80)
-- `engine` — needs topic field for choreography context (engine#701)
+- `connectors` — needs Space API for space-aware channel grouping (connectors#67)
+- `engine` — needs Space for normative channel layout integration (case → space mapping)
 - `blocks` — needs all for end-to-end integration (blocks#49)
 
 **Cross-repo follow-ups still open:**
@@ -27,16 +27,14 @@ Five issues on one branch: `get_reactions_batch` MCP tool (#339), `mergeTopics` 
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #334 | Space — channel hierarchy | L | High | Last #328 child |
-| #335 | moveTopic | — | — | CLOSED this session |
 | #337 | Topic-aware digest | M | Med | |
 | #338 | Topic-aware projections | M | Med | |
-| #341 | Escape topic/channel names in telemetry JSON | XS | Low | Filed this session |
+| #341 | Escape topic/channel names in telemetry JSON | XS | Low | Filed last session |
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/issue-339-conversation-followups/2026-07-12-conversation-followups-design.md` |
-| Blog | `blog/2026-07-12-mdp02-five-followups-one-branch.md` |
-| Design review | `~/adr/casehub-qhorus/conversation-followups-20260712-151919/tracker.md` |
+| Design spec | `docs/specs/issue-334-space-channel-hierarchy/2026-07-12-space-channel-hierarchy-design.md` |
+| Blog | `blog/2026-07-12-mdp03-spaces-replace-naming-conventions.md` |
+| Design review | `~/adr/casehub-qhorus/space-channel-hierarchy-20260712-211404/tracker.md` |
