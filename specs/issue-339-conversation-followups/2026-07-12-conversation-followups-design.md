@@ -54,7 +54,7 @@ record MergeResult(String sourceTopic, String targetTopic, int messagesUpdated) 
 **Mechanics:**
 
 *Service (`TopicService.merge`):*
-1. Validate: source topic exists, target topic exists, source != target, neither is "general"
+1. Validate: source topic exists, target topic exists, source != target, source is not "general"
 2. Update all messages with `topic=source` to `topic=target` via `MessageStore.updateTopicName(channelId, source, target)` (existing method)
 3. Delete source `Topic` record via `TopicStore.delete(channelId, source)`
 
@@ -102,11 +102,15 @@ record MoveResult(String topicName, UUID sourceChannelId, UUID targetChannelId, 
 
 **New store methods:**
 ```java
-// MessageStore
+// MessageStore (blocking)
 int updateChannelId(UUID sourceChannelId, String topic, UUID targetChannelId);
+// ReactiveMessageStore
+Uni<Integer> updateChannelId(UUID sourceChannelId, String topic, UUID targetChannelId);
 
-// CommitmentStore
+// CommitmentStore (blocking)
 List<Commitment> findByIds(Collection<UUID> ids);
+// ReactiveCommitmentStore
+Uni<List<Commitment>> findByIds(Collection<UUID> ids);
 ```
 
 **Mechanics:**
@@ -121,7 +125,7 @@ List<Commitment> findByIds(Collection<UUID> ids);
 1. Validate: topic exists in source, topic is not "general"
 2. **Commitment gate:** query messages in source channel/topic with non-null `commitmentId`. Collect distinct commitment IDs, batch-check via `CommitmentStore.findByIds(Collection<UUID>)` (new method). If any commitment is non-terminal (OPEN, ACKNOWLEDGED) → throw `IllegalStateException` listing the blocking commitments by correlationId.
 3. Move messages: `messageStore.updateChannelId(sourceChannelId, topicName, targetChannelId)`
-4. Move topic record: if target channel has a topic with the same name → messages merge into it. If not → create new Topic record in target channel. Delete source Topic record.
+4. Move topic record: if target channel has a topic with the same name → messages merge into it (target's resolved state is not modified — same rule as mergeTopics). If not → create new Topic record in target channel. Delete source Topic record.
 
 **MCP tool:**
 ```
@@ -304,4 +308,4 @@ No `InMemoryPresenceStore` needed — the Caffeine cache IS in-memory.
 
 - **No Flyway migration** for any of these issues. All changes are either in-memory (presence), enum additions (DEBATE), new queries on existing columns (moveTopic), or pure service/MCP additions.
 - **Reactive parity** for MCP tools follows the existing `@IfBuildProperty` pattern. Presence is an exception — no reactive service, blocking service called from both stacks.
-- **InMemory store additions** in `persistence-memory` for `MessageStore.updateChannelId()` and `CommitmentStore.findByIds()`.
+- **Store method additions** across all implementations (blocking, reactive, InMemory, JPA) for `updateChannelId()` and `findByIds()`. `CrossTenant*Store` interfaces are separate (not extending the base stores) and do not need the new methods.
