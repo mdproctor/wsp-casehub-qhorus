@@ -1,0 +1,9 @@
+branch: issue-339-conversation-followups
+project-sha: 2c35bd323fdad602efcf9ad9c1fe06d8e377cc58
+date: 2026-07-12
+issue: 339
+issue-repo: casehubio/qhorus
+covers: 339,336,335,340,333
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
