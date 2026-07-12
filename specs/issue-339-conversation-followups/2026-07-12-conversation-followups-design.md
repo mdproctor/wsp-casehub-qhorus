@@ -27,7 +27,7 @@ No new store methods, no migration, no service changes. Blocking tool only — r
 
 ### Validation
 
-- `message_ids` must be non-null and non-empty
+- `message_ids` must be non-null, non-empty, and limited to 200 entries maximum
 - Individual IDs are not validated for existence — missing messages return empty reaction lists (consistent with `getReactions` for non-existent messages)
 
 ---
@@ -52,10 +52,16 @@ record MergeResult(String sourceTopic, String targetTopic, int messagesUpdated) 
 ```
 
 **Mechanics:**
+
+*Service (`TopicService.merge`):*
 1. Validate: source topic exists, target topic exists, source != target, neither is "general"
 2. Update all messages with `topic=source` to `topic=target` via `MessageStore.updateTopicName(channelId, source, target)` (existing method)
 3. Delete source `Topic` record via `TopicStore.delete(channelId, source)`
-4. Emit audit EVENT with merge details
+
+*MCP tool (`merge_topics` — `@Transactional`):*
+1. Resolve channel via `resolveChannel()`
+2. Call `topicService.merge(channelId, sourceTopic, targetTopic, actorId)`
+3. Emit audit EVENT with merge details via `messageService.dispatch()` (follows `rename_topic` pattern)
 
 **MCP tool:**
 ```
@@ -66,7 +72,7 @@ merge_topics(channel, source_topic, target_topic, caller_instance_id?)
 
 - **Open commitments: allowed.** Topics are organizational, not normative. Commitments reference `channelId` and `correlationId`, not topic. Merging doesn't change normative context.
 - **No merge markers.** The ledger preserves original topics (immutable). Query the ledger for pre-merge history.
-- **Source Topic record deleted.** If source was resolved, that state is lost — target's resolved state governs.
+- **Source Topic record deleted.** Source's resolved state is lost — target's resolved state governs. Merging into a resolved target does NOT auto-unresolve; the admin can explicitly unresolve if the merged content warrants it. Resolved state is always a deliberate admin decision, not a side effect of message reorganisation.
 - **"general" cannot be the source.** You can't empty the default topic. But merging INTO "general" is allowed — collapsing a topic back into the default is a valid operation.
 
 ### Migration
@@ -94,18 +100,28 @@ TopicService.move(UUID sourceChannelId, String topicName, UUID targetChannelId, 
 record MoveResult(String topicName, UUID sourceChannelId, UUID targetChannelId, int messagesUpdated) {}
 ```
 
-**New store method:**
+**New store methods:**
 ```java
 // MessageStore
 int updateChannelId(UUID sourceChannelId, String topic, UUID targetChannelId);
+
+// CommitmentStore
+List<Commitment> findByIds(Collection<UUID> ids);
 ```
 
 **Mechanics:**
-1. Validate: source channel exists, target channel exists, source != target, topic exists in source, topic is not "general"
-2. **Commitment gate:** query messages in source channel/topic with non-null `commitmentId`. For each, check commitment state via `CommitmentStore.findById()`. If any commitment is non-terminal (OPEN, ACKNOWLEDGED) → throw `IllegalStateException` listing the blocking commitments by correlationId.
+
+*MCP tool (`move_topic` — `@Transactional`):*
+1. Resolve source and target channels via `resolveChannel()`
+2. Validate: source != target, `sourceChannel.tenancyId == targetChannel.tenancyId`, target channel semantic is APPEND or COLLECT (reject EPHEMERAL, BARRIER, LAST_WRITE)
+3. Call `topicService.move(sourceChannelId, topicName, targetChannelId, actorId)`
+4. Emit audit EVENTs in both channels via `messageService.dispatch()`: `topic-moved-out` in source, `topic-moved-in` in target (follows `rename_topic` pattern)
+
+*Service (`TopicService.move`):*
+1. Validate: topic exists in source, topic is not "general"
+2. **Commitment gate:** query messages in source channel/topic with non-null `commitmentId`. Collect distinct commitment IDs, batch-check via `CommitmentStore.findByIds(Collection<UUID>)` (new method). If any commitment is non-terminal (OPEN, ACKNOWLEDGED) → throw `IllegalStateException` listing the blocking commitments by correlationId.
 3. Move messages: `messageStore.updateChannelId(sourceChannelId, topicName, targetChannelId)`
 4. Move topic record: if target channel has a topic with the same name → messages merge into it. If not → create new Topic record in target channel. Delete source Topic record.
-5. Emit audit EVENTs in both channels: `topic-moved-out` in source, `topic-moved-in` in target.
 
 **MCP tool:**
 ```
@@ -119,10 +135,13 @@ move_topic(source_channel, topic_name, target_channel, caller_instance_id?)
 - **Delivery cursor limitation (known, accepted).** Moved messages retain their original IDs (allocated in the source channel's sequence). These IDs may be lower than the target channel's AT_LEAST_ONCE delivery cursor, so they won't be re-delivered to the target channel's backends. moveTopic is administrative reorganization of historical messages, not real-time dispatch.
 - **Reactions follow messages.** Keyed by `messageId`, not `channelId`. No action needed.
 - **"general" cannot be moved.** The default topic is structural.
+- **Same-tenancy enforced.** Source and target must share `tenancyId`. Implicitly enforced at the MCP layer (tenancy-scoped store queries prevent cross-tenant channel resolution), explicitly validated for defense-in-depth.
+- **Target semantic: APPEND or COLLECT only.** EPHEMERAL, BARRIER, and LAST_WRITE channels have structural semantics incompatible with historical message insertion. LAST_WRITE expects single-value state. EPHEMERAL clears on read. BARRIER gates on declared contributors.
+- **Channel policies not re-validated.** Moved messages were validated against the source channel's policies at dispatch time. The enforcement gate is dispatch-time, not retroactive. Moved messages may include senders not in target's `allowedWriters` or message types not in target's `allowedTypes`/`deniedTypes` — this is an intentional consequence of administrative reorganisation. `distinctSendersByChannel()` will reflect the actual senders present.
 
 ### Migration
 
-V33 — no schema change needed. `updateChannelId` is a new UPDATE query on existing columns.
+None — `updateChannelId` is a new UPDATE query on existing columns. No DDL changes.
 
 ---
 
@@ -212,6 +231,7 @@ cache miss (expired/never seen) → OFFLINE
 public class PresenceService {
 
     void heartbeat(String memberId, PresenceStatus status, String statusMessage);
+    // status restricted to ONLINE, AVAILABLE, BUSY — throws IllegalArgumentException for AWAY/OFFLINE
 
     Presence getPresence(String memberId);
 
@@ -243,12 +263,12 @@ public interface PresenceConfig {
 #### MCP tools
 
 ```
-set_presence(member_id, status, status_message?)   → Presence
-get_presence(member_id)                            → Presence
-get_channel_presence(channel)                      → List<Presence>
+set_presence(status, status_message?, member_id?)   → Presence
+get_presence(member_id)                             → Presence
+get_channel_presence(channel)                       → List<Presence>
 ```
 
-`set_presence` is the heartbeat entry point. Calling it refreshes `lastSeenAt` and updates the reported status.
+`set_presence` is the heartbeat entry point. Calling it refreshes `lastSeenAt` and updates the reported status. `member_id` defaults to `currentPrincipal.actorId()` — matching the `react`/`unreact` pattern. Optional override for system/admin use. AWAY and OFFLINE are rejected — they are computed-only statuses derived from heartbeat absence.
 
 #### Testing
 
@@ -266,6 +286,7 @@ No `InMemoryPresenceStore` needed — the Caffeine cache IS in-memory.
 - **No reactive parity.** Caffeine has no blocking I/O. The blocking service is sub-microsecond. Reactive MCP tools call it directly.
 - **No Flyway migration.** Cache-only.
 - **No PresenceStore SPI.** Extract one when multi-node support (Redis, distributed cache) is needed. Pre-release single-node doesn't need the abstraction.
+- **Single-node only.** Caffeine is JVM-local. Consistent with ARC42 §12's "Cross-node fanOut gap" constraint — presence queries on node B won't see heartbeats sent to node A. Acceptable for pre-release single-node deployment.
 
 ---
 
@@ -283,4 +304,4 @@ No `InMemoryPresenceStore` needed — the Caffeine cache IS in-memory.
 
 - **No Flyway migration** for any of these issues. All changes are either in-memory (presence), enum additions (DEBATE), new queries on existing columns (moveTopic), or pure service/MCP additions.
 - **Reactive parity** for MCP tools follows the existing `@IfBuildProperty` pattern. Presence is an exception — no reactive service, blocking service called from both stacks.
-- **InMemory store additions** in `persistence-memory` for `MessageStore.updateChannelId()` only.
+- **InMemory store additions** in `persistence-memory` for `MessageStore.updateChannelId()` and `CommitmentStore.findByIds()`.
