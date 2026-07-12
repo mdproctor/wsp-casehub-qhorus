@@ -1,49 +1,48 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-10 — Epic #328 session 1 (Topic #329 + Reactions #330) implemented. Branch open.
+**Date:** 2026-07-12 — Epic #328 sessions 1+2 complete. Branch closed. #329-#332 implemented, #333-#334 remain.
 
 ---
 
 ## Immediate Next Step
 
-Branch `issue-328-conversation-model-enrichments` is open for #328. Run `/work` to resume.
+Branch `issue-328-conversation-model-enrichments` is closed. #333 (Presence) and #334 (Space) are open — start a new branch via `/work` when ready.
 
-Session 2 scope: #331 (Rich ArtefactRef) + #332 (Channel Membership). Design spec covers sessions 1–3. Read `specs/issue-328-conversation-model-enrichments/2026-07-10-topic-reactions-design.md` for the full context — the Future Directions and Cross-Repo Integration sections are relevant for sessions 2–3.
+## What Was Done
 
-## What Was Done This Session
+**Session 1 (#329 Topic + #330 Reactions):** Hybrid Topic entity with denormalized string on Message. Reactions as non-normative UI metadata with CDI event.
 
-**Topic (#329) + Reactions (#330) fully implemented.** Hybrid Topic entity + denormalized `topic` string on Message (avoiding Zulip's architectural regret). Topic recorded immutably on `MessageLedgerEntry` (CQRS pattern). Reactions as non-normative UI metadata with own CDI event. Full test suite green across 13 modules. Flyway V28–V30 + V2001. CLAUDE.md updated.
+**Session 2 (#331 Rich ArtefactRef + #332 Channel Membership):** Replaced `List<UUID>` artefactRefs with structured `ArtefactRef(uri, type, label, scope)` across all 8 pipeline types. Added `ChannelMembership` with roles, ID-based unread tracking, lazy auto-membership on first human interaction.
 
-Design decisions documented in `design/JOURNAL.md` (§Session-1). Cross-repo integration issues filed: engine#701, connectors#80, blocks#49. Deferred items: #335 (moveTopic), #336 (mergeTopics), #337 (topic digest), #338 (topic projections), #339 (reactions batch MCP).
-
-Two garden entries: GE-20260711-bf1d9a (Flyway V-ordering gotcha), GE-20260711-40e102 (bulk API migration technique).
+Adversarial design review passed (4 rounds, 18 issues, all verified). Full build green across 13 modules. 19 commits squashed to 4.
 
 ## Cross-Module
 
 **We're blocking:**
-- `connectors` — needs qhorus topic + reaction API for chat UI (connectors#80) · M · Med
-- `engine` — needs qhorus topic field for choreography context (engine#701) · S · Low
-- `blocks` — needs all three for end-to-end integration (blocks#49) · L · High
+- `connectors` — needs topic + reaction + artefactRef + membership APIs (connectors#65, #68, #80)
+- `engine` — needs topic field for choreography context (engine#701)
+- `blocks` — needs all for end-to-end integration (blocks#49)
 
 **Cross-repo follow-ups still open:**
-- claudony#169 — OutboundMessage correlationId UUID→String · XS · Low
-- drafthouse#102 — redundant `.toString()` on correlationId · XS · Low
+- claudony#169 — OutboundMessage correlationId UUID→String
+- drafthouse#102 — redundant `.toString()` on correlationId
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #331 | Rich ArtefactRef — typed, anchored document references | M | Med | Session 2 — restructures existing `List<UUID>` |
-| #332 | Channel Membership — who's in the channel, distinct from ACL | M | Med | Session 2 — foundation for #333 |
-| #333 | Presence — availability status with heartbeat degradation | M | High | Session 3 — depends on #332 |
-| #334 | Space — organizational channel hierarchy | L | High | Session 3 — most complex piece |
+| #333 | Presence — availability with heartbeat | M | High | Depends on #332 |
+| #334 | Space — channel hierarchy | L | High | Most complex |
+| #335 | moveTopic | S | Med | Deferred |
+| #336 | mergeTopics | S | Med | Deferred |
+| #337 | Topic-aware digest | M | Med | |
+| #338 | Topic-aware projections | M | Med | |
+| #339 | get_reactions_batch | S | Low | |
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `specs/issue-328-conversation-model-enrichments/2026-07-10-topic-reactions-design.md` |
-| Implementation plan | `plans/2026-07-10-topic-reactions.md` |
-| Design journal | `design/JOURNAL.md` |
-| Blog entry | `blog/2026-07-10-topics-and-reactions.md` |
-| Previous session | `git show HEAD~1:HANDOFF.md` |
+| Session 1 spec | `docs/specs/issue-328-conversation-model-enrichments/2026-07-10-topic-reactions-design.md` |
+| Session 2 spec | `docs/specs/issue-328-conversation-model-enrichments/2026-07-11-artefactref-membership-design.md` |
+| Blog | `blog/2026-07-10-topics-and-reactions.md` |
