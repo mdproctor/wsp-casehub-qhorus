@@ -1,5 +1,5 @@
-# Branch Closed: issue-319-channel-null-lists-and-fixes
+# Branch Closed: issue-334-space-channel-hierarchy
 
-**Date:** 2026-07-04
-**Issues:** 319,317,318
+**Date:** 2026-07-12
+**Issues:** 334
 **Status:** merged to main
