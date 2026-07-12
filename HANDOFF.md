@@ -1,25 +1,21 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-12 — Epic #328 sessions 1+2 complete. Branch closed. #329-#332 implemented, #333-#334 remain.
+**Date:** 2026-07-12 — Branch `issue-339-conversation-followups` closed. #339, #336, #335, #340, #333 implemented. #341 filed.
 
 ---
 
 ## Immediate Next Step
 
-Branch `issue-328-conversation-model-enrichments` is closed. #333 (Presence) and #334 (Space) are open — start a new branch via `/work` when ready.
+All conversation model followups done. #333 (Presence) and #334 (Space) were the remaining #328 children — #333 is now closed. #334 (Space — channel hierarchy) is the last major piece. Start with `/work` when ready.
 
 ## What Was Done
 
-**Session 1 (#329 Topic + #330 Reactions):** Hybrid Topic entity with denormalized string on Message. Reactions as non-normative UI metadata with CDI event.
-
-**Session 2 (#331 Rich ArtefactRef + #332 Channel Membership):** Replaced `List<UUID>` artefactRefs with structured `ArtefactRef(uri, type, label, scope)` across all 8 pipeline types. Added `ChannelMembership` with roles, ID-based unread tracking, lazy auto-membership on first human interaction.
-
-Adversarial design review passed (4 rounds, 18 issues, all verified). Full build green across 13 modules. 19 commits squashed to 4.
+Five issues on one branch: `get_reactions_batch` MCP tool (#339), `mergeTopics` (#336), `moveTopic` with commitment gate (#335), `ArtefactType.DEBATE` (#340), `Presence` with Caffeine cache and heartbeat degradation (#333). Design review: 5 rounds, 22 issues, 16 verified. Full build green across 13 modules. 7 commits squashed to 5.
 
 ## Cross-Module
 
 **We're blocking:**
-- `connectors` — needs topic + reaction + artefactRef + membership APIs (connectors#65, #68, #80)
+- `connectors` — needs topic merge/move + presence + artefactRef + membership APIs (connectors#65, #68, #80)
 - `engine` — needs topic field for choreography context (engine#701)
 - `blocks` — needs all for end-to-end integration (blocks#49)
 
@@ -31,18 +27,16 @@ Adversarial design review passed (4 rounds, 18 issues, all verified). Full build
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #333 | Presence — availability with heartbeat | M | High | Depends on #332 |
-| #334 | Space — channel hierarchy | L | High | Most complex |
-| #335 | moveTopic | S | Med | Deferred |
-| #336 | mergeTopics | S | Med | Deferred |
+| #334 | Space — channel hierarchy | L | High | Last #328 child |
+| #335 | moveTopic | — | — | CLOSED this session |
 | #337 | Topic-aware digest | M | Med | |
 | #338 | Topic-aware projections | M | Med | |
-| #339 | get_reactions_batch | S | Low | |
+| #341 | Escape topic/channel names in telemetry JSON | XS | Low | Filed this session |
 
 ## References
 
 | What | Path |
 |------|------|
-| Session 1 spec | `docs/specs/issue-328-conversation-model-enrichments/2026-07-10-topic-reactions-design.md` |
-| Session 2 spec | `docs/specs/issue-328-conversation-model-enrichments/2026-07-11-artefactref-membership-design.md` |
-| Blog | `blog/2026-07-10-topics-and-reactions.md` |
+| Design spec | `docs/specs/issue-339-conversation-followups/2026-07-12-conversation-followups-design.md` |
+| Blog | `blog/2026-07-12-mdp02-five-followups-one-branch.md` |
+| Design review | `~/adr/casehub-qhorus/conversation-followups-20260712-151919/tracker.md` |
