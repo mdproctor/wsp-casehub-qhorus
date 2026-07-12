@@ -264,6 +264,8 @@ public interface PresenceConfig {
 }
 ```
 
+**Invariant:** `awayTimeout < offlineTimeout` — otherwise the Caffeine cache evicts entries before the AWAY threshold is reached, making AWAY unreachable (members jump directly from reported status to OFFLINE). Validate at `PresenceService` startup; throw `IllegalStateException` if violated.
+
 #### MCP tools
 
 ```
