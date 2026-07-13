@@ -52,7 +52,9 @@ UNIQUE constraint: `(url, channel_id, tenancy_id)` — prevents duplicate regist
 - `delete(UUID)` → `boolean`
 - `deleteByChannelId(UUID)` — channel deletion cleanup
 
-Injects `CurrentPrincipal`. All runtime queries (`findById`, `findByChannelId`, `findGlobal`, `save`, `delete`, `deleteByChannelId`) filter by `CurrentPrincipal.tenancyId()` via JPQL WHERE clause. `findAll()` is deliberately cross-tenant — used only by startup reload, which runs outside a request context and must load all registrations regardless of tenant.
+Injects `CurrentPrincipal`. All runtime queries (`findById`, `findByChannelId`, `findGlobal`, `save`, `delete`) filter by `CurrentPrincipal.tenancyId()` via JPQL WHERE clause. Two methods are deliberately cross-tenant:
+- `findAll()` — used only by startup reload, which runs outside a request context
+- `deleteByChannelId(UUID)` — channel deletion is authoritative; all registrations for a channel share the same tenant via the channel's tenancy, so ambient `CurrentPrincipal` filtering is unnecessary and may fail outside request context
 
 No `InMemoryWebhookRegistrationStore` — optional module with its own store. Tests use H2.
 
@@ -60,11 +62,19 @@ No `InMemoryWebhookRegistrationStore` — optional module with its own store. Te
 
 `WebhookRegistry` becomes the coordination layer between the in-memory cache and the JPA store:
 
-- **Startup reload:** `@Observes StartupEvent` calls `store.findAll()` (cross-tenant) and loads all registrations into the in-memory maps.
+In-memory maps:
+- `channelHooks`: `Map<UUID, Set<WebhookRegistration>>` — keyed by channelId. Channel UUIDs are globally unique and tenant-scoped, so this is inherently tenant-correct.
+- `globalHooks`: `Map<String, Set<WebhookRegistration>>` — keyed by **tenancyId**. Prevents cross-tenant leakage of global webhooks.
+- `byId`: `Map<UUID, WebhookRegistration>` — keyed by registration ID (globally unique).
+
+Operations:
+- **Startup reload:** `@Observes StartupEvent` calls `store.findAll()` (cross-tenant) and loads all registrations into the in-memory maps, keying global hooks by `tenancyId`.
 - **`register()`** — NOT `@Transactional`. Calls `store.save()` (which is `@Transactional` and commits on return), then populates in-memory maps. If `save()` throws, in-memory maps are not updated — consistency preserved.
 - **`deregister()`** — NOT `@Transactional`. Calls `store.delete()` (commits on return), then removes from in-memory maps.
-- **Channel deletion:** `@Observes ChannelClosedEvent` — removes entries from `channelHooks` and `byId` for the closed channel, then calls `store.deleteByChannelId()` to clean the DB. This mirrors the pattern in `SlackChannelBackend.close()`.
-- **Lookup methods** (`findForChannel`, `findByChannelId`, `listAll`) — unchanged, still read from in-memory maps only (hot path).
+- **Channel deletion:** `@Observes ChannelClosedEvent` — removes entries from `channelHooks` and `byId` for the closed channel, then calls `store.deleteByChannelId()` to clean the DB. `deleteByChannelId()` is cross-tenant (no `CurrentPrincipal` filter) — channel deletion is authoritative and all registrations for a given channel share the same tenant.
+- **`findForChannel(UUID channelId, String tenancyId)`** — returns `globalHooks.get(tenancyId) + channelHooks.get(channelId)`. Tenant-scoped on the hot path.
+- **`listAll(String tenancyId)`** — filters `byId.values()` by `tenancyId`. Used by the REST endpoint.
+- **`findByChannelId(UUID channelId)`** — unchanged (channel UUIDs are globally unique, inherently tenant-correct).
 
 The in-memory `ConcurrentHashMap` remains the runtime lookup for `WebhookMessageObserver.onMessage()`. JPA is purely for durability and reload.
 
@@ -80,20 +90,28 @@ Becomes a DTO/API type. `secret` field replaced by `secretRef`:
 public record WebhookRegistration(
         UUID id,
         UUID channelId,
+        String tenancyId,
         String url,
         String secretRef,
-        Map<String, String> headers) { ... }
+        Map<String, String> headers,
+        Instant createdAt) { ... }
 ```
 
 ### WebhookMessageObserver
 
-Injects `CredentialResolver`. At POST time, if `secretRef` is non-null, resolves the actual secret via `credentialResolver.resolve(secretRef)` and extracts `creds.get(CredentialPropertyKeys.SIGNING_SECRET)`. Same pattern as `SlackChannelBackend.resolveToken()` which extracts `CredentialPropertyKeys.BEARER_TOKEN`.
+Injects `CredentialResolver`. The `onMessage(MessageReceivedEvent event)` call passes `event.tenancyId()` through to `registry.findForChannel(event.channelId(), event.tenancyId())` for tenant-scoped webhook lookup.
+
+At POST time, if `secretRef` is non-null, resolves the actual secret via `credentialResolver.resolve(secretRef)` and extracts `creds.get(CredentialPropertyKeys.SIGNING_SECRET)`. Same pattern as `SlackChannelBackend.resolveToken()` which extracts `CredentialPropertyKeys.BEARER_TOKEN`.
 
 Resolution failure (missing credential or missing `signing-secret` key) logs ERROR and **skips the POST entirely**. A `secretRef` declares that signing is mandatory — sending unsigned is not an acceptable fallback.
 
 ### REST API
 
-`WebhookRegistryResource.RegisterRequest` changes:
+`WebhookRegistryResource` injects `CurrentPrincipal` and passes `tenancyId` to registry methods:
+- `list()` calls `registry.listAll(currentPrincipal.tenancyId())` — tenant-scoped
+- `list(channelId)` calls `registry.findByChannelId(channelId)` — inherently tenant-correct via globally unique channel UUIDs
+
+`RegisterRequest` changes:
 - `secret` → `secretRef` (breaking, acceptable — no durable consumers)
 - All other fields unchanged
 
@@ -128,7 +146,7 @@ CREATE UNIQUE INDEX uq_webhook_global ON webhook_registration (url, tenancy_id)
 | Test | Type | What it covers |
 |------|------|----------------|
 | `WebhookRegistrationStoreTest` | `@QuarkusTest` + H2 | CRUD, tenancy filtering, cascade delete |
-| `WebhookRegistryTest` | CDI-free unit | In-memory lookup (updated: `secretRef` not `secret`) |
+| `WebhookRegistryTest` | CDI-free unit | In-memory lookup, tenant-scoped global hooks, cross-tenant isolation |
 | `WebhookMessageObserverTest` | CDI-free unit | Credential resolution, HMAC with resolved secret, missing-credential graceful skip |
 | `WebhookFlywaySchemaTest` | Plain Java | V35 migration produces correct schema |
 
