@@ -27,7 +27,7 @@ Breaking change to the REST API: `RegisterRequest.secret` becomes `RegisterReque
 | Field | Type | Constraints |
 |-------|------|-------------|
 | `id` | UUID | PK |
-| `channelId` | UUID | Nullable (null = global webhook), FK → channel ON DELETE CASCADE |
+| `channelId` | UUID | Nullable (null = global webhook), FK → channel |
 | `url` | String | NOT NULL, max 2048 |
 | `secretRef` | String | Nullable (no signature if omitted) |
 | `headers` | String | Nullable, JSON-serialized Map via `MapToJsonConverter` |
@@ -145,7 +145,7 @@ CREATE UNIQUE INDEX uq_webhook_global ON webhook_registration (url, tenancy_id)
 
 | Test | Type | What it covers |
 |------|------|----------------|
-| `WebhookRegistrationStoreTest` | `@QuarkusTest` + H2 | CRUD, tenancy filtering, cascade delete |
+| `WebhookRegistrationStoreTest` | `@QuarkusTest` + H2 | CRUD, tenancy filtering, channel deletion cleanup (deleteByChannelId) |
 | `WebhookRegistryTest` | CDI-free unit | In-memory lookup, tenant-scoped global hooks, cross-tenant isolation |
 | `WebhookMessageObserverTest` | CDI-free unit | Credential resolution, HMAC with resolved secret, missing-credential graceful skip |
 | `WebhookFlywaySchemaTest` | Plain Java | V35 migration produces correct schema |
