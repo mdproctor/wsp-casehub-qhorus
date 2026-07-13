@@ -14,7 +14,15 @@ Fixed #344: added a 14-param backward-compatible constructor to `ChannelCreateRe
 
 ## Cross-Module
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Updated: claudony#169 closed — removed from backlog.*
+
+**We're blocking:**
+- `connectors` — needs Space API for space-aware channel grouping (connectors#67)
+- `engine` — needs Space for normative channel layout integration
+- `blocks` — needs all for end-to-end integration (blocks#49)
+
+**Cross-repo follow-ups still open:**
+- drafthouse#102 — redundant `.toString()` on correlationId
 
 ## What's Next
 
