@@ -86,3 +86,4 @@
 | [2026-07-12-mdp02-five-followups-one-branch.md](2026-07-12-mdp02-five-followups-one-branch.md) | 2026-07-12 | Five follow-ups, one branch |
 | [2026-07-12-mdp03-spaces-replace-naming-conventions.md](2026-07-12-mdp03-spaces-replace-naming-conventions.md) | 2026-07-12 | Spaces replace naming conventions |
 | [2026-07-13-mdp01-three-issues-one-proxy-bug.md](2026-07-13-mdp01-three-issues-one-proxy-bug.md) | 2026-07-13 | Three issues, one CDI proxy bug, and a utility that should have existed from day one |
+| [2026-07-13-mdp02-silent-filter-missing-field.md](2026-07-13-mdp02-silent-filter-missing-field.md) | 2026-07-13 | The silent filter and the missing field |
