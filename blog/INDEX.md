@@ -81,3 +81,8 @@
 | [2026-05-30-mdp05-humans-in-the-mesh.md](2026-05-30-mdp05-humans-in-the-mesh.md) | 2026-05-30 | ConnectorChannelBackend bridges inbound connectors into Qhorus; mapper purity refactor (Option B); LedgerProcessor native image gap; @ObservesAsync integration test fix |
 | [2026-06-16-mdp01-when-advisory-makes-orphans.md](2026-06-16-mdp01-when-advisory-makes-orphans.md) | 2026-06-16 | Hybrid type enforcement — why COMMAND/QUERY stay hard-enforced while all others become advisory |
 | [2026-06-17-mdp01-three-problems-one-queue.md](2026-06-17-mdp01-three-problems-one-queue.md) | 2026-06-17 | Active virtual-thread SSE model: BlockingQueue.poll() as unified keepalive/orphan/timeout primitive |
+| [2026-07-05-the-silence-of-wrong-superclass.md](2026-07-05-the-silence-of-wrong-superclass.md) | 2026-07-05 | The silence of wrong superclass |
+| [2026-07-10-topics-and-reactions.md](2026-07-10-topics-and-reactions.md) | 2026-07-10 | Topics and reactions |
+| [2026-07-12-mdp02-five-followups-one-branch.md](2026-07-12-mdp02-five-followups-one-branch.md) | 2026-07-12 | Five follow-ups, one branch |
+| [2026-07-12-mdp03-spaces-replace-naming-conventions.md](2026-07-12-mdp03-spaces-replace-naming-conventions.md) | 2026-07-12 | Spaces replace naming conventions |
+| [2026-07-13-mdp01-three-issues-one-proxy-bug.md](2026-07-13-mdp01-three-issues-one-proxy-bug.md) | 2026-07-13 | Three issues, one CDI proxy bug, and a utility that should have existed from day one |
