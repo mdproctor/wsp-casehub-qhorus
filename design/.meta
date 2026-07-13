@@ -1,0 +1,9 @@
+branch: issue-344-channel-create-request-compat
+project-sha: 126ca8706dde49d2a1d0b80d792a45c3cd8c4f46
+date: 2026-07-13
+issue: 344
+issue-repo: casehubio/qhorus
+covers: 344
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
