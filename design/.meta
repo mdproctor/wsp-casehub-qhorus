@@ -1,0 +1,9 @@
+branch: issue-345-webhook-persistent-reg
+project-sha: 3f9bd83f193a84de2556be637a573e5c8c13e776
+date: 2026-07-13
+issue: 345
+issue-repo: casehubio/qhorus
+covers: 345
+flyway-next-v: 35
+design-repo: project
+design-section-hashes: 
