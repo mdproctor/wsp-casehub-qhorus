@@ -1,16 +1,16 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-13 — Branch `issue-337-topic-digest-and-fixes` closed. #337, #341, #342 implemented and pushed.
+**Date:** 2026-07-13 — Branch `issue-343-watchdog-test-fix-and-topic-projections` closed. #343 (already fixed), #338 implemented and pushed.
 
 ---
 
 ## Immediate Next Step
 
-All three issues closed. Epic #328 backlog is clear. Pick from What's Next — #338 (topic-aware projections) is the natural continuation. Start with `/work` when ready.
+Epic #328 backlog is clear — all conversation model enrichment issues closed. Only infrastructure-level issues remain (#163, #165). Pick new work or start a new epic.
 
 ## What Was Done
 
-Three issues on one branch: telemetryJson() utility eliminates string-concatenated JSON in 5 MCP tool sites (#341). CommitmentContext enriched with artefactUuid, expectedToken, content — V1/V4 evidential checks now fire through the attestation path, StoredCommitmentAttestationPolicy downgrades DONE to FLAGGED on violations (#342). get_channel_digest includes topicBreakdown with per-topic message count, last activity, and resolved status (#337). Also fixed pre-existing CDI proxy field-access bug in resolveTopic/unresolveTopic and filed #343 for WatchdogAlertE2ETest consistent failure.
+Closed #343 without code changes — the consistent test failure (ChannelDigestTest.digestShowsResolvedTopicStatus, mislabeled as WatchdogAlertE2ETest in the issue title) was already fixed by the CDI proxy field-access fix in #337. Implemented #338: topic-aware projections. Fixed a silent bug in MessageQueryJpql (JPA stores ignored the topic field — in-memory stores filtered correctly). Added MessageView.topic field. Added topic parameter to project_channel MCP tool with blank normalization and reactive parity. Design-reviewed (3 rounds, 12 issues, all verified, $9.84). Garden entry GE-20260713-26f881 for the MessageQueryJpql parity gap.
 
 ## Cross-Module
 
@@ -27,12 +27,13 @@ Three issues on one branch: telemetryJson() utility eliminates string-concatenat
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #338 | Topic-aware projections | M | Med | Natural pair with #337 |
-| #343 | WatchdogAlertE2ETest consistent failure | S | Med | Filed this session |
+| #165 | SmallRye Reactive Messaging bridge for MessageObserver | M | High | Infrastructure — Kafka/AMQP bridge |
+| #163 | CLUSTER-scoped MessageObserver — Kafka, WebSocket, Webhook | L | High | Cross-node observer delivery |
 
 ## References
 
 | What | Path |
 |------|------|
-| Blog | `blog/2026-07-13-mdp01-three-issues-one-proxy-bug.md` |
-| Protocol updated | `docs/protocols/casehub/commitment-attestation-policy-null-context.md` |
+| Blog | `blog/2026-07-13-mdp02-silent-filter-missing-field.md` |
+| Garden | `GE-20260713-26f881` — MessageQueryJpql parity gap |
+| Spec | `specs/2026-07-13-topic-aware-projections-design.md` |
