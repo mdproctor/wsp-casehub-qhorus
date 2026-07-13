@@ -1,20 +1,18 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-13 — Branch `issue-344-channel-create-request-compat` closed. #344 fixed and pushed.
+**Date:** 2026-07-13 — Branch `issue-163-cluster-scoped-observer` closed. #163 implemented and pushed.
 
 ---
 
 ## Immediate Next Step
 
-Epic #328 backlog clear — all conversation model enrichment issues closed, plus #344 (cross-repo compat fix). Only infrastructure-level issues remain (#163, #165). Pick new work or start a new epic.
+Only infrastructure issues remain (#165 SmallRye bridge, open but lower priority after #163 shipped the explicit transport approach). Pick new work or start a new initiative. `drafthouse#102` (redundant `.toString()` on correlationId) is still open as a cross-repo follow-up.
 
 ## What Was Done
 
-Fixed #344: added a 14-param backward-compatible constructor to `ChannelCreateRequest` that defaults `spaceId` to `null`. This unblocks downstream consumers (clinical `ProtocolDeviationService`, ops `ChannelProvisionHandler`) broken by the 15th param added in #334. CLAUDE.md updated with compat constructor documentation. One of 8 SNAPSHOT breakages tracked by engine#719 — the qhorus-specific one is now resolved.
+Implemented CLUSTER-scoped MessageObserver dispatch (#163). Foundation: gave `Scope.CLUSTER` real dispatch semantics — LOCAL fires on dispatching node only, CLUSTER fires on all nodes via `deliverRemote()` → `MessageService.dispatchClusterObservers()`. Fixed LAST_WRITE overwrite path to fire observers (was excluded, creating node-asymmetric behavior). Built three optional transport modules: `kafka-observer` (CloudEvents to Kafka topic, scope LOCAL), `websocket-observer` (real-time push to browser clients, scope CLUSTER), `webhook-observer` (HTTP POST callbacks with HMAC-SHA256, scope CLUSTER). Extracted `CloudEventMapper` as shared utility. Design review caught 12 issues — all verified and fixed (LAST_WRITE asymmetry, tenant isolation via channelId, package visibility, webhook scope change LOCAL→CLUSTER). Deferred items filed as #345 (webhook persistent registrations) and #346 (WebSocket catch-up mechanism).
 
 ## Cross-Module
-
-*Updated: claudony#169 closed — removed from backlog.*
 
 **We're blocking:**
 - `connectors` — needs Space API for space-aware channel grouping (connectors#67)
@@ -28,11 +26,14 @@ Fixed #344: added a 14-param backward-compatible constructor to `ChannelCreateRe
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #165 | SmallRye Reactive Messaging bridge for MessageObserver | M | High | Infrastructure — Kafka/AMQP bridge |
-| #163 | CLUSTER-scoped MessageObserver — Kafka, WebSocket, Webhook | L | High | Cross-node observer delivery |
+| #345 | Webhook persistent registrations (JPA) | S | Low | Currently in-memory, lost on restart |
+| #346 | WebSocket catch-up mechanism for reconnecting clients | M | Med | Clients miss messages during disconnect |
+| #165 | SmallRye Reactive Messaging bridge for MessageObserver | M | High | Alternative to explicit transports — lower priority now |
 
 ## References
 
 | What | Path |
 |------|------|
-| Fix commit | `6ab760db` on main |
+| Design spec | `docs/specs/2026-07-13-cluster-scoped-observer-design.md` |
+| Landed commit | `3f9bd83f` on main |
+| Design review | `~/adr/qhorus/cluster-scoped-observer-*/tracker.md` |
