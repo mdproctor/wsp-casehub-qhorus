@@ -1,0 +1,9 @@
+branch: issue-343-watchdog-test-fix-and-topic-projections
+project-sha: 60b37ea392785b3fe4cbfad38789311f86a67114
+date: 2026-07-13
+issue: 343
+issue-repo: casehubio/qhorus
+covers: 343,338
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
