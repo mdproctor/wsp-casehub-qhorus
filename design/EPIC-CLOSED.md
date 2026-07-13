@@ -1,5 +1,5 @@
-# Branch Closed: issue-334-space-channel-hierarchy
+# Branch Closed: issue-337-topic-digest-and-fixes
 
-**Date:** 2026-07-12
-**Issues:** 334
+**Date:** 2026-07-13
+**Issues:** 337,341,342
 **Status:** merged to main
