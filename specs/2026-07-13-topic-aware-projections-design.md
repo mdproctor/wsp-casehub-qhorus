@@ -18,9 +18,9 @@ Two orthogonal layers, both implemented:
 
 ### Layer 1 — Query-time topic filter
 
-Add an optional `topic` parameter to the `project_channel` MCP tool. When set, the tool builds `MessageQuery.builder().topic(topic)` and routes through the existing scoped `ProjectionService.project(channelId, scope, projection)` overload. Any existing or future projection works with topic filtering — no SPI changes.
+Add an optional `topic` parameter to the `project_channel` MCP tool. Blank or empty `topic` is normalized to null at the tool boundary (consistent with `splitCsv()`, `parseOptionalUuid()`, and other null-normalization patterns in `QhorusMcpToolsBase`). When non-null after normalization, the tool builds `MessageQuery.builder().topic(topic)` and routes through the existing scoped `ProjectionService.project(channelId, scope, projection)` overload. Any existing or future projection works with topic filtering — no SPI changes.
 
-**Prerequisite fix — `MessageQueryJpql`:** Both `from(MessageQuery)` and `from(MessageQuery, String)` variants must add a `topic` predicate. Topic matching is case-insensitive — `LOWER(m.topic) = LOWER(?n)` — to match `MessageQuery.matches()` semantics, which uses `topic.equalsIgnoreCase(m.topic())`. Without this fix, topic filtering silently returns all messages in JPA-backed stores.
+**Prerequisite fix — `MessageQueryJpql`:** Both `from(MessageQuery)` and `from(MessageQuery, String)` variants must add a `topic` predicate. Topic matching is case-insensitive — `LOWER(topic) = LOWER(?n)` — to match `MessageQuery.matches()` semantics, which uses `topic.equalsIgnoreCase(m.topic())`. Without this fix, topic filtering silently returns all messages in JPA-backed stores.
 
 **`projectAndRender` restructuring:** The existing `projectAndRender(channelId, projection, maxMessages)` only enters the scoped code path when `maxMessages > 0`. This method gains a `topic` parameter and is restructured: any non-null `topic` OR positive `maxMessages` triggers the scoped path via `MessageQuery`. When both are set, both constraints go on the same `MessageQuery`. When only `topic` is set (no `maxMessages`), a `MessageQuery` with just the topic filter is built. The unscoped fallthrough path is only reached when both `topic` is null and `maxMessages` is null/non-positive.
 
@@ -46,8 +46,10 @@ Breaking change to `MessageView` record constructor — pre-release, callers upd
 - Unit: `MessageView` construction with topic field
 - Unit: `MessageQueryJpql` generates correct `LOWER(topic) = LOWER(?n)` predicate when topic is set
 - Integration: `project_channel` with topic filter — fold only messages in one topic
+- Integration: `project_channel` with topic and `maxMessages` combined — verify both constraints applied on one `MessageQuery`
 - Integration: `project_channel` with topic only (no `maxMessages`) — verify scoped path is taken
 - Integration: projection reading `MessageView.topic()` to group internally
 - Edge: topic filter with no matching messages returns identity
 - Edge: null topic = fold all messages (existing behaviour preserved)
+- Edge: blank/empty topic normalized to null — fold all messages (not silent no-results)
 - Edge: topic matching is case-insensitive — JPA and in-memory stores agree
