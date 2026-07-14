@@ -1,0 +1,9 @@
+branch: issue-346-websocket-catchup
+project-sha: 526d07e80281cc4c85d12151ffff27bf2242655b
+date: 2026-07-14
+issue: 346
+issue-repo: casehubio/qhorus
+covers: 346
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
