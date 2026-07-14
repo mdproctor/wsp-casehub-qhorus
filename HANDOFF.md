@@ -1,16 +1,16 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-13 — Branch `issue-163-cluster-scoped-observer` closed. #163 implemented and pushed.
+**Date:** 2026-07-14 — Branch `issue-345-webhook-persistent-reg` closed. #345 implemented and pushed.
 
 ---
 
 ## Immediate Next Step
 
-Only infrastructure issues remain (#165 SmallRye bridge, open but lower priority after #163 shipped the explicit transport approach). Pick new work or start a new initiative. `drafthouse#102` (redundant `.toString()` on correlationId) is still open as a cross-repo follow-up.
+Pick new work. The What's Next table has two remaining issues from #163 follow-ups (#346 WebSocket catch-up, #165 SmallRye bridge). No blocking cross-module work.
 
 ## What Was Done
 
-Implemented CLUSTER-scoped MessageObserver dispatch (#163). Foundation: gave `Scope.CLUSTER` real dispatch semantics — LOCAL fires on dispatching node only, CLUSTER fires on all nodes via `deliverRemote()` → `MessageService.dispatchClusterObservers()`. Fixed LAST_WRITE overwrite path to fire observers (was excluded, creating node-asymmetric behavior). Built three optional transport modules: `kafka-observer` (CloudEvents to Kafka topic, scope LOCAL), `websocket-observer` (real-time push to browser clients, scope CLUSTER), `webhook-observer` (HTTP POST callbacks with HMAC-SHA256, scope CLUSTER). Extracted `CloudEventMapper` as shared utility. Design review caught 12 issues — all verified and fixed (LAST_WRITE asymmetry, tenant isolation via channelId, package visibility, webhook scope change LOCAL→CLUSTER). Deferred items filed as #345 (webhook persistent registrations) and #346 (WebSocket catch-up mechanism).
+Implemented persistent webhook registrations (#345). JPA-backed `WebhookRegistrationEntity` and `WebhookRegistrationStore` with tenant-scoped queries. `WebhookRegistry` coordinates in-memory cache with JPA store — startup reload, write-through on register/deregister. `secretRef` replaces plaintext `secret` — resolved via `CredentialResolver` at POST time (fail-closed on resolution failure). Added `ChannelClosedEvent` CDI event (mirrors `ChannelInitialisedEvent`) for channel deletion cleanup. Global hooks keyed by `tenancyId` to prevent cross-tenant leakage. V35 migration. Design review caught 16 issues (all resolved). Cross-repo: added `SIGNING_SECRET` to `CredentialPropertyKeys` in `casehub-platform-api`.
 
 ## Cross-Module
 
@@ -19,21 +19,17 @@ Implemented CLUSTER-scoped MessageObserver dispatch (#163). Foundation: gave `Sc
 - `engine` — needs Space for normative channel layout integration
 - `blocks` — needs all for end-to-end integration (blocks#49)
 
-**Cross-repo follow-ups still open:**
-- drafthouse#102 — redundant `.toString()` on correlationId
-
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #345 | Webhook persistent registrations (JPA) | S | Low | Currently in-memory, lost on restart |
 | #346 | WebSocket catch-up mechanism for reconnecting clients | M | Med | Clients miss messages during disconnect |
-| #165 | SmallRye Reactive Messaging bridge for MessageObserver | M | High | Alternative to explicit transports — lower priority now |
+| #165 | SmallRye Reactive Messaging bridge for MessageObserver | M | High | Alternative to explicit transports — lower priority |
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/2026-07-13-cluster-scoped-observer-design.md` |
-| Landed commit | `3f9bd83f` on main |
-| Design review | `~/adr/qhorus/cluster-scoped-observer-*/tracker.md` |
+| Design spec | `docs/specs/issue-345-webhook-persistent-reg/2026-07-13-webhook-persistent-registrations-design.md` |
+| Landed commit | `526d07e8` on main |
+| Design review | `~/adr/casehub-qhorus/webhook-persistent-registrations-20260714-001642/tracker.md` |
