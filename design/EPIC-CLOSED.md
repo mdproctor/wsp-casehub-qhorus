@@ -1,5 +1,5 @@
-# Branch Closed: issue-334-space-channel-hierarchy
+# Branch Closed: issue-346-websocket-catchup
 
-**Date:** 2026-07-12
-**Issues:** 334
+**Date:** 2026-07-14
+**Issues:** 346
 **Status:** merged to main
