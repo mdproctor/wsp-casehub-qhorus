@@ -1,5 +1,5 @@
-# Branch Closed: issue-334-space-channel-hierarchy
+# Branch Closed: issue-348-concurrent-binding-order
 
-**Date:** 2026-07-12
-**Issues:** 334
+**Date:** 2026-07-14
+**Issues:** 348
 **Status:** merged to main
