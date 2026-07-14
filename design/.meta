@@ -1,0 +1,9 @@
+branch: issue-348-concurrent-binding-order
+project-sha: 5174768cce3853111cd8978d8611b49721891b56
+date: 2026-07-14
+issue: 348
+issue-repo: casehubio/qhorus
+covers: 348
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
