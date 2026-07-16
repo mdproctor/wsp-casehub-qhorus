@@ -1,0 +1,9 @@
+branch: issue-165-smallrye-messaging-bridge
+project-sha: a4b48cec85da52795ffb2eb9514aa1d2ab447a2a
+date: 2026-07-16
+issue: 165
+issue-repo: casehubio/qhorus
+covers: 165
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
