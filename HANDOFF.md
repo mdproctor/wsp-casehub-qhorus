@@ -18,15 +18,6 @@ Three categories this session:
 
 **Roadmap:** Research-backed analysis of LLM coordination failures (MAST taxonomy, grounding research, context rot, coordination tax). Filed 4 epics and 12 child issues (#349–#364) covering Qhorus infrastructure + cross-repo suggestions for engine, blocks, neocortex.
 
-## Cross-Module
-
-**We're blocking:**
-- `engine` — tests need `messageId` update for new `MessageReceivedEvent` constructor (breaking API change from #346)
-- `connectors` — needs Space API for space-aware channel grouping (connectors#67)
-- `blocks` — needs all for end-to-end integration (blocks#49)
-
----
-
 ## Backlog — Prioritised by Effort-to-Impact
 
 ### Category A: Small Effort / High Practical Impact — Do First
