@@ -87,3 +87,4 @@
 | [2026-07-12-mdp03-spaces-replace-naming-conventions.md](2026-07-12-mdp03-spaces-replace-naming-conventions.md) | 2026-07-12 | Spaces replace naming conventions |
 | [2026-07-13-mdp01-three-issues-one-proxy-bug.md](2026-07-13-mdp01-three-issues-one-proxy-bug.md) | 2026-07-13 | Three issues, one CDI proxy bug, and a utility that should have existed from day one |
 | [2026-07-17-mdp01-notifications-are-not-conversations.md](2026-07-17-mdp01-notifications-are-not-conversations.md) | 2026-07-17 | Notifications are not conversations — qhorus as notification source via commitment lifecycle bridge |
+| [2026-07-17-mdp02-obligation-model-was-already-there.md](2026-07-17-mdp02-obligation-model-was-already-there.md) | 2026-07-17 | The obligation model was already there — type-blind resolution, correlation integrity checker, context pressure telemetry |
