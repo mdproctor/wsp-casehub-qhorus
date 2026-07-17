@@ -1,0 +1,9 @@
+branch: issue-354-coordination-pathology-watchdog
+project-sha: c71b13ef2030c27a456c75072ea253a7c279ecc5
+date: 2026-07-17
+issue: 354
+issue-repo: casehubio/qhorus
+covers: 354
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
