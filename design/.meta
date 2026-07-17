@@ -1,0 +1,9 @@
+branch: issue-365-notification-bridge
+project-sha: a4b48cec85da52795ffb2eb9514aa1d2ab447a2a
+date: 2026-07-17
+issue: 365
+issue-repo: casehubio/qhorus
+covers: 365
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
