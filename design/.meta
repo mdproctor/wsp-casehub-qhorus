@@ -1,0 +1,9 @@
+branch: issue-353-correlation-query-telemetry
+project-sha: 714a42710cce08967170e3d67e6a90af26d35108
+date: 2026-07-17
+issue: 353
+issue-repo: casehubio/qhorus
+covers: 353,362,363
+flyway-next-v: 2002
+design-repo: project
+design-section-hashes: 
