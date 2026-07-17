@@ -1,5 +1,5 @@
-# Branch Closed: issue-334-space-channel-hierarchy
+# Branch Closed: issue-353-correlation-query-telemetry
 
-**Date:** 2026-07-12
-**Issues:** 334
+**Date:** 2026-07-17
+**Issues:** 353,362,363
 **Status:** merged to main
