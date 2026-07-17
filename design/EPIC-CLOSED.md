@@ -1,5 +1,5 @@
-# Branch Closed: issue-334-space-channel-hierarchy
+# Branch Closed: issue-365-notification-bridge
 
-**Date:** 2026-07-12
-**Issues:** 334
+**Date:** 2026-07-17
+**Issues:** 365
 **Status:** merged to main
