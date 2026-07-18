@@ -1,0 +1,9 @@
+branch: issue-355-channel-context-summary
+project-sha: 6710f6c195b0dbc3bef840baac9eddda43ed4cb3
+date: 2026-07-18
+issue: 355
+issue-repo: casehubio/qhorus
+covers: 355
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
