@@ -1,0 +1,9 @@
+branch: issue-356-peer-attestation
+project-sha: 6710f6c195b0dbc3bef840baac9eddda43ed4cb3
+date: 2026-07-19
+issue: 356
+issue-repo: casehubio/qhorus
+covers: 356
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
