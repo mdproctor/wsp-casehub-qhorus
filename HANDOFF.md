@@ -1,5 +1,7 @@
 # CaseHub Qhorus — Session Handover
 
+*Updated: #355, #368 closed — removed from in-progress. Epic #349 children all closed.*
+
 **Date:** 2026-07-19 — #356 implemented and shipped. Peer attestation — multi-agent verification on ledger entries.
 
 ---
@@ -12,7 +14,7 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 
 **Implemented #356 — peer attestation.** Layered architecture from root primitive: `PeerAttestationWriter` validates and writes `LedgerAttestation` with ENDORSED/CHALLENGED verdicts. `ReviewerResolver` 4-layer fallback (explicit → channel config → capability routing → CDI event). `PeerReviewAutoTrigger` observer sends review QUERYs after DONE. `PeerReviewResponseHandler` parses structured responses and auto-writes attestations. 4 new MCP tools: `attest`, `list_attestations`, `request_peer_review`, `set_channel_reviewers`. Channel gains `reviewerInstances` field (V37 migration). Trust integration is free — Bayesian Beta model aggregates automatically. Design-reviewed through 5 adversarial rounds (22 issues, all resolved). Pushed to upstream/main.
 
-**Also in slot 2:** #355 (channel context summary) and #368 (circular delegation detection) are in progress in worktree slot 2 (`/Users/mdproctor/claude/casehub/worktrees/2/qhorus`).
+**Also landed (slot 2):** #355 (channel context summary) and #368 (circular delegation detection) — both now closed and merged to main.
 
 ## Backlog — Prioritised by Effort-to-Impact
 
@@ -21,7 +23,7 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 | Priority | # | Title | Scale | Cplx | Why this order |
 |---|---|---|---|---|---|
 | **1** | #357 | Protocol enforcement SPI | L | High | Depends on #354 (done). 7x accuracy gains evidence. |
-| **2** | #349 | Epic: Coordination Resilience | — | — | All children closed except #368 (in slot). Close when #368 lands. |
+| **2** | #349 | Epic: Coordination Resilience | — | — | All children closed (#368 landed). Ready to close. |
 
 ### Category D: Cross-Repo Suggestions
 
@@ -37,9 +39,9 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 
 | # | Epic | Children |
 |---|------|----------|
-| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, #368 (slot 2) |
-| #350 | Channel Intelligence | #355 (slot 2), #357 |
-| #351 | Verification & Trust | ~~#356~~ |
+| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, ~~#368~~ — **ready to close** |
+| #350 | Channel Intelligence | ~~#355~~, #357 |
+| #351 | Verification & Trust | ~~#356~~ — **ready to close** |
 | #352 | Cross-Repo Suggestions | #358, #359, #360, #361, #364 |
 
 ## References
