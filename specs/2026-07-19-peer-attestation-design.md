@@ -41,6 +41,9 @@ void write(UUID ledgerEntryId, AttestationVerdict verdict,
 Validation:
 - Entry exists (`ledger.findEntryById()`)
 - Entry is a COMMAND or HANDOFF (same guard as LedgerWriteService.writeAttestation)
+- Self-attestation guard: `attestorId != entry.actorId`. Rejects attestations
+  where the attestor produced the entry being attested. Prevents trust score
+  self-inflation.
 - Verdict is ENDORSED or CHALLENGED — rejects SOUND/FLAGGED (policy-only)
 - Attestor is a registered instance (`instanceStore.find()`). If the attestor
   is not registered, reject with IllegalArgumentException — peer attestation
@@ -50,7 +53,9 @@ Validation:
 Sets:
 - `attestorRole = "peer-reviewer"`
 - `attestorType = ActorType.AGENT`
-- `confidence` from config (`peer-endorsed-confidence` or `peer-challenged-confidence`)
+- `confidence` from config (`peer-endorsed-confidence` or `peer-challenged-confidence`).
+  Config-only — agents cannot override confidence to prevent gaming
+  (e.g. CHALLENGE with confidence=1.0 disproportionately damaging trust).
 - `capabilityTag` from the entry's content (same extraction as StoredCommitmentAttestationPolicy)
 
 Calls `ledger.saveAttestation()`.
@@ -58,7 +63,7 @@ Calls `ledger.saveAttestation()`.
 ### Layer 1 — API: MCP Tools
 
 **`attest(entry_id, verdict, evidence)`**
-- Direct attestation write. Any agent, any entry, any time.
+- Direct attestation on a COMMAND or HANDOFF entry. Any registered agent, any time.
 - Resolves ledger entry UUID, parses verdict string to enum.
 - Calls PeerAttestationWriter.write().
 - Returns: attestation ID, entry ID, verdict, attestor ID.
@@ -94,23 +99,35 @@ List<String> resolve(UUID channelId, List<String> explicitReviewerIds, String te
 Fallback chain (first non-empty wins):
 1. Explicit — `explicitReviewerIds` non-empty → return those
 2. Channel config — `channel.reviewerInstances` non-empty → return those
-3. Capability routing — `instanceStore.findByCapability("peer-reviewer")` → return IDs
+3. Capability routing — `instanceService.findByCapability("peer-reviewer")` → return IDs
 4. CDI event — fire `PeerReviewRequestedEvent(ledgerEntryId, channelId, tenancyId)`.
    Return empty list. External consumer (blocks/routing) observes and handles.
 
-**PeerReviewRequestedEvent** — record in `api/gateway/` alongside
-ChannelInitialisedEvent and ChannelClosedEvent. The escape hatch for intelligent
-routing without Qhorus knowing about routing logic.
+**PeerReviewRequestedEvent** — record in `api/spi/` alongside
+CommitmentAttestationPolicy. The `api/gateway/` package is for channel lifecycle
+events (ChannelInitialisedEvent, ChannelClosedEvent); review workflow events belong
+in the SPI package where attestation concerns already live.
 
 **PeerReviewAutoTrigger** — `@ApplicationScoped` MessageObserver, scope LOCAL.
+Gated with `@IfBuildProperty(name = "casehub.qhorus.reactive.enabled",
+stringValue = "false", enableIfMissing = true)` — blocking-only for v1.
 
 Fires after DONE messages:
 1. Filter: `event.messageType() != DONE` → return
-2. Look up message by `event.messageId()` to get correlationId
-3. Find COMMAND ledger entry via `messageRepo.findEarliestWithSubjectByCorrelationId()`
-4. Call `ReviewerResolver.resolve(channelId, List.of(), tenancyId)`
-5. Reviewers found → dispatch review QUERYs with structured `peer_review` content
-6. No reviewers → no-op (channel has no review configured)
+2. `event.correlationId() == null` → return (correlationId is a record component
+   on MessageReceivedEvent — no message store lookup needed)
+3. Find entry via `messageRepo.findEarliestWithSubjectByCorrelationId(
+   event.correlationId(), event.tenancyId())`
+4. Message type guard: `entry.messageType` is not `COMMAND` or `HANDOFF` → return.
+   Prevents recursive loop when review QUERYs receive DONEs with a correlationId
+   that resolves to a non-COMMAND entry.
+5. Call `ReviewerResolver.resolve(channelId, List.of(), tenancyId)`
+6. Reviewers found → dispatch review QUERYs with structured `peer_review` content.
+   Each QUERY gets its own UUID correlationId (independent obligations — shared
+   correlationIds would create commitment conflicts or fulfill the original
+   COMMAND's commitment). `completion_content` = `event.content()` from the
+   triggering DONE.
+7. No reviewers → no-op (channel has no review configured)
 
 Review QUERY content:
 ```json
@@ -124,30 +141,32 @@ Review QUERY content:
 ```
 
 **PeerReviewResponseHandler** — `@ApplicationScoped` MessageObserver, scope LOCAL.
+Gated with `@IfBuildProperty(name = "casehub.qhorus.reactive.enabled",
+stringValue = "false", enableIfMissing = true)` — blocking-only for v1.
 
 Fires on RESPONSE messages:
-1. Filter: `event.messageType() != RESPONSE || event.messageId() == null` → return
-2. Look up RESPONSE message → get `inReplyTo`
-3. `inReplyTo == null` → return
-4. Look up original QUERY by `inReplyTo` (PK lookup)
-5. Parse QUERY content — contains `"peer_review"` key? No → return
-6. Extract `ledger_entry_id` from the QUERY's `peer_review` object
-7. Try to parse RESPONSE content as structured attestation:
+1. Filter: `event.messageType() != RESPONSE` → return
+2. Try to parse `event.content()` — contains `"peer_review_response"` key? No → return
+3. Extract from the response JSON:
    ```json
    {
      "peer_review_response": {
+       "ledger_entry_id": "uuid-of-command-entry",
        "verdict": "ENDORSED",
-       "evidence": "Output contains required fields...",
-       "confidence": 0.8
+       "evidence": "Output contains required fields..."
      }
    }
    ```
-8. Parsed → call PeerAttestationWriter.write(). Confidence from response JSON
-   if present, otherwise config default.
-9. Unparseable → WARN log. Reviewer uses `attest()` tool explicitly.
+4. Parsed → call PeerAttestationWriter.write() with extracted ledger_entry_id,
+   verdict, and evidence. Confidence from config (not overridable).
+5. Unparseable → WARN log. Reviewer uses `attest()` tool explicitly.
 
-Two PK message lookups per RESPONSE — only for RESPONSE type messages with
-non-null messageId. RESPONSEs are infrequent relative to STATUS/EVENT.
+Content-based identification eliminates `inReplyTo` tracing and avoids the
+pre-commit message store visibility issue documented in `MessageObserver`
+Javadoc. The response echoes `ledger_entry_id` from the QUERY's `peer_review`
+payload — PeerAttestationWriter validates the entry exists regardless.
+
+Zero message store queries. Zero transaction visibility concerns.
 
 ## Data Model Changes
 
@@ -188,10 +207,12 @@ A DONE that receives:
 - Policy SOUND (0.7) + Peer CHALLENGED (0.5) → mixed signal, exactly what the
   model handles
 
-Over time, agents that consistently ENDORSE poor work will see their own trust
-score degrade (their ENDORSED attestations produce observations on the subject,
-not on themselves — but if they are later shown to be wrong, the subject's score
-correction reflects back through the Bayesian update).
+**Limitation:** The current model does not track attestor credibility. An agent
+that consistently ENDORSEs poor work suffers no trust penalty — the Bayesian Beta
+model scores subjects (actors whose entries are attested), not attestors. The
+self-attestation guard prevents the simplest abuse vector, but colluding agents
+can still cross-ENDORSE with no consequence to either attestor's score. Attestor
+credibility tracking is a future enhancement (qhorus#371).
 
 ## What's NOT Needed
 
@@ -221,7 +242,9 @@ Integration tests use `QuarkusTransaction.requiringNew()` for dispatch (observer
 transaction discipline). Channel created with reviewerInstances. Reviewer
 instance registered with `"peer-reviewer"` capability.
 
-Blocking-only for v1. Reactive parity deferred unless reactive tests are enabled.
+Blocking-only for v1. Both PeerReviewAutoTrigger and PeerReviewResponseHandler are
+gated with `@IfBuildProperty(name = "casehub.qhorus.reactive.enabled",
+stringValue = "false", enableIfMissing = true)`. Reactive parity tracked in qhorus#372.
 
 ## Research Basis
 
