@@ -1,6 +1,6 @@
 # CaseHub Qhorus — Session Handover
 
-*Updated: #355, #368 closed — removed from in-progress. Epic #349 children all closed.*
+*Updated: #355, #368 closed — removed from in-progress. Epics #349 and #351 closed.*
 
 **Date:** 2026-07-19 — #356 implemented and shipped. Peer attestation — multi-agent verification on ledger entries.
 
@@ -22,8 +22,7 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 
 | Priority | # | Title | Scale | Cplx | Why this order |
 |---|---|---|---|---|---|
-| **1** | #357 | Protocol enforcement SPI | L | High | Depends on #354 (done). 7x accuracy gains evidence. |
-| **2** | #349 | Epic: Coordination Resilience | — | — | All children closed (#368 landed). Ready to close. |
+| **1** | #357 | Protocol enforcement SPI | L | High | Depends on #354 (done). Last child of epic #350. |
 
 ### Category D: Cross-Repo Suggestions
 
@@ -39,9 +38,9 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 
 | # | Epic | Children |
 |---|------|----------|
-| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, ~~#368~~ — **ready to close** |
+| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, ~~#368~~ — **CLOSED** |
 | #350 | Channel Intelligence | ~~#355~~, #357 |
-| #351 | Verification & Trust | ~~#356~~ — **ready to close** |
+| #351 | Verification & Trust | ~~#356~~ — **CLOSED** |
 | #352 | Cross-Repo Suggestions | #358, #359, #360, #361, #364 |
 
 ## References
