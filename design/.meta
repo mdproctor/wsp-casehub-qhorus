@@ -1,0 +1,9 @@
+branch: issue-357-protocol-enforcement-spi
+project-sha: 74d98d9fd4ef754bb1aaa86dfdc4e95b2f75e373
+date: 2026-07-20
+issue: 357
+issue-repo: casehubio/qhorus
+covers: 357
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
