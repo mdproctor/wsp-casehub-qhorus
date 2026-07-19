@@ -230,7 +230,7 @@ credibility tracking is a future enhancement (qhorus#371).
 | PeerAttestationWriter | CDI-free unit | Validates entry exists, rejects SOUND/FLAGGED, sets attestorRole, calls saveAttestation |
 | ReviewerResolver | CDI-free unit | Fallback chain order, empty at each layer, CDI event fired when all empty |
 | PeerReviewAutoTrigger | CDI-free unit | Only fires for DONE, calls resolver, sends QUERYs with structured content, no-op when no reviewers |
-| PeerReviewResponseHandler | CDI-free unit | Only fires for RESPONSE, traces inReplyTo, parses structured JSON, falls back silently, calls writer |
+| PeerReviewResponseHandler | CDI-free unit | Only fires for RESPONSE, parses content-based peer_review_response JSON, falls back silently, calls writer with config confidence |
 | Integration | @QuarkusTest | Full round-trip: COMMAND → DONE → auto-review QUERY → structured RESPONSE → attestation written. list_attestations returns both policy and peer |
 | MCP tools | @QuarkusTest | attest() writes ENDORSED/CHALLENGED. request_peer_review() sends QUERYs. list_attestations() returns all |
 | Channel config | @QuarkusTest | setReviewerInstances() persists and reads back. create_channel with reviewer_ids |
