@@ -24,8 +24,12 @@ correctness.
    field exists but is never populated.
 3. **No new SPI.** CommitmentAttestationPolicy is for policy attestation. Peer
    attestation bypasses it — writes directly via PeerAttestationWriter.
-4. **Trust integration is free.** The Bayesian Beta model already aggregates
-   all attestations per actor, weighted by `recencyWeight × confidence`.
+4. **Trust integration is mechanical.** Peer attestations target the same
+   COMMAND entry that policy attestations use. The Bayesian Beta model aggregates
+   all attestations on an entry, weighted by `recencyWeight × confidence`. Trust
+   attribution follows the existing pattern: the COMMAND sender's score is affected
+   (same actor whose trust is updated by policy SOUND/FLAGGED). Obligor-targeted
+   trust attribution is a separate concern (qhorus#373).
 
 ## Architecture
 
@@ -51,6 +55,7 @@ Validation:
   attestorId from `currentPrincipal.actorId()`.
 
 Sets:
+- `subjectId` from `entry.subjectId` (same as LedgerWriteService.writeAttestation)
 - `attestorRole = "peer-reviewer"`
 - `attestorType = ActorType.AGENT`
 - `confidence` from config (`peer-endorsed-confidence` or `peer-challenged-confidence`).
@@ -121,7 +126,9 @@ Fires after DONE messages:
 4. Message type guard: `entry.messageType` is not `COMMAND` or `HANDOFF` → return.
    Prevents recursive loop when review QUERYs receive DONEs with a correlationId
    that resolves to a non-COMMAND entry.
-5. Call `ReviewerResolver.resolve(channelId, List.of(), tenancyId)`
+5. Call `ReviewerResolver.resolve(entry.channelId, List.of(), tenancyId)` — uses
+   the COMMAND entry's channel (where work was requested), not `event.channelId()`
+   (where DONE arrived). In cross-channel HANDOFF flows these may differ.
 6. Reviewers found → dispatch review QUERYs with structured `peer_review` content.
    Each QUERY gets its own UUID correlationId (independent obligations — shared
    correlationIds would create commitment conflicts or fulfill the original
@@ -198,21 +205,36 @@ config. No new deadline mechanism. `CommitmentService.expireOverdue()` fires
 
 ## Trust Integration
 
-Zero changes needed. The Bayesian Beta model aggregates ALL attestations for an
-actor. Each attestation is an observation weighted by `recencyWeight × confidence`.
+Zero trust model changes needed. Peer attestations are written on the COMMAND
+entry — the same entry that policy attestations (SOUND/FLAGGED) target. The
+Bayesian Beta model aggregates all attestations per entry, weighted by
+`recencyWeight × confidence`.
 
-A DONE that receives:
+**Trust attribution:** `ComputedTrustScoreSource.computeFresh()` computes trust
+for an actor from entries where `entry.actorId = actorId` and attestations on
+those entries. Since attestations go on the COMMAND entry, the COMMAND sender's
+(requester's) trust score is affected — both by policy attestation and by peer
+attestation. This is the existing pattern: `QhorusLedgerEntryRepository.saveAttestation()`
+fires `AttestationRecordedEvent(entry.actorId, ...)`, invalidating the COMMAND
+sender's trust cache.
+
+A COMMAND that receives:
 - Policy SOUND (0.7) + Peer ENDORSED (0.4) → two positive observations, peer
-  nudges score up less than policy
+  adds a quality-verified signal beyond formal correctness
 - Policy SOUND (0.7) + Peer CHALLENGED (0.5) → mixed signal, exactly what the
-  model handles
+  model handles — formally correct but quality-flagged
 
-**Limitation:** The current model does not track attestor credibility. An agent
-that consistently ENDORSEs poor work suffers no trust penalty — the Bayesian Beta
-model scores subjects (actors whose entries are attested), not attestors. The
-self-attestation guard prevents the simplest abuse vector, but colluding agents
-can still cross-ENDORSE with no consequence to either attestor's score. Attestor
-credibility tracking is a future enhancement (qhorus#371).
+**Limitation — obligor trust attribution:** The obligor (agent who fulfills the
+COMMAND and sends DONE) does not have their trust score directly affected by
+attestations on the COMMAND entry. This is a pre-existing property of the trust
+model, not specific to peer attestation — policy SOUND/FLAGGED has the same
+attribution. Obligor-targeted trust attribution is tracked in qhorus#373.
+
+**Limitation — attestor credibility:** The current model does not track attestor
+credibility. An agent that consistently ENDORSEs poor work suffers no trust
+penalty — the Bayesian Beta model scores actors by attestations on their entries,
+not by attestations they produce. Attestor credibility tracking is tracked in
+qhorus#371.
 
 ## What's NOT Needed
 
