@@ -1,16 +1,18 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-18 — #354 implemented and shipped. Coordination pathology watchdog — 4 new conditions.
+**Date:** 2026-07-19 — #356 implemented and shipped. Peer attestation — multi-agent verification on ledger entries.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the backlog below. #355 (channel context summary slot, M/Med) is the recommended next pick — context drift mitigation infrastructure.
+Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the recommended next pick — depends on #354 (done), the last remaining epic #350 child.
 
 ## What Was Done
 
-**Implemented #354 — coordination pathology watchdog.** 4 new `WatchdogConditionType` values: LOOP_DETECTED (consecutive-pair Jaccard similarity), OBLIGATION_FAN_OUT (COMMAND commitments with zero engagement), CONVERSATION_STALL (per-correlation terminal resolution with age guard), ECHO_CHAMBER (cross-sender similarity, ≥2 pairs required). Also migrated `conditionType` from String to enum with rollback-safe `fromString()`. Design-reviewed through 5 adversarial rounds. Pushed to upstream/main.
+**Implemented #356 — peer attestation.** Layered architecture from root primitive: `PeerAttestationWriter` validates and writes `LedgerAttestation` with ENDORSED/CHALLENGED verdicts. `ReviewerResolver` 4-layer fallback (explicit → channel config → capability routing → CDI event). `PeerReviewAutoTrigger` observer sends review QUERYs after DONE. `PeerReviewResponseHandler` parses structured responses and auto-writes attestations. 4 new MCP tools: `attest`, `list_attestations`, `request_peer_review`, `set_channel_reviewers`. Channel gains `reviewerInstances` field (V37 migration). Trust integration is free — Bayesian Beta model aggregates automatically. Design-reviewed through 5 adversarial rounds (22 issues, all resolved). Pushed to upstream/main.
+
+**Also in slot 2:** #355 (channel context summary) and #368 (circular delegation detection) are in progress in worktree slot 2 (`/Users/mdproctor/claude/casehub/worktrees/2/qhorus`).
 
 ## Backlog — Prioritised by Effort-to-Impact
 
@@ -18,34 +20,33 @@ Pick from the backlog below. #355 (channel context summary slot, M/Med) is the r
 
 | Priority | # | Title | Scale | Cplx | Why this order |
 |---|---|---|---|---|---|
-| **1** | #355 | Channel context summary slot + SPI | M | Med | Context drift mitigation. Infrastructure for per-channel state. 65% of enterprise AI failures are context drift. |
-| **2** | #356 | Peer attestation | M | High | 21% MAST verification gaps. Multiple attestations per ledger entry. |
-| **3** | #357 | Protocol enforcement SPI | L | High | 7x accuracy gains evidence but complex. Depends on #354 (now done). |
+| **1** | #357 | Protocol enforcement SPI | L | High | Depends on #354 (done). 7x accuracy gains evidence. |
+| **2** | #349 | Epic: Coordination Resilience | — | — | All children closed except #368 (in slot). Close when #368 lands. |
 
 ### Category D: Cross-Repo Suggestions
 
 | Priority | # | Title | Target | Scale | Cplx |
 |---|---|---|---|---|---|
-| **4** | #358 | Supervisor + friction interventions | engine | L | High |
-| **5** | #359 | Summarisation → Qhorus integration | blocks | M | Med |
-| **6** | #361 | CBR routing + coordination memory | blocks/neocortex | M | High |
-| **7** | #360 | Common ground projection | blocks | M | High |
-| **8** | #364 | Convergence detection | blocks | M | High |
+| **3** | #358 | Supervisor + friction interventions | engine | L | High |
+| **4** | #359 | Summarisation → Qhorus integration | blocks | M | Med |
+| **5** | #361 | CBR routing + coordination memory | blocks/neocortex | M | High |
+| **6** | #360 | Common ground projection | blocks | M | High |
+| **7** | #364 | Convergence detection | blocks | M | High |
 
 ### Epics
 
 | # | Epic | Children |
 |---|------|----------|
-| #349 | Coordination Resilience | ~~#353~~, #354 ✅, ~~#362~~ |
-| #350 | Channel Intelligence | #355, #357, ~~#363~~ |
-| #351 | Verification & Trust | #356 |
+| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, #368 (slot 2) |
+| #350 | Channel Intelligence | #355 (slot 2), #357 |
+| #351 | Verification & Trust | ~~#356~~ |
 | #352 | Cross-Repo Suggestions | #358, #359, #360, #361, #364 |
 
 ## References
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/2026-07-17-coordination-pathology-watchdog-design.md` |
-| Design review workspace | `~/adr/casehub-qhorus/coordination-pathology-watchdog-20260718-010424/` |
-| Garden entry | `GE-20260718-b07bf8` (ide_optimize_imports + ide_replace_text_in_file gotcha) |
+| Design spec | `docs/specs/2026-07-19-peer-attestation-design.md` (workspace specs/) |
+| Design review workspace | `~/adr/casehub-qhorus/peer-attestation-20260719-133508/` |
+| Slot 2 | `/Users/mdproctor/claude/casehub/worktrees/2/` |
 | Previous references | *Unchanged — `git show HEAD~1:HANDOFF.md`* |
