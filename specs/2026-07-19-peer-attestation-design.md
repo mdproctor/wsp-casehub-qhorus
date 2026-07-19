@@ -49,10 +49,10 @@ Validation:
   where the attestor produced the entry being attested. Prevents trust score
   self-inflation.
 - Verdict is ENDORSED or CHALLENGED — rejects SOUND/FLAGGED (policy-only)
-- Attestor is a registered instance (`instanceStore.find()`). If the attestor
-  is not registered, reject with IllegalArgumentException — peer attestation
-  requires an identifiable agent, not an anonymous caller. The MCP tool resolves
-  attestorId from `currentPrincipal.actorId()`.
+- Attestor is a registered instance (`instanceStore.findByInstanceId(attestorId)`).
+  If the attestor is not registered, reject with IllegalArgumentException — peer
+  attestation requires an identifiable agent, not an anonymous caller. The MCP
+  tool resolves attestorId from `currentPrincipal.actorId()`.
 
 Sets:
 - `subjectId` from `entry.subjectId` (same as LedgerWriteService.writeAttestation)
@@ -75,11 +75,16 @@ Calls `ledger.saveAttestation()`.
 
 **`request_peer_review(entry_id, reviewer_ids?, channel?)`**
 - Resolves the ledger entry, extracts COMMAND content and channel.
+- Resolves `completion_content`: looks up the most recent terminal entry (DONE
+  or FAILURE) for the COMMAND's correlationId via the ledger. If found, extracts
+  its content. If not found (COMMAND not yet fulfilled), `completion_content` is
+  null — the review QUERY contains only the COMMAND content.
 - Calls ReviewerResolver.resolve() with explicit reviewer_ids and channel.
 - For each resolved reviewer, dispatches a QUERY via messageService.dispatch():
-  - Content: `{"peer_review": {"ledger_entry_id": "...", "original_command": "...", "completion_content": "..."}}`
+  - Content: `{"peer_review": {"ledger_entry_id": "...", "original_command": "...", "completion_content": "...or null"}}`
   - Target: reviewer instance ID
   - Channel: same channel as original COMMAND (or explicit override)
+  - Sender: the calling agent (`currentPrincipal.actorId()`)
   - Deadline: from `casehub.qhorus.commitment.default-query-deadline`
 - Returns: list of review QUERYs sent (reviewer IDs + correlation IDs).
 - Empty list if no reviewers resolved → advisory message.
@@ -130,6 +135,9 @@ Fires after DONE messages:
    the COMMAND entry's channel (where work was requested), not `event.channelId()`
    (where DONE arrived). In cross-channel HANDOFF flows these may differ.
 6. Reviewers found → dispatch review QUERYs with structured `peer_review` content.
+   Sender: `entry.actorId` (the COMMAND sender/requester — they requested the work,
+   are already on the channel's `allowedWriters` ACL, and receive
+   `CommitmentExpiredEvent` if the review times out).
    Each QUERY gets its own UUID correlationId (independent obligations — shared
    correlationIds would create commitment conflicts or fulfill the original
    COMMAND's commitment). `completion_content` = `event.content()` from the
