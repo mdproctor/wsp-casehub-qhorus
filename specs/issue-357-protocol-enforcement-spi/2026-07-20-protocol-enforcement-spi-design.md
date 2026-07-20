@@ -80,6 +80,11 @@ public record ProtocolContext(
 `recentMessages` is populated by `MessageService` with a bounded lookback query
 before calling protocols. Lookback size configured via
 `casehub.qhorus.protocol.lookback-size` (default: 50). EVENT messages excluded.
+**Ordering: oldest-first (ascending by ID).** Protocol analysis reads naturally as
+a chronological sequence — "consecutive messages from sender A" and "last message
+from a participant" are intuitive scanning forward. The store method queries
+`ORDER BY id DESC LIMIT N` for efficiency, then reverses before populating the
+context.
 
 `activeCommitments` is populated by `CommitmentStore.findOpenByChannelId(channelId)`
 — all OPEN or ACKNOWLEDGED commitments for the channel. Pre-queried once in the
@@ -173,10 +178,21 @@ if (ch != null && !ch.protocols().isEmpty()) {
 ```
 
 `messageStore.findRecent(channelId, limit)` is a new store method — returns last
-N messages ordered by ID DESC, excluding EVENTs.
+N messages ordered by ID ASC (oldest-first), excluding EVENTs. The store queries
+`ORDER BY id DESC LIMIT N` then reverses, so protocol analysis reads as a
+chronological sequence (see §ProtocolContext).
+
+Both queries execute unconditionally when any protocol is active. For channels
+using only history-based protocols (ROUND_ROBIN, CONTRIBUTION_REQUIRED), the
+commitment query is a no-op cost. This is the explicit trade-off of the
+self-contained ProtocolContext design — architectural simplicity over conditional
+query optimisation. If profiling shows this is significant, a future optimisation
+can conditionally skip the commitment query when no active protocol's
+`protocolName()` matches a commitment-dependent set.
 
 Reactive parity: `ReactiveMessageService` gets the same block with
-`messageStore.findRecentAsync()` returning `Uni<List<MessageView>>`.
+`messageStore.findRecentAsync()` and `commitmentStore.findOpenByChannelIdAsync()`,
+composed via `Uni.combine().all().unis(...).asTuple()`.
 
 OTel span event: `qhorus.enforcement.protocol` added after protocol evaluation.
 
@@ -218,11 +234,15 @@ Enforced turn-taking with explicit participant ordering.
   rejects ROUND_ROBIN when `protocolParticipants` is empty). Turn-taking without
   a defined order is meaningless; deriving participants from message history produces
   non-deterministic ordering that changes as the lookback window slides.
-- Current turn: find last non-EVENT message in `recentMessages`, advance to next
-  participant (wrapping)
+- Current turn: find the most recent message from a participant in
+  `recentMessages` (last participant message in the oldest-first list),
+  advance to the next participant in the declared order (wrapping).
+  Messages from senders not in `protocolParticipants` are ignored for turn
+  determination — system messages, admin actions, and observer agents do not
+  advance the turn counter or trigger advisories.
 - Advisory on out-of-turn: "[ROUND_ROBIN] expected 'agent-B' to speak next
   in channel 'X', got 'agent-A'"
-- Skips evaluation when ≤1 participant or no message history
+- Skips evaluation when ≤1 participant or no participant message history
 
 ### CONTRIBUTION_REQUIRED
 
@@ -247,8 +267,9 @@ correctness at the tail vs. no per-channel state entity.
 
 ### MessageStore
 
-- `findRecent(UUID channelId, int limit)` — last N messages by ID DESC, excluding
-  EVENTs. Returns `List<MessageView>`.
+- `findRecent(UUID channelId, int limit)` — last N messages ordered oldest-first
+  (ascending by ID), excluding EVENTs. Returns `List<MessageView>`. Implementation
+  queries `ORDER BY id DESC LIMIT N` then reverses for chronological analysis.
 - `ReactiveMessageStore.findRecentAsync(UUID channelId, int limit)` — reactive
   counterpart returning `Uni<List<MessageView>>`.
 
@@ -321,10 +342,11 @@ cleared.
 
 ## Testing
 
-- **Protocol beans:** CDI-free unit tests with constructed `ProtocolContext` and
-  mock `CommitmentStore` (for REQUEST_RESPONSE and TASK_COMPLETION). Each protocol
+- **Protocol beans:** CDI-free unit tests with constructed `ProtocolContext`
+  (including test `activeCommitments` for REQUEST_RESPONSE and TASK_COMPLETION).
+  No mocks required — protocols are pure functions of ProtocolContext. Each protocol
   tests: no-violation path, single violation, multiple violations, empty channel
-  (no history), single participant edge case.
+  (no history), single participant edge case, non-participant sender (ROUND_ROBIN).
 
 - **ProtocolRegistry:** CDI-free unit tests with package-private constructor.
   Tests: duplicate name rejection, unknown name handling, empty list, ordering.
