@@ -1,45 +1,39 @@
 # CaseHub Qhorus — Session Handover
 
-*Updated: #355, #368 closed — removed from in-progress. Epics #349 and #351 closed.*
-
-**Date:** 2026-07-19 — #356 implemented and shipped. Peer attestation — multi-agent verification on ledger entries.
+**Date:** 2026-07-20 — #357 implemented and shipped. Channel protocol enforcement SPI — pluggable message sequence validation.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the recommended next pick — depends on #354 (done), the last remaining epic #350 child.
+Close epic #350 (Channel Intelligence) — all children done (#355, #357). Then pick from the cross-repo backlog.
 
 ## What Was Done
 
-**Implemented #356 — peer attestation.** Layered architecture from root primitive: `PeerAttestationWriter` validates and writes `LedgerAttestation` with ENDORSED/CHALLENGED verdicts. `ReviewerResolver` 4-layer fallback (explicit → channel config → capability routing → CDI event). `PeerReviewAutoTrigger` observer sends review QUERYs after DONE. `PeerReviewResponseHandler` parses structured responses and auto-writes attestations. 4 new MCP tools: `attest`, `list_attestations`, `request_peer_review`, `set_channel_reviewers`. Channel gains `reviewerInstances` field (V37 migration). Trust integration is free — Bayesian Beta model aggregates automatically. Design-reviewed through 5 adversarial rounds (22 issues, all resolved). Pushed to upstream/main.
+**Implemented #357 — channel protocol enforcement SPI.** Advisory-only enforcement via `ChannelProtocol` SPI in `api/spi/`. `ProtocolRegistry` (ProjectionRegistry pattern). 4 built-in protocols: REQUEST_RESPONSE, TASK_COMPLETION, ROUND_ROBIN, CONTRIBUTION_REQUIRED. Dispatch pipeline position: after CorrelationIntegrityChecker, before LAST_WRITE. Two shared queries per dispatch (findRecent + findOpenByChannelId). Channel gains `protocols` and `protocolParticipants` fields (V39 migration). 4 new MCP tools. Design-reviewed through 4 adversarial rounds (17 issues, all resolved). Pushed to upstream/main.
 
-**Also landed (slot 2):** #355 (channel context summary) and #368 (circular delegation detection) — both now closed and merged to main.
+**Also this session:** closed epics #349 (Coordination Resilience) and #351 (Verification & Trust). Stamped issue-355 project branch.
 
-## Backlog — Prioritised by Effort-to-Impact
+## What's Left
 
-### Category B: Medium Effort / High Practical Impact — Core Roadmap
+- Close epic #350 — all children landed · XS · Low
 
-| Priority | # | Title | Scale | Cplx | Why this order |
-|---|---|---|---|---|---|
-| **1** | #357 | Protocol enforcement SPI | L | High | Depends on #354 (done). Last child of epic #350. |
+## What's Next
 
-### Category D: Cross-Repo Suggestions
-
-| Priority | # | Title | Target | Scale | Cplx |
-|---|---|---|---|---|---|
-| **3** | #358 | Supervisor + friction interventions | engine | L | High |
-| **4** | #359 | Summarisation → Qhorus integration | blocks | M | Med |
-| **5** | #361 | CBR routing + coordination memory | blocks/neocortex | M | High |
-| **6** | #360 | Common ground projection | blocks | M | High |
-| **7** | #364 | Convergence detection | blocks | M | High |
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #358 | Supervisor + friction interventions | L | High | Cross-repo: engine |
+| #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks |
+| #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex |
+| #360 | Common ground projection | M | High | Cross-repo: blocks |
+| #364 | Convergence detection | M | High | Cross-repo: blocks |
 
 ### Epics
 
 | # | Epic | Children |
 |---|------|----------|
 | #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, ~~#368~~ — **CLOSED** |
-| #350 | Channel Intelligence | ~~#355~~, #357 |
+| #350 | Channel Intelligence | ~~#355~~, ~~#357~~ — **ready to close** |
 | #351 | Verification & Trust | ~~#356~~ — **CLOSED** |
 | #352 | Cross-Repo Suggestions | #358, #359, #360, #361, #364 |
 
@@ -47,7 +41,6 @@ Pick from the backlog below. #357 (protocol enforcement SPI, L/High) is the reco
 
 | What | Path |
 |------|------|
-| Design spec | `docs/specs/2026-07-19-peer-attestation-design.md` (workspace specs/) |
-| Design review workspace | `~/adr/casehub-qhorus/peer-attestation-20260719-133508/` |
-| Slot 2 | `/Users/mdproctor/claude/casehub/worktrees/2/` |
+| Design spec | `docs/specs/2026-07-20-protocol-enforcement-spi-design.md` |
+| Design review workspace | `~/adr/casehub-qhorus/protocol-enforcement-spi-20260720-030413/` |
 | Previous references | *Unchanged — `git show HEAD~1:HANDOFF.md`* |
