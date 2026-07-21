@@ -1,0 +1,9 @@
+branch: issue-375-notification-bridge-migration
+project-sha: d0036a2a71205418db981cd456feaa0a4984ed3c
+date: 2026-07-22
+issue: 375
+issue-repo: casehubio/qhorus
+covers: 375
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
