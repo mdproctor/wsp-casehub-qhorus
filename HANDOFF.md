@@ -1,26 +1,21 @@
 # CaseHub Qhorus — Session Handover
 
-*Updated: #376, #360, #364 closed — removed from backlog.*
-
-**Date:** 2026-07-20 — #357 shipped. All four original epics now closed (#349, #350, #351). #384 (retire reactive tier) merged.
+**Date:** 2026-07-28 — #375 shipped. Notification bridge migrated to platform subscription engine.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the cross-repo backlog below, or continue #375 (notification bridge migration — paused mid-brainstorm in another session).
+Pick from the cross-repo backlog below — all qhorus-local issues are complete.
 
 ## What Was Done
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
-
-**Additionally:** closed epic #350 (Channel Intelligence). Confirmed #384 (retire reactive tier) PR merged.
+#375: migrated `notification-bridge/` from direct `NotificationStore.store()` to firing `QhorusObligationEvent` POJOs into the platform subscription engine via `DataSourceRegistry.resolveSource()`. Added `QhorusSubscriptionBootstrap` for 5 default SYSTEM-scope subscriptions at startup. Deleted `NotificationCategories`. Also fixed the jetbrains-index-mcp-plugin PR #254→#268 (MCP Kotlin SDK migration broke `CreateModuleTool` — rebased, fixed types, CI green, awaiting maintainer merge).
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #375 | Notification bridge → platform SubscribableEvent | M | High | Paused mid-brainstorm; workspace branch open |
 | #358 | Supervisor + friction interventions | L | High | Cross-repo: engine |
 | #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks |
 | #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex |
