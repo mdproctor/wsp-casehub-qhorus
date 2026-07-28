@@ -20,7 +20,7 @@ Pick from the cross-repo backlog below, or continue #375 (notification bridge mi
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #375 | Notification bridge → platform SubscribableEvent | M | High | Paused mid-brainstorm in another session |
+| #375 | Notification bridge → platform SubscribableEvent | M | High | Paused mid-brainstorm; workspace branch open |
 | #358 | Supervisor + friction interventions | L | High | Cross-repo: engine |
 | #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks |
 | #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex |
