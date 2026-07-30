@@ -1,0 +1,9 @@
+branch: issue-387-rest-api-channel-crud
+project-sha: 8dc2fc1bdc259285563c0401d0d94de4598fd935
+date: 2026-07-30
+issue: 387
+issue-repo: casehubio/qhorus
+covers: 387
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
