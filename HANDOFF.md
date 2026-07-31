@@ -1,33 +1,26 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-28 — #375 shipped. Notification bridge migrated to platform subscription engine.
+**Date:** 2026-07-31 — #387 shipped. REST API for channel CRUD.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the cross-repo backlog below — all qhorus-local issues are complete.
+Pick from the cross-repo backlog — all qhorus-local issues are complete. #358, #359, #361 are independent cross-repo items (no longer grouped under an epic). Slots 47 (archived) and 48 (ready to land) covered #359 and #361 respectively.
 
 ## What Was Done
 
-#375: migrated `notification-bridge/` from direct `NotificationStore.store()` to firing `QhorusObligationEvent` POJOs into the platform subscription engine via `DataSourceRegistry.resolveSource()`. Added `QhorusSubscriptionBootstrap` for 5 default SYSTEM-scope subscriptions at startup. Deleted `NotificationCategories`. Also fixed the jetbrains-index-mcp-plugin PR #254→#268 (MCP Kotlin SDK migration broke `CreateModuleTool` — rebased, fixed types, CI green, awaiting maintainer merge).
+#387: added `ChannelResource` with 14 REST endpoints mapping to `ChannelService` — POST/GET/DELETE /api/channels, pause/resume, and PUT sub-resources for allowed-writers, admin-instances, reviewer-instances, type-constraints, rate-limits, protocols, protocol-participants, delivery-tracking. `ChannelResponse` record with typed collections (no CSV). Always-on, no config gate. 20 integration tests. Two garden gotchas captured (GE-20260731-4377d0, GE-20260731-016352).
+
+Also closed epic #352 (Cross-Repo Coordination Improvements) — it was a parking lot, not a coherent epic.
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #358 | Supervisor + friction interventions | L | High | Cross-repo: engine |
-| #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks |
-| #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex |
-
-### Epics
-
-| # | Epic | Children |
-|---|------|----------|
-| #349 | Coordination Resilience | ~~#353~~, ~~#354~~, ~~#362~~, ~~#363~~, ~~#368~~ — **CLOSED** |
-| #350 | Channel Intelligence | ~~#355~~, ~~#357~~ — **CLOSED** |
-| #351 | Verification & Trust | ~~#356~~ — **CLOSED** |
-| #352 | Cross-Repo Suggestions | #358, #359, ~~#360~~, #361, ~~#364~~ |
+| #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks (slot 47 archived) |
+| #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex (slot 48 ready to land) |
 
 ## References
 
