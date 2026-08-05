@@ -1,18 +1,16 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-07-31 — #387 shipped. REST API for channel CRUD.
+**Date:** 2026-08-04 — #388 shipped. Thread summary storage for blocks#59.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the cross-repo backlog — all qhorus-local issues are complete. #358, #359, #361 are independent cross-repo items (no longer grouped under an epic). Slots 47 (archived) and 48 (ready to land) covered #359 and #361 respectively.
+Pick from the cross-repo backlog — all qhorus-local issues are complete. #358, #359, #361 are independent cross-repo items.
 
 ## What Was Done
 
-#387: added `ChannelResource` with 14 REST endpoints mapping to `ChannelService` — POST/GET/DELETE /api/channels, pause/resume, and PUT sub-resources for allowed-writers, admin-instances, reviewer-instances, type-constraints, rate-limits, protocols, protocol-participants, delivery-tracking. `ChannelResponse` record with typed collections (no CSV). Always-on, no config gate. 20 integration tests. Two garden gotchas captured (GE-20260731-4377d0, GE-20260731-016352).
-
-Also closed epic #352 (Cross-Repo Coordination Improvements) — it was a parking lot, not a coherent epic.
+#388: added `ThreadSummary` record + `ThreadSummaryStore` SPI + `ThreadSummaryUpdatedEvent` in qhorus-api, `InMemoryThreadSummaryStore` in persistence-memory (6 tests), JPA entity + `JpaThreadSummaryStore` in runtime. Three commits on main. All backward-compatible — new types only. Blocks#59 consumes these for push-based thread summary integration.
 
 ## What's Next
 
