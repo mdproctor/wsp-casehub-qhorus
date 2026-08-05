@@ -1,0 +1,10 @@
+branch: issue-389-content-sanitiser-rename
+state: scaffolded
+project-sha: 68f02e70abf78b4f216325e4f00c330608b36ec9
+date: 2026-08-06
+issue: 389
+issue-repo: casehubio/qhorus
+covers: 389
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
