@@ -1,0 +1,10 @@
+branch: issue-374-sx-batch-cleanup
+state: scaffolded
+project-sha: 6d67a10252b07e6d3d36a7cff185a5e65047ee8c
+date: 2026-08-06
+issue: 374
+issue-repo: casehubio/qhorus
+covers: 374,378,379,388
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
