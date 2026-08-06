@@ -1,0 +1,10 @@
+branch: issue-381-delivery-lag-watchdog
+state: scaffolded
+project-sha: 907751044d376e3a51344935f0d753ee7e6dcf8b
+date: 2026-08-06
+issue: 381
+issue-repo: casehubio/qhorus
+covers: 381
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
