@@ -1,0 +1,10 @@
+branch: issue-380-per-participant-delivery-retry
+state: scaffolded
+project-sha: 88d771a25a7e0f0353c5c9e6f49fbd434e92ba92
+date: 2026-08-07
+issue: 380
+issue-repo: casehubio/qhorus
+covers: 380
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
