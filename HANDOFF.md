@@ -1,24 +1,16 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-08-04 — #388 shipped. Thread summary storage for blocks#59.
+**Date:** 2026-08-08 — backlog triage + #380 shipped.
 
 ---
 
 ## Immediate Next Step
 
-Pick from the cross-repo backlog — all qhorus-local issues are complete. #358, #359, #361 are independent cross-repo items.
+Pick from remaining open issues: #371 (attestor credibility, M/High), #373 (obligor trust attribution, M/High), #391 (stale CLAUDE.md reactive cleanup, S/Low).
 
 ## What Was Done
 
-#388: added `ThreadSummary` record + `ThreadSummaryStore` SPI + `ThreadSummaryUpdatedEvent` in qhorus-api, `InMemoryThreadSummaryStore` in persistence-memory (6 tests), JPA entity + `JpaThreadSummaryStore` in runtime. Three commits on main. All backward-compatible — new types only. Blocks#59 consumes these for push-based thread summary integration.
-
-## What's Next
-
-| # | Description | Scale | Complexity | Notes |
-|---|-------------|-------|------------|-------|
-| #358 | Supervisor + friction interventions | L | High | Cross-repo: engine |
-| #359 | Summarisation → Qhorus integration | M | Med | Cross-repo: blocks (slot 47 archived) |
-| #361 | CBR routing + coordination memory | M | High | Cross-repo: blocks/neocortex (slot 48 ready to land) |
+Triaged all S/XS issues. Closed #372 (reactive stack removed — issue invalid), #369 and #358 (filed as engine#875/#876). Filed #391 for stale CLAUDE.md reactive cleanup. Implemented #380: per-participant delivery retry with PostResult SPI, selective cursor advancement, retryLaggingParticipants in deliverPending, per-participant health tracking, volume caps. Design review (light, 3 dimensions) caught cursor race and instanceof dispatch — both fixed. Garden entry GE-20260808-c29cdf (ConcurrentHashMap findFirst non-determinism).
 
 ## References
 
