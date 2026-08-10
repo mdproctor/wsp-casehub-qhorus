@@ -1,0 +1,10 @@
+branch: issue-392-remove-unnecessary-cdi
+state: scaffolded
+project-sha: 92772fc3b63bbdce5b36830e75575927ffe26db8
+date: 2026-08-11
+issue: 392
+issue-repo: casehubio/qhorus
+covers: 392
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
