@@ -1,18 +1,18 @@
 # CaseHub Qhorus — Session Handover
 
-**Date:** 2026-08-10 — #391 + #373 closed.
+**Date:** 2026-08-11 — #392 closed.
 
 ---
 
 ## Immediate Next Step
 
-Pick from remaining open issues: #371 (attestor credibility, M/High), #392 (unnecessary CDI cleanup, S/Low).
+Pick from remaining open issues: #371 (attestor credibility, M/High), #394 (GraphQL schema, unsized).
 
 ## What Was Done
 
-Closed #391: removed all stale reactive stack documentation from CLAUDE.md (14 bullets deleted, 12 edited), deleted 3 reactive protocols, cleaned 6 remaining protocols, removed stale %reactive-pg test profile. Closed #373: obligor trust attribution via dual attestation — second attestation on terminal entry feeds obligor trust through existing query model with zero casehub-ledger changes. Decision review caught a flaw in the original obligorId approach (domain leakage, conflated signals) and surfaced the cleaner dual-attestation alternative.
+Closed #392: verified 4 CDI classes flagged by parent#340 audit. 3 of 4 were false positives — StoredMessageTypePolicy (SPI interface), DefaultInboundNormaliser (@DefaultBean displacement), QhorusEntityMapper (real @Inject ObjectMapper). Only AllowedWritersPolicy had genuinely unnecessary @ApplicationScoped — removed it and wired directly in MessageService. Garden entry GE-20260811-bfe973 captures the audit false-positive pattern.
 
 ## References
 
-- Spec: `specs/issue-391-reactive-cleanup-trust-attr/2026-08-10-obligor-trust-attribution-design.md`
-- Blog: `blog/2026-08-10-mdp01-trust-attribution-belongs-where-actor-is.md`
+- Blog: `blog/2026-08-11-mdp01-three-out-of-four-were-fine.md`
+- Garden: GE-20260811-bfe973 (CDI audit false positives from injection counting)
