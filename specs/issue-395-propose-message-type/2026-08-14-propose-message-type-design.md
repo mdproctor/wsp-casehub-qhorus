@@ -119,21 +119,42 @@ case RESPONSE -> {
 }
 ```
 
-**c) Trust gate** (~line 191): No change. PROPOSE is not trust-gated. The `dispatch.type() == MessageType.COMMAND` guard remains as-is.
+**c) Trust gate** (~line 191): No change. PROPOSE is not trust-gated (D4). The trust gate exists to prevent agents from directing action without authority — PROPOSE is a commissive (offers terms), not a directive (demands action). The receiver can freely DECLINE. Channel ACLs and rate limiting provide sufficient access control. The `dispatch.type() == MessageType.COMMAND` guard remains as-is.
 
-### 4. StoredMessageTypePolicy.validate() (runtime)
+**d) Default deadline** — add PROPOSE alongside the existing QUERY default deadline logic:
 
-Add PROPOSE to hard-enforcement branch:
+```java
+if (effectiveDeadline == null && dispatch.type() == MessageType.PROPOSE) {
+    var defaultDl = config.commitment().defaultProposeDeadline();
+    if (defaultDl.isPresent()) {
+        effectiveDeadline = Instant.now().plus(defaultDl.get());
+    }
+}
+```
+
+### 4. StoredMessageTypePolicy (runtime)
+
+**validate()** — add PROPOSE to the early-return guard:
 
 ```java
 // Before:
-case COMMAND, QUERY -> { /* hard enforcement — throws */ }
+if (type != MessageType.COMMAND && type != MessageType.QUERY) return;
 
 // After:
-case COMMAND, QUERY, PROPOSE -> { /* hard enforcement — throws */ }
+if (type != MessageType.COMMAND && type != MessageType.QUERY && type != MessageType.PROPOSE) return;
 ```
 
-PROPOSE creates commitments, so advisory-only enforcement would risk orphan commitments (per PP-20260604-a7ad99).
+**advisory()** — add PROPOSE to the skip guard (must match validate):
+
+```java
+// Before:
+if (type == MessageType.COMMAND || type == MessageType.QUERY) return null;
+
+// After:
+if (type == MessageType.COMMAND || type == MessageType.QUERY || type == MessageType.PROPOSE) return null;
+```
+
+Both methods must be updated. Without the advisory() change, PROPOSE on a denying channel would get advisory-only enforcement instead of hard. PROPOSE creates commitments, so advisory-only enforcement would risk orphan commitments (per PP-20260604-a7ad99).
 
 ### 5. CorrelationIntegrityChecker (runtime)
 
@@ -151,22 +172,51 @@ No change needed. PROPOSE falls to `default -> 0` in `statePriority()` (priority
 
 ### 7. QhorusMcpTools (runtime)
 
-Update `send_message` tool:
-- Add `PROPOSE` to the type parameter documentation
-- PROPOSE follows the same dispatch path as all other types
+**send_message tool documentation updates:**
+- Type parameter: add `PROPOSE`
+- correlation_id parameter: add PROPOSE to "auto-generated for QUERY and COMMAND" → "auto-generated for QUERY, COMMAND, and PROPOSE"
+- deadline parameter: add PROPOSE to "Only meaningful for QUERY and COMMAND"
 
-### 8. Notification bridge
+**Artefact claim release guard:** The auto-release in `sendMessage()` fires on RESPONSE (along with DONE/DECLINE/FAILURE). For PROPOSE commitments, RESPONSE is non-fulfilling — claims must NOT be released. Add a PROPOSE guard:
 
-Add `PROPOSED` to `QhorusObligationEvent.Kind` enum. `NotificationBridgeObserver` fires on PROPOSE dispatch (alongside existing COMMAND → ASSIGNED mapping). DONE-on-PROPOSE fires existing `FULFILLED` kind.
+```java
+// Before:
+if (dispatchResult.correlationId() != null && (msgType == MessageType.RESPONSE || ...)) {
+    // release artefact claims
+}
 
-### 9. Examples — type-system module
+// After: check commitment type before releasing on RESPONSE
+if (dispatchResult.correlationId() != null && (msgType == MessageType.DONE
+        || msgType == MessageType.DECLINE || msgType == MessageType.FAILURE
+        || (msgType == MessageType.RESPONSE && !isProposeCommitment(correlationId)))) {
+    // release artefact claims
+}
+```
+
+### 8. StoredCommitmentAttestationPolicy and EvidentialChecker (runtime)
+
+**StoredCommitmentAttestationPolicy:** PROPOSE follows the same attestation pattern as COMMAND — DONE on PROPOSE → SOUND (downgraded to FLAGGED if EvidentialChecker finds violations), DECLINE → FLAGGED, FAILURE → FLAGGED. No special handling needed — the policy dispatches on the terminal message type, not the originating type.
+
+**EvidentialChecker.checkObligation():** PROPOSE must be a valid originating type. RESPONSE on PROPOSE is a valid non-fulfilling interaction, not a vocabulary violation (I_ec). The vocabulary check must account for PROPOSE's distinct fulfillment semantics.
+
+### 9. Default PROPOSE deadline (runtime config)
+
+Add `casehub.qhorus.commitment.default-propose-deadline` (`Optional<Duration>`, absent by default). Same pattern as `default-query-deadline`. Applied in the commitment open branch when `dispatch.type() == MessageType.PROPOSE` and no explicit deadline is set.
+
+Counter-proposals create new PROPOSE commitments with new correlationIds. Without deadlines, iterated negotiation accumulates orphan OPEN commitments. The default deadline enables `CommitmentService.expireOverdue()` to clean them up via the existing watchdog. Consumers can also explicitly DECLINE superseded proposals.
+
+### 10. Notification bridge
+
+Add `PROPOSED` to `QhorusObligationEvent.Kind` enum — semantically distinct from `ASSIGNED` (COMMAND). ASSIGNED means "you must execute"; PROPOSED means "terms offered for your consideration." The distinction matters for notification routing and display. `NotificationBridgeObserver` fires on PROPOSE dispatch. DONE-on-PROPOSE fires existing `FULFILLED` kind.
+
+### 11. Examples — type-system module
 
 Update `MessageTaxonomyTest` in `examples/type-system/` to cover PROPOSE:
 - Enum value existence
 - Method return values
 - Builder validation (correlationId + content required)
 
-### 10. Doc revisions
+### 12. Doc revisions
 
 | Document | Change |
 |---|---|
@@ -176,7 +226,7 @@ Update `MessageTaxonomyTest` in `examples/type-system/` to cover PROPOSE:
 | `docs/guides/contributor-guide.md` | Update type system internals |
 | `CLAUDE.md` | Update all "9-type" references to "10-type" |
 
-### 11. No Flyway migration
+### 13. No Flyway migration
 
 - MessageType is stored as String in DB — adding an enum value requires no schema change
 - Commitment entity already has `messageType` column — no new column needed
