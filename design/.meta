@@ -1,0 +1,10 @@
+branch: issue-395-propose-message-type
+state: scaffolded
+project-sha: 80f7fdb3f7fa751e9435dfa2814a9ab7e86cee18
+date: 2026-08-14
+issue: 395
+issue-repo: casehubio/qhorus
+covers: 395
+flyway-next-v: 42
+design-repo: project
+design-section-hashes: 
