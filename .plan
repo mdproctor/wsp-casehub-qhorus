@@ -1,0 +1,15 @@
+# Work Plan — issue-398-roadmap-phase1
+
+## State
+issue-repo: casehubio/qhorus
+
+## Queue
+- [ ] casehubio/qhorus#398 — E1: Cross-channel causal graphs ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: Cross-channel ancestor walk + depth limit
+    - [ ] Task 2: CausalGraphService DTOs + graph building
+  - [ ] Batch 2: Surface
+    - [ ] Task 3: MCP tool updates get_causal_chain + get_causal_graph
+    - [ ] Task 4: CausalGraphResource REST endpoints
+- [ ] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine
+- [ ] casehubio/qhorus#400 — E3: Active governance policies — enforcement modes
