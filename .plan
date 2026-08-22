@@ -5,12 +5,6 @@ issue-repo: casehubio/qhorus
 state: active
 
 ## Queue
-- [ ] casehubio/qhorus#398 — E1: Cross-channel causal graphs ← active
-  - [x] Batch 1: Foundation
-    - [x] Task 1: Cross-channel ancestor walk + depth limit
-    - [x] Task 2: CausalGraphService DTOs + graph building
-  - [x] Batch 2: Surface
-    - [x] Task 3: MCP tool updates get_causal_chain + get_causal_graph
-    - [x] Task 4: CausalGraphResource REST endpoints
-- [ ] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine
+- [x] casehubio/qhorus#398 — E1: Cross-channel causal graphs
+- [ ] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine ← active
 - [ ] casehubio/qhorus#400 — E3: Active governance policies — enforcement modes
