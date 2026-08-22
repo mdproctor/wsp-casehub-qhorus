@@ -15,3 +15,4 @@ state: active
     - [x] Task 4: Containment execution + audit EVENT
     - [x] Task 5: register_watchdog action param + CLAUDE.md
 - [ ] casehubio/qhorus#400 — E3: Active governance policies — enforcement modes
+- [ ] casehubio/qhorus#407 — Tutorial example — governance in action
