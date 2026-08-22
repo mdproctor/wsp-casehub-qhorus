@@ -2,6 +2,7 @@
 
 ## State
 issue-repo: casehubio/qhorus
+state: active
 
 ## Queue
 - [ ] casehubio/qhorus#398 — E1: Cross-channel causal graphs ← active
