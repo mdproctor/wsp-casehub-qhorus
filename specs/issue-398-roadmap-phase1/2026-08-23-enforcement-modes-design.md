@@ -90,8 +90,9 @@ Step 9 (NEW): Enforcement gate
   - if channel.enforcementMode() == ADVISORY → pass through (current behavior)
   - if dispatch.type() == EVENT → pass through (exempt, prevents recursion)
   - if sender contains ":" → pass through (system sender exempt, consistent with trust gate)
-  - if dispatch.type() is terminal (DONE, FAILURE, DECLINE, RESPONSE, HANDOFF) → pass through
-    (obligation resolution must never be blocked — ADR-0016)
+  - if dispatch.type() is obligation-resolving (DONE, FAILURE, DECLINE, RESPONSE) → pass through
+    (obligation resolution must never be blocked — ADR-0016; HANDOFF is NOT exempt —
+    it transfers obligations via CommitmentService.delegate(), not resolves them)
   - filter tagged advisories: remove any whose source is in channel.enforcementExclusions()
   - if no enforceable violations remain → pass through
   - enforceable violations exist:
@@ -292,7 +293,7 @@ both to null.
 |-----------|--------|
 | `dispatch.type() == EVENT` | Infrastructure messages; prevents recursion from enforcement EVENTs |
 | `sender.contains(":")` | System senders (system:enforcement, system:watchdog, etc.); consistent with trust gate |
-| Terminal types (DONE, FAILURE, DECLINE, RESPONSE, HANDOFF) | Obligation resolution must never be blocked (ADR-0016) |
+| Obligation-resolving types (DONE, FAILURE, DECLINE, RESPONSE) | Obligation resolution must never be blocked (ADR-0016). HANDOFF is NOT exempt — it transfers, not resolves |
 | Source in `enforcementExclusions` | Per-channel runtime configuration to reduce coverage |
 
 ### What Does NOT Change
@@ -320,7 +321,8 @@ both to null.
    - Exclusions: excluded sources don't trigger enforcement
    - EVENT exemption: EVENT type bypasses enforcement
    - System sender exemption: system senders bypass enforcement
-   - Terminal type exemption: DONE/FAILURE/DECLINE/RESPONSE/HANDOFF bypass enforcement
+   - Obligation-resolving type exemption: DONE/FAILURE/DECLINE/RESPONSE bypass enforcement
+   - HANDOFF enforcement: HANDOFF IS subject to enforcement (not exempt — transfers, not resolves)
    - Mixed: some advisories excluded, some enforceable
 5. **EnforcementExecutor** (CDI-free with mocks):
    - Dispatches enforcement EVENT with correct telemetry
@@ -331,7 +333,8 @@ both to null.
 6. **Integration tests** (`@QuarkusTest`):
    - End-to-end: send violating message to BLOCKING channel, assert throw + EVENT in timeline
    - QUARANTINE: verify channel paused after enforcement
-   - Terminal exemption: DONE on BLOCKING channel still dispatches
+   - Obligation-resolving exemption: DONE on BLOCKING channel still dispatches
+   - HANDOFF not exempt: HANDOFF on BLOCKING channel throws EnforcementBlockedException
    - Exclusion: verify excluded protocol doesn't block
    - set_enforcement_mode / set_enforcement_exclusions MCP tools
 7. **Migration test** — V45 column existence verified in FlywayMigrationSchemaTest
