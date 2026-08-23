@@ -2,16 +2,17 @@
 
 ## D1: Enforcement scope
 
-**Choice:** All advisory sources are subject to enforcement mode by default, with per-channel runtime exclusions to reduce coverage. Terminal resolution types (DONE, FAILURE, DECLINE, RESPONSE, HANDOFF) are unconditionally exempt — obligation resolution must never be blocked.
+**Choice:** All advisory sources are subject to enforcement mode by default, with per-channel runtime exclusions to reduce coverage. Obligation-resolving types (DONE, FAILURE, DECLINE, RESPONSE) are unconditionally exempt — obligation resolution must never be blocked. HANDOFF is NOT exempt — it transfers obligations, not resolves them.
 **Alternatives:**
 - Protocols only — simpler but leaves type and correlation advisories permanently informational, limiting compliance coverage
 - Design-time fixed subset — removes runtime adaptability; operators can't tune enforcement to their context
 - No terminal type exemption — creates unresolvable obligations when a DONE is blocked on a typed channel (ADR-0016 specifically decided against this)
-**Rationale:** Enforcement should default to maximum coverage. Operators who find specific sources too aggressive for their workload exclude them at runtime. Full range by default, configuration to reduce. Terminal types are exempt because blocking a DONE/FAILURE/DECLINE on a typed channel leaves the originating COMMAND/QUERY commitment permanently OPEN with no resolution path.
-**Trade-offs:** Per-channel exclusions add a field to Channel and a migration column. Tagging advisories with source identifiers requires changes to all three advisory producers.
-**Sources:** MessageTypePolicy.java, CorrelationIntegrityChecker.java, ChannelProtocol SPI, MessageService.dispatch() enforcement gate, ADR-0016 (hybrid-channel-type-enforcement)
+- Exempt HANDOFF too — would prevent protocol enforcement on delegation messages; unnecessary because blocking HANDOFF leaves the original obligor with full resolution capability (DONE/FAILURE/DECLINE)
+**Rationale:** Enforcement should default to maximum coverage. Operators who find specific sources too aggressive for their workload exclude them at runtime. Full range by default, configuration to reduce. Obligation-resolving types are exempt because blocking a DONE/FAILURE/DECLINE/RESPONSE on a typed channel leaves the originating COMMAND/QUERY commitment with no resolution path. HANDOFF is excluded from the exemption because CommitmentService.delegate() transitions the parent to DELEGATED and creates a new OPEN child — it transfers, not resolves. Blocking HANDOFF leaves the original obligor retaining the obligation with three resolution paths intact. The platform's own TERMINAL_TYPES constants confirm: CausalGraphService and A2ATaskStateMapper both exclude HANDOFF from terminal types.
+**Trade-offs:** Per-channel exclusions add a field to Channel and a migration column. Tagging advisories with source identifiers requires changes to all three advisory producers. HANDOFF can now be blocked by enforcement — operators who want delegation to flow freely on enforced channels can exclude the relevant advisory source.
+**Sources:** MessageTypePolicy.java, CorrelationIntegrityChecker.java, ChannelProtocol SPI, MessageService.dispatch() enforcement gate, ADR-0016 (hybrid-channel-type-enforcement), CommitmentService.delegate(), CausalGraphService.TERMINAL_TYPES, A2ATaskStateMapper.TERMINAL_TYPES
 **Exploration:** quick
-**Status:** revised (R1-03: terminal type exemption added)
+**Status:** revised (R1-03: terminal type exemption added; R2-01: HANDOFF removed from exemption)
 
 ## D2: Block action
 
