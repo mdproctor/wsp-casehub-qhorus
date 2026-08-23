@@ -51,3 +51,15 @@
 **Sources:** WatchdogEvaluationService.dispatchContainmentEvent() pattern, WatchdogAlertEvent CDI pattern, ConnectorAlertBridge, MessageService.dispatch() EVENT exemptions (lines 170, 183)
 **Exploration:** quick
 **Status:** revised (R1-02: REQUIRES_NEW, R1-06/R1-07: CDI event added, R1-09: system sender exemption)
+
+## D5: Per-channel enforcement configuration (no inheritance)
+
+**Choice:** Enforcement mode is per-channel only; no Space-level or global default inheritance in Phase 1
+**Alternatives:**
+- Space-level default with per-channel override — reduces operational burden for large deployments; Space entity already supports parentSpaceId for recursive nesting
+- Global default with Space and channel overrides — three-tier resolution hierarchy
+**Rationale:** Phase 1 validates the enforcement model with explicit per-channel configuration. Inheritance adds resolution complexity (channel overrides Space overrides global) and requires changes to both Space entity and enforcement resolution logic. Per-channel is the minimum viable approach. Once enforcement is proven in production, Space-level inheritance is a natural Phase 2 enhancement.
+**Trade-offs:** Operators with many channels must configure each individually. MCP bulk-set operations and channel templates mitigate this. No inheritance means no accidental enforcement propagation — explicit is safer for a new governance mechanism.
+**Sources:** Space entity (parentSpaceId), Channel entity (enforcementMode field)
+**Exploration:** quick
+**Status:** captured (R1-08: implicit decision made explicit)
