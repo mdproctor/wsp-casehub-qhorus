@@ -202,12 +202,15 @@ Both fields optional — omitted fields are unchanged. Delegates to
 
 ### ChannelDetail Changes
 
-`ChannelDetail` (in `api/channel/`) gains:
-- `EnforcementMode enforcementMode`
-- `List<String> enforcementExclusions`
+`ChannelDetail` (in `api/channel/`) gains two String fields following the existing
+CSV-serialized pattern (consistent with `protocols`, `allowedWriters`, etc.):
+- `String enforcementMode` — enum name or null (null = ADVISORY)
+- `String enforcementExclusions` — comma-separated tags or null
 
-`QhorusEntityMapper.toChannelDetail()` maps from Channel. MCP list/get tools
-surface enforcement configuration in channel detail output.
+`QhorusEntityMapper.toChannelDetail()` maps from Channel:
+`ch.enforcementMode() != ADVISORY ? ch.enforcementMode().name() : null` and
+`joinCsv(ch.enforcementExclusions())`. Backward-compatible constructors default
+both to null.
 
 ### What Does NOT Change
 
