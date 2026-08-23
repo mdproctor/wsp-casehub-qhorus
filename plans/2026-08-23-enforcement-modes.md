@@ -328,7 +328,7 @@ git commit -m "feat(#400): Channel enforcement fields + ChannelEntity + V45 migr
 **Files:**
 - Create: `runtime/src/main/java/io/casehub/qhorus/runtime/message/TaggedAdvisory.java`
 - Modify: `runtime/src/main/java/io/casehub/qhorus/runtime/message/MessageService.java` — refactor advisory collection to use TaggedAdvisory
-- Test: `runtime/src/test/java/io/casehub/qhorus/message/TaggedAdvisoryTest.java`
+- Test: `../../runtime/src/test/java/io/casehub/qhorus/runtime/message/TaggedAdvisoryTest.java`
 
 **Interfaces:**
 - Produces: `TaggedAdvisory(String source, String message)` — package-private record
