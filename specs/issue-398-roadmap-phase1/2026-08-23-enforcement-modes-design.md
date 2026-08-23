@@ -30,6 +30,22 @@ public enum EnforcementMode {
 `ADVISORY` is the default. Existing behavior is unchanged for channels that
 don't set an enforcement mode.
 
+### EnforcementBlockedException
+
+```java
+public class EnforcementBlockedException extends IllegalStateException {
+    private final EnforcementMode mode;
+    private final List<String> violationSources;
+    private final List<String> violations;
+}
+```
+
+Extends `IllegalStateException` — backward-compatible with all existing catch
+blocks, `@WrapBusinessError` interceptors, and REST exception mappers. Enables
+programmatic discrimination (`catch (EnforcementBlockedException)`) for agents
+that need different corrective action than for ACL or rate-limit failures.
+Same pattern as `MessageTypeViolationException`.
+
 ### Channel Record Changes
 
 `Channel` gains two fields:
@@ -73,20 +89,83 @@ Steps 5-8: existing advisory collection (MessageTypePolicy, CorrelationIntegrity
 Step 9 (NEW): Enforcement gate
   - if channel.enforcementMode() == ADVISORY → pass through (current behavior)
   - if dispatch.type() == EVENT → pass through (exempt, prevents recursion)
+  - if sender contains ":" → pass through (system sender exempt, consistent with trust gate)
+  - if dispatch.type() is terminal (DONE, FAILURE, DECLINE, RESPONSE, HANDOFF) → pass through
+    (obligation resolution must never be blocked — ADR-0016)
   - filter tagged advisories: remove any whose source is in channel.enforcementExclusions()
   - if no enforceable violations remain → pass through
   - enforceable violations exist:
-    a. dispatch enforcement EVENT (see below)
-    b. if QUARANTINE: channelService.pause(channelId), commitmentService.expireByChannel(channelId)
-    c. throw IllegalStateException with violation summary
+    a. enforcementExecutor.execute(channel, dispatch, enforceable violations)
+       (REQUIRES_NEW — see EnforcementExecutor below)
+    b. throw EnforcementBlockedException with violation details
 Step 10: LAST_WRITE / persist / commit / fanOut (existing)
 ```
 
-The gate is a single method: `enforceIfRequired(Channel, List<TaggedAdvisory>, MessageDispatch)`.
+The gate method in MessageService: `enforceIfRequired(Channel, List<TaggedAdvisory>, MessageDispatch)`.
+It delegates containment and audit to `EnforcementExecutor`.
+
+### EnforcementExecutor (REQUIRES_NEW)
+
+A package-private `@ApplicationScoped` CDI bean, analogous to `ChannelCreateHelper`.
+All enforcement side effects execute in `REQUIRES_NEW` transactions so they survive
+the outer transaction's rollback when `EnforcementBlockedException` is thrown.
+
+```java
+@ApplicationScoped
+class EnforcementExecutor {
+
+    @Transactional(REQUIRES_NEW)
+    void execute(Channel ch, MessageDispatch dispatch, List<TaggedAdvisory> violations,
+                 String tenancyId) {
+        // 1. Dispatch enforcement EVENT to violating channel
+        messageService.dispatch(MessageDispatch.builder()
+                .channelId(ch.id())
+                .sender("system:enforcement")
+                .type(MessageType.EVENT)
+                .telemetry(telemetryJson(...))
+                .actorType(ActorType.SYSTEM)
+                .tenancyId(tenancyId)
+                .build());
+
+        // 2. If QUARANTINE: pause + expire
+        if (ch.enforcementMode() == EnforcementMode.QUARANTINE) {
+            channelService.pause(ch.id());
+            commitmentService.expireByChannel(ch.id());
+        }
+
+        // 3. Fire CDI event for external notification
+        enforcementBlockedEvent.fireAsync(new EnforcementBlockedEvent(
+                ch.id(), ch.name(), ch.enforcementMode(),
+                dispatch.sender(), dispatch.type(),
+                violations.stream().map(TaggedAdvisory::message).toList(),
+                violations.stream().map(TaggedAdvisory::source).distinct().toList()));
+    }
+}
+```
+
+This bean is injected into `MessageService` via CDI — calls go through the CDI
+proxy, ensuring the `REQUIRES_NEW` annotation takes effect (unlike a self-call).
+
+Error isolation: the entire `execute()` is wrapped in try-catch in the caller.
+If it fails, the `EnforcementBlockedException` is still thrown (message is blocked)
+but audit/containment may be incomplete.
+
+### EnforcementBlockedEvent (CDI)
+
+```java
+public record EnforcementBlockedEvent(
+    UUID channelId, String channelName, EnforcementMode mode,
+    String blockedSender, MessageType blockedType,
+    List<String> violations, List<String> violationSources) {}
+```
+
+Fired async from `EnforcementExecutor`. Flows through `ConnectorAlertBridge` to
+external notification systems (Slack, webhooks), consistent with `WatchdogAlertEvent`.
+Provides centralized operational monitoring independent of per-channel EVENT audit trail.
 
 ### Enforcement EVENT
 
-Before throwing, the gate dispatches a system EVENT to the violating channel:
+Dispatched by `EnforcementExecutor` to the violating channel (in REQUIRES_NEW):
 
 ```java
 MessageDispatch.builder()
@@ -95,8 +174,8 @@ MessageDispatch.builder()
     .type(MessageType.EVENT)
     .telemetry(telemetryJson(
         "enforcement_action", mode == QUARANTINE ? "QUARANTINED" : "BLOCKED",
-        "violations", violationMessages,       // List<String>
-        "violation_sources", violationSources,  // List<String> — distinct tags
+        "violations", violationMessages,
+        "violation_sources", violationSources,
         "blocked_sender", dispatch.sender(),
         "blocked_type", dispatch.type().name(),
         "enforcement_mode", mode.name()))
@@ -106,13 +185,13 @@ MessageDispatch.builder()
 ```
 
 This EVENT goes through the normal dispatch pipeline. It is not subject to
-enforcement because `dispatch.type() == EVENT` is exempted in the gate.
-It creates a Message and MessageLedgerEntry — fully auditable, queryable via
-`list_ledger_entries(type_filter="EVENT")`.
+enforcement because `dispatch.type() == EVENT` is exempted in the gate. It is also
+exempt because `sender` contains `:`. It creates a Message and MessageLedgerEntry —
+fully auditable, queryable via `list_ledger_entries(type_filter="EVENT")`.
 
 ### QUARANTINE Containment
 
-After the enforcement EVENT, before throwing:
+Within `EnforcementExecutor.execute()` (REQUIRES_NEW), after the enforcement EVENT:
 
 1. `channelService.pause(channelId)` — prevents further dispatches
 2. `commitmentService.expireByChannel(channelId)` — resolves open obligations
@@ -121,14 +200,9 @@ Same primitives as #399's `WatchdogEvaluationService.executeContainmentAction()`
 No agent deregistration — enforcement is single-message-based (one sender violated
 a protocol); the watchdog handles pattern-based agent concerns.
 
-Error isolation: containment actions are wrapped in try-catch. If containment fails,
-the throw still occurs (message is still blocked) but the channel may not be paused.
-This matches the watchdog pattern.
-
 ### ChannelEntity Changes
 
 ```java
-// New fields on ChannelEntity
 @Column(name = "enforcement_mode")
 private String enforcementMode;      // nullable, null = ADVISORY
 
@@ -212,6 +286,15 @@ CSV-serialized pattern (consistent with `protocols`, `allowedWriters`, etc.):
 `joinCsv(ch.enforcementExclusions())`. Backward-compatible constructors default
 both to null.
 
+### Exemptions Summary
+
+| Exemption | Reason |
+|-----------|--------|
+| `dispatch.type() == EVENT` | Infrastructure messages; prevents recursion from enforcement EVENTs |
+| `sender.contains(":")` | System senders (system:enforcement, system:watchdog, etc.); consistent with trust gate |
+| Terminal types (DONE, FAILURE, DECLINE, RESPONSE, HANDOFF) | Obligation resolution must never be blocked (ADR-0016) |
+| Source in `enforcementExclusions` | Per-channel runtime configuration to reduce coverage |
+
 ### What Does NOT Change
 
 - **DispatchResult** — no new fields. Advisories still `List<String>` in ADVISORY mode.
@@ -228,22 +311,39 @@ both to null.
 ## Testing Strategy
 
 1. **EnforcementMode enum** — trivial, no test needed
-2. **TaggedAdvisory** — package-private record, tested through dispatch integration
-3. **Enforcement gate unit tests** (CDI-free):
+2. **EnforcementBlockedException** — constructor, field accessors, ISA IllegalStateException
+3. **TaggedAdvisory** — package-private record, tested through dispatch integration
+4. **Enforcement gate unit tests** (CDI-free):
    - ADVISORY mode: advisories returned, no throw
-   - BLOCKING mode: throws on violation, no throw when advisories empty
-   - QUARANTINE mode: throws + pause + expire called
+   - BLOCKING mode: throws EnforcementBlockedException on violation, no throw when advisories empty
+   - QUARANTINE mode: throws + executor called (pause + expire)
    - Exclusions: excluded sources don't trigger enforcement
    - EVENT exemption: EVENT type bypasses enforcement
+   - System sender exemption: system senders bypass enforcement
+   - Terminal type exemption: DONE/FAILURE/DECLINE/RESPONSE/HANDOFF bypass enforcement
    - Mixed: some advisories excluded, some enforceable
-4. **Enforcement EVENT** — verify EVENT dispatched before throw, telemetry content
-5. **Integration tests** (`@QuarkusTest`):
+5. **EnforcementExecutor** (CDI-free with mocks):
+   - Dispatches enforcement EVENT with correct telemetry
+   - BLOCKING: no pause/expire
+   - QUARANTINE: pause + expire called
+   - Fires EnforcementBlockedEvent CDI event
+   - Error isolation: individual failures don't prevent throw
+6. **Integration tests** (`@QuarkusTest`):
    - End-to-end: send violating message to BLOCKING channel, assert throw + EVENT in timeline
    - QUARANTINE: verify channel paused after enforcement
+   - Terminal exemption: DONE on BLOCKING channel still dispatches
    - Exclusion: verify excluded protocol doesn't block
    - set_enforcement_mode / set_enforcement_exclusions MCP tools
-6. **Migration test** — V45 column existence verified in FlywayMigrationSchemaTest
-7. **ChannelCreateRequest** — enforcement fields in builder, backward compat constructors
+7. **Migration test** — V45 column existence verified in FlywayMigrationSchemaTest
+8. **ChannelCreateRequest** — enforcement fields in builder, backward compat constructors
+
+## Deferred (out of scope for Phase 1)
+
+- **Space-level enforcement inheritance** — channels inherit enforcement mode from Space
+  unless explicitly overridden. Useful for deployments with many channels. Phase 2 concern.
+- **Threshold-based quarantine** — require N violations within a window before QUARANTINE
+  triggers, analogous to watchdog thresholds. Reduces false-positive risk from heuristic
+  protocol advisories. Phase 2 concern.
 
 ## References
 
@@ -253,9 +353,12 @@ both to null.
 - `api/src/main/java/io/casehub/qhorus/api/spi/ChannelProtocol.java` — protocol SPI
 - `runtime/src/main/java/io/casehub/qhorus/runtime/message/protocol/ProtocolRegistry.java` — protocol discovery
 - `runtime/src/main/java/io/casehub/qhorus/runtime/watchdog/WatchdogEvaluationService.java` — containment pattern (#399)
+- `runtime/src/main/java/io/casehub/qhorus/runtime/channel/ChannelCreateHelper.java` — REQUIRES_NEW precedent
 - `api/src/main/java/io/casehub/qhorus/api/watchdog/WatchdogAction.java` — containment enum (#399)
+- `api/src/main/java/io/casehub/qhorus/api/watchdog/WatchdogAlertEvent.java` — CDI event pattern
 - `api/src/main/java/io/casehub/qhorus/api/message/DispatchResult.java` — result record (unchanged)
 - `api/src/main/java/io/casehub/qhorus/api/channel/Channel.java` — channel record
+- `docs/adr/0016-hybrid-channel-type-enforcement.md` — ADR for type enforcement asymmetry
 - casehubio/qhorus#399 — E2 cascade containment (containment primitives)
 - casehubio/qhorus#400 — this issue
 - [Governance-as-a-Service (arXiv, 2025)](https://arxiv.org/html/2508.18765v2)
