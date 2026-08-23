@@ -6,13 +6,14 @@ state: active
 
 ## Queue
 - [x] casehubio/qhorus#398 — E1: Cross-channel causal graphs
-- [ ] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine ← active
-  - [x] Batch 1: Foundation
-    - [x] Task 1: WatchdogAction enum + record + migration
-    - [x] Task 2: AlertContext.affectedAgentIds
-    - [x] Task 3: markOffline + expireByChannel
-  - [x] Batch 2: Execution
-    - [x] Task 4: Containment execution + audit EVENT
-    - [x] Task 5: register_watchdog action param + CLAUDE.md
-- [ ] casehubio/qhorus#400 — E3: Active governance policies — enforcement modes
+- [x] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine
+- [ ] casehubio/qhorus#400 — E3: Active governance policies — enforcement modes ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: EnforcementMode enum + exception + event
+    - [ ] Task 2: Channel + ChannelEntity + V45 migration
+  - [ ] Batch 2: Pipeline
+    - [ ] Task 3: TaggedAdvisory + advisory tagging
+    - [ ] Task 4: EnforcementExecutor + enforcement gate
+  - [ ] Batch 3: API
+    - [ ] Task 5: MCP tools + REST + CLAUDE.md
 - [ ] casehubio/qhorus#407 — Tutorial example — governance in action
