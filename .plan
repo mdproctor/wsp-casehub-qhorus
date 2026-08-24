@@ -2,8 +2,9 @@
 
 ## State
 issue-repo: casehubio/qhorus
-state: active
+state: closing:review
 
+evidence-era: true
 ## Queue
 - [x] casehubio/qhorus#398 — E1: Cross-channel causal graphs
 - [x] casehubio/qhorus#399 — E2: Cascade containment — watchdog-triggered quarantine
