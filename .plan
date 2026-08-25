@@ -1,0 +1,15 @@
+# Work Plan — issue-401-reputation-routing
+
+## State
+branch: issue-401-reputation-routing
+state: scaffolded
+project-sha: 2de507c3fa320bc193b4a5cf87976ec953880da1
+date: 2026-08-25
+issue-repo: casehubio/qhorus
+covers: 401
+design-repo: project
+design-section-hashes: 
+flyway-next-v: V46
+
+## Queue
+- [ ] casehubio/qhorus#401 — Issue #401 ← active
