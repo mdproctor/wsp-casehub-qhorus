@@ -2,7 +2,7 @@
 
 ## State
 issue-repo: casehubio/qhorus
-state: closing:review
+state: closing:promoted
 
 evidence-era: true
 ## Queue
