@@ -1,0 +1,17 @@
+# Work Plan — issue-415-space-fixes
+
+## State
+branch: issue-415-space-fixes
+state: scaffolded
+project-sha: 63817f650c5e21e7ca63b57b5fcc2b8d302acc67
+date: 2026-08-26
+issue-repo: casehubio/qhorus
+covers: 415,416
+design-repo: project
+design-section-hashes: 
+flyway-next-v: V47
+
+## Queue
+- [ ] casehubio/qhorus#415 — Issue #415 ← active
+- [ ] casehubio/qhorus#415 — SpaceResourceTest 500 bug fix
+- [ ] casehubio/qhorus#416 — spaces push dataset
