@@ -1,0 +1,15 @@
+# Work Plan — issue-413-judgment-compliance-evidence
+
+## State
+branch: issue-413-judgment-compliance-evidence
+state: scaffolded
+project-sha: c78bcc7337692398136665f7e11cfc7718ba71c3
+date: 2026-08-27
+issue-repo: casehubio/qhorus
+covers: 413
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#413 — Issue #413 ← active
