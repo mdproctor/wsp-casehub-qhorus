@@ -1,0 +1,15 @@
+# Work Plan — issue-402-compliance-evidence-export
+
+## State
+branch: issue-402-compliance-evidence-export
+state: scaffolded
+project-sha: 2a394ad5977963aeca36461872a16f136eb21611
+date: 2026-08-27
+issue-repo: casehubio/qhorus
+covers: 402
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [ ] casehubio/qhorus#402 — Issue #402 ← active
