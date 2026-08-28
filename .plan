@@ -13,3 +13,12 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#411 — Issue #411 ← active
+  - [ ] Batch 1: Attestation Feedback
+    - [ ] Task 1: Deferred attestation policy
+    - [ ] Task 2: Verification observer
+  - [ ] Batch 2: Verification Properties
+    - [ ] Task 3: Interfaces + Liveness + Safety
+    - [ ] Task 4: Deadlock + Fairness + Evidence
+  - [ ] Batch 3: Report Integration
+    - [ ] Task 5: Report type + service + REST/GraphQL
+    - [ ] Task 6: Issue closures + docs + full build
