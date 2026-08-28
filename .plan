@@ -13,9 +13,9 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#406 — Issue #406 ← active
-  - [ ] Batch 1: Foundation
-    - [ ] Task 1: API types + stores + migration
-    - [ ] Task 2: InMemory stores + contract tests
+  - [x] Batch 1: Foundation
+    - [x] Task 1: API types + stores + migration
+    - [x] Task 2: InMemory stores + contract tests
   - [ ] Batch 2: Backend
     - [ ] Task 3: Module scaffold + JPA store
     - [ ] Task 4: Poster + Backend CDI-free tests
