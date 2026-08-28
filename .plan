@@ -19,6 +19,6 @@ flyway-next-v: none
   - [x] Batch 2: Verification Properties
     - [x] Task 3: Interfaces + Liveness + Safety
     - [x] Task 4: Deadlock + Fairness + Evidence
-  - [ ] Batch 3: Report Integration
+  - [x] Batch 3: Report Integration
     - [x] Task 5: Report type + service + REST/GraphQL
-    - [ ] Task 6: Issue closures + docs + full build
+    - [x] Task 6: Issue closures + docs + full build
