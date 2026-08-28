@@ -16,9 +16,9 @@ flyway-next-v: none
   - [x] Batch 1: Attestation Feedback
     - [x] Task 1: Deferred attestation policy
     - [x] Task 2: Verification observer
-  - [ ] Batch 2: Verification Properties
+  - [x] Batch 2: Verification Properties
     - [x] Task 3: Interfaces + Liveness + Safety
-    - [ ] Task 4: Deadlock + Fairness + Evidence
+    - [x] Task 4: Deadlock + Fairness + Evidence
   - [ ] Batch 3: Report Integration
     - [ ] Task 5: Report type + service + REST/GraphQL
     - [ ] Task 6: Issue closures + docs + full build
