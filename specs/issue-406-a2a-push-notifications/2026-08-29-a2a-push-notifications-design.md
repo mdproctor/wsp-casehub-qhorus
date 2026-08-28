@@ -333,7 +333,7 @@ No verification handshake on push config registration. No HMAC payload signing
 (can be added as a qhorus-specific extension later). These are not required by
 the A2A spec.
 
-### 10. In-memory cache for correlationId lookup
+### 10. In-memory cache and cross-tenant store access
 
 `post()` is called for every message on registered channels. To avoid a DB
 query per call, the push backend maintains an in-memory `Set<String>` of
@@ -344,6 +344,14 @@ active task IDs (correlationIds) with push configs.
 - Updated on push config create/delete
 - `post()` checks `activeTaskIds.contains(message.correlationId())` before
   querying the store for full config details
+
+**Cross-tenant store access:** The push backend's `post()` runs in the delivery
+pump thread (`ManagedExecutor`) — no request context, no `CurrentPrincipal`.
+Per `scheduled-service-cross-tenant-stores` protocol, the backend injects
+`CrossTenantPushNotificationConfigStore` (which has its own `@CrossTenant`
+qualifier and bypasses tenant filtering). `correlationId` is a UUID — globally
+unique across tenants — so `findByTaskId(correlationId)` does not need tenant
+scoping. The `activeTaskIds()` cache is cross-tenant by design.
 
 ### 11. Configuration
 
