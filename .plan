@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-411-judgment-commitment-type
-state: scaffolded
+state: closing:stamped
 project-sha: bf6d1e106aefe1dfe1ad2d1bf0dac958f3332a08
 date: 2026-08-28
 issue-repo: casehubio/qhorus
@@ -11,14 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#411 — Issue #411 ← active
-  - [x] Batch 1: Attestation Feedback
-    - [x] Task 1: Deferred attestation policy
-    - [x] Task 2: Verification observer
-  - [x] Batch 2: Verification Properties
-    - [x] Task 3: Interfaces + Liveness + Safety
-    - [x] Task 4: Deadlock + Fairness + Evidence
-  - [x] Batch 3: Report Integration
-    - [x] Task 5: Report type + service + REST/GraphQL
-    - [x] Task 6: Issue closures + docs + full build
+- [x] casehubio/qhorus#411 — Issue #411
