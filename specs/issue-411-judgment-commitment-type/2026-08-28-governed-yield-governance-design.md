@@ -61,40 +61,46 @@ A reviewer who delivers a poor-quality review has still fulfilled their obligati
 
 ### JudgmentCommitmentAttestationPolicy
 
-A `CommitmentAttestationPolicy` SPI override that defers attestation for judgment commitments. When a COMMAND's DONE resolution is for a judgment (determined by checking whether a matching YIELDED event exists for the same `correlationId`), the policy returns a deferred outcome — no attestation is written at DONE time.
+Extends `StoredCommitmentAttestationPolicy` to defer attestation for judgment commitments. When a COMMAND's DONE resolution is for a judgment (determined by checking whether a matching YIELDED event exists for the same `correlationId`), the policy returns `Optional.empty()` — the existing SPI deferral mechanism. `LedgerWriteService.writeAttestation()` already skips attestation when the policy returns empty.
+
+FAILURE terminal type is NOT deferred — expired judgments (deadline-triggered FAILURE) must get standard FLAGGED attestation to penalize agents who let judgments expire.
 
 ```java
 @ApplicationScoped
-public class JudgmentCommitmentAttestationPolicy implements CommitmentAttestationPolicy {
+public class JudgmentCommitmentAttestationPolicy extends StoredCommitmentAttestationPolicy {
 
     @Inject MessageLedgerEntryRepository messageRepo;
-    @Inject @Any Instance<CommitmentAttestationPolicy> delegates;
+    @Inject CurrentPrincipal currentPrincipal;
 
     @Override
-    public AttestationOutcome attestationFor(MessageType terminalType,
-            String content, CommitmentContext ctx) {
+    public Optional<AttestationOutcome> attestationFor(MessageType terminalType,
+            String resolvedActorId, CommitmentContext ctx) {
         if (terminalType == MessageType.DONE && isJudgmentCommitment(ctx)) {
-            return AttestationOutcome.DEFERRED;
+            return Optional.empty(); // deferred — JudgmentVerificationObserver writes attestation later
         }
-        // delegate to StoredCommitmentAttestationPolicy for non-judgment commitments
-        return resolveDefault().attestationFor(terminalType, content, ctx);
+        // non-judgment commitments + FAILURE/DECLINE: delegate to parent (standard attestation)
+        return super.attestationFor(terminalType, resolvedActorId, ctx);
     }
 
     private boolean isJudgmentCommitment(CommitmentContext ctx) {
-        // Check if a YIELDED event exists for this correlationId
-        return ctx.correlationId() != null
-                && messageRepo.hasJudgmentEvent(ctx.correlationId(), tenancyId);
+        if (ctx.correlationId() == null) return false;
+        String tenancyId = currentPrincipal.tenancyId();
+        return messageRepo.hasJudgmentEvent(ctx.correlationId(), tenancyId);
     }
 }
 ```
 
-**Activation:** This policy activates by classpath presence when the compliance-report module is included. Without the module, the default `StoredCommitmentAttestationPolicy` applies — judgment COMMANDs get standard DONE attestation.
+**CDI resolution:** Extends `StoredCommitmentAttestationPolicy` (the `@DefaultBean`). CDI selects the subclass over the default — the `super` call for non-judgment commitments preserves the parent's configurable confidence values. No `@Alternative` or priority needed.
 
-**AttestationOutcome.DEFERRED:** New value in the `AttestationOutcome` enum. `LedgerWriteService.writeAttestation()` skips attestation when outcome is DEFERRED. No other code path reads this value — it's a sentinel for "don't write now, something else will."
+**Activation:** This policy lives in the compliance-report module. Activates by classpath presence. Without the module, the parent `StoredCommitmentAttestationPolicy` applies — judgment COMMANDs get standard DONE attestation.
+
+**Escalated judgments:** ESCALATED is not a commitment terminal type — it's a judgment EVENT. The commitment stays OPEN after escalation (the engine will open a new COMMAND to the escalated-to agent). No attestation involved.
+
+**Expired judgments:** Deadline-triggered FAILURE is handled by the parent class (FLAGGED/0.6). The judgment policy does NOT defer FAILURE — agents who let judgments expire receive the standard trust penalty.
 
 ### JudgmentVerificationObserver
 
-A `MessageObserver` (LOCAL scope) that writes the sole attestation when a VERIFIED event lands.
+A `MessageObserver` (LOCAL scope) that writes the sole attestation when a VERIFIED event lands. Since `MessageReceivedEvent` does not carry telemetry columns (and EVENT `content` is enforced null), the observer queries `MessageLedgerEntryRepository` for the VERIFIED entry's extracted columns.
 
 ```java
 @ApplicationScoped
@@ -102,61 +108,71 @@ public class JudgmentVerificationObserver implements MessageObserver {
 
     @Inject LedgerEntryRepository ledger;
     @Inject MessageLedgerEntryRepository messageRepo;
+    @Inject CurrentPrincipal currentPrincipal;
+    @Inject QhorusConfig config;
 
     @Override
     public void onMessage(MessageReceivedEvent event) {
-        if (!JudgmentEventKinds.VERIFIED.equals(event.toolName())) return;
+        if (event.messageType() != MessageType.EVENT) return;
+        if (event.messageId() == null) return;
 
-        // Find the DONE entry for this judgment's correlationId
-        var yieldedEntry = messageRepo.findEarliestWithSubjectByCorrelationId(
-                event.correlationId(), event.tenancyId());
-        if (yieldedEntry.isEmpty()) return;
+        String tenancyId = event.tenancyId();
 
-        // Find the terminal DONE entry
-        var doneEntry = messageRepo.findLatestByCorrelationId(
-                event.correlationId(), event.tenancyId());
-        if (doneEntry.isEmpty()) return;
+        // Query the persisted ledger entry for telemetry columns
+        var verifiedEntry = messageRepo.findByMessageId(event.messageId());
+        if (verifiedEntry.isEmpty()) return;
+        var entry = verifiedEntry.get();
+        if (!JudgmentEventKinds.VERIFIED.equals(entry.toolName)) return;
 
-        var entry = doneEntry.get();
-        var verdict = mapVerdict(event);
-        var confidence = mapConfidence(event);
+        // Find the originating COMMAND entry (attestation target)
+        var commandEntry = messageRepo.findLatestByCorrelationId(
+                entry.channelId, event.correlationId(), tenancyId);
+        if (commandEntry.isEmpty()) return;
 
-        var attestation = LedgerAttestation.builder()
-                .entryId(entry.id)
-                .attestorId("system:judgment-verifier")
-                .verdict(verdict)
-                .confidence(confidence)
-                .evidence("Judgment verification: " + event.verificationOutcome())
-                .build();
-        ledger.saveAttestation(attestation);
+        var target = commandEntry.get();
+        var verdict = mapVerdict(entry.verificationOutcome);
+        var confidence = mapConfidence(entry.verificationOutcome, entry.evidenceQuality);
+
+        final LedgerAttestation attestation = new LedgerAttestation();
+        attestation.ledgerEntryId = target.id;
+        attestation.subjectId = target.subjectId;
+        attestation.attestorId = "system:judgment-verifier";
+        attestation.attestorType = ActorType.SYSTEM;
+        attestation.verdict = verdict;
+        attestation.confidence = confidence;
+        attestation.capabilityTag = CapabilityTag.GLOBAL;
+        ledger.saveAttestation(attestation, tenancyId);
     }
 
-    private LedgerVerdict mapVerdict(MessageReceivedEvent event) {
-        return switch (extractVerificationOutcome(event)) {
-            case "ACCEPTED" -> LedgerVerdict.SOUND;
-            case "REJECTED" -> LedgerVerdict.FLAGGED;
-            case "PARTIAL" -> LedgerVerdict.FLAGGED;
-            default -> LedgerVerdict.FLAGGED;
-        };
+    private AttestationVerdict mapVerdict(String verificationOutcome) {
+        if ("ACCEPTED".equals(verificationOutcome)) return AttestationVerdict.SOUND;
+        return AttestationVerdict.FLAGGED;
     }
 
-    private double mapConfidence(MessageReceivedEvent event) {
-        return switch (extractVerificationOutcome(event)) {
-            case "ACCEPTED" -> Math.max(0.7, extractEvidenceQuality(event));
-            case "REJECTED" -> 0.3;
-            case "PARTIAL" -> 0.5;
-            default -> 0.4;
+    private double mapConfidence(String verificationOutcome, Double evidenceQuality) {
+        return switch (verificationOutcome != null ? verificationOutcome : "") {
+            case "ACCEPTED" -> Math.max(
+                    config.attestation().judgmentAcceptedConfidence(),
+                    evidenceQuality != null ? evidenceQuality : 0.7);
+            case "REJECTED" -> config.attestation().judgmentRejectedConfidence();
+            case "PARTIAL" -> config.attestation().judgmentPartialConfidence();
+            default -> config.attestation().judgmentRejectedConfidence();
         };
     }
 }
 ```
 
-**Confidence mapping:**
-- ACCEPTED: `max(0.7, evidenceQuality)` — at least as confident as a standard DONE, up to 1.0 for perfect evidence
-- REJECTED: 0.3 — low confidence, worse than standard DECLINE (0.4)
-- PARTIAL: 0.5 — intermediate, worse than standard FAILURE (0.6)
+**Configuration (follows existing `QhorusConfig.Attestation` pattern):**
+- `casehub.qhorus.attestation.judgment-accepted-confidence` (default 0.7)
+- `casehub.qhorus.attestation.judgment-rejected-confidence` (default 0.3)
+- `casehub.qhorus.attestation.judgment-partial-confidence` (default 0.5)
 
-**Recovery path:** The offline verification tool (Part 2, evidence completeness property) detects missing attestations and writes them as remediation. Query: find DONE ledger entries with matching VERIFIED events but no attestation on the DONE entry.
+**Confidence mapping:**
+- ACCEPTED: `max(judgmentAcceptedConfidence, evidenceQuality)` — at least the configured floor, up to 1.0 for perfect evidence
+- REJECTED: `judgmentRejectedConfidence` (default 0.3) — low, worse than standard DECLINE (0.4)
+- PARTIAL: `judgmentPartialConfidence` (default 0.5) — intermediate, worse than standard FAILURE (0.6)
+
+**Recovery path:** The offline verification tool (Part 2, evidence completeness property) detects missing attestations. Remediation is a separate `remediate()` method (not inside `check()`) that writes missing attestations using the same mapping.
 
 ### New repository method
 
@@ -178,7 +194,7 @@ public boolean hasJudgmentEvent(String correlationId, String tenancyId) {
 
 ### No Flyway migration
 
-No schema changes. `AttestationOutcome.DEFERRED` is a Java enum addition — not stored in DB. The observer writes standard attestations to the existing `ledger_attestation` table.
+No schema changes. The observer writes standard attestations to the existing `ledger_attestation` table. The `Optional.empty()` deferral mechanism is pure Java — no DB representation.
 
 ---
 
@@ -191,8 +207,13 @@ public interface VerificationProperty {
     String name();
     String ctlFormula();
     String description();
-    List<PropertyViolation> check(String tenancyId, Instant from, Instant to);
+    CheckResult check(String tenancyId, Instant from, Instant to);
 }
+
+public record CheckResult(
+    List<PropertyViolation> violations,
+    int remediationsAvailable
+) {}
 
 public record PropertyViolation(
     String propertyName,
@@ -202,6 +223,16 @@ public record PropertyViolation(
     String severity    // HIGH, MEDIUM, LOW
 ) {}
 ```
+
+Properties that support remediation (e.g., evidence completeness) also implement `RemediatingProperty`:
+
+```java
+public interface RemediatingProperty extends VerificationProperty {
+    int remediate(String tenancyId, Instant from, Instant to);
+}
+```
+
+`remediate()` is a separate method, never called inside `check()`. The `PropertyVerificationService` calls `check()` first, then optionally calls `remediate()` on properties that implement it. This keeps `check()` idempotent and side-effect-free.
 
 **Semantic gap:** CTL/LTL notation documents INTENT — system properties over all paths and all futures. Java predicates are TRACE CHECKERS — they verify "no violations observed in this time window." A passing check means the observed history satisfies the property, not that the system provably maintains it. The spec is explicit about this distinction (D5).
 
@@ -215,8 +246,10 @@ public record PropertyViolation(
 
 ```java
 public class LivenessProperty implements VerificationProperty {
-    // Queries: CommitmentStore.findOpenOlderThan(Instant cutoff, String tenancyId)
-    // New method — returns OPEN commitments with createdAt < cutoff
+    // Queries: CommitmentReader.findOpenOlderThan(Instant cutoff, String tenancyId)
+    // New method on CommitmentReader (read interface):
+    //   List<Commitment> findOpenOlderThan(Instant cutoff, String tenancyId)
+    // Implementations: JpaCommitmentStore, InMemoryCommitmentStore, CrossTenantCommitmentStore
 }
 ```
 
@@ -269,13 +302,15 @@ public class FairnessProperty implements VerificationProperty {
 
 **Predicate:** Query YIELDED judgment events without a corresponding VERIFIED or ESCALATED event for the same `judgment_id`. Also check for deferred attestations that were never written (DONE entry with no attestation and a matching VERIFIED event).
 
-**Remediation:** When violations of the missing-attestation kind are found, the property checker writes the missing attestation using the same mapping as `JudgmentVerificationObserver`. This is the recovery path specified in D4.
+**Remediation (separate method):** Implements `RemediatingProperty`. The `remediate()` method writes missing attestations using the same mapping as `JudgmentVerificationObserver`. Called by `PropertyVerificationService` after `check()`, not inside it.
 
 ```java
-public class EvidenceCompletenessProperty implements VerificationProperty {
-    // Queries: MessageLedgerEntryRepository.findPendingJudgments(tenancyId) (existing from #413)
-    // + findDoneEntriesWithDeferredAttestation(tenancyId) (new — DONE + VERIFIED exists + no attestation)
-    // Remediation: writes missing attestations via LedgerEntryRepository.saveAttestation()
+public class EvidenceCompletenessProperty implements RemediatingProperty {
+    // check(): Queries:
+    //   MessageLedgerEntryRepository.findPendingJudgments(tenancyId) (existing from #413)
+    //   + findDoneEntriesWithDeferredAttestation(tenancyId) (new — DONE + VERIFIED exists + no attestation)
+    // remediate(): writes missing attestations via LedgerEntryRepository.saveAttestation()
+    //   Uses same confidence mapping as JudgmentVerificationObserver
 }
 ```
 
@@ -400,9 +435,10 @@ The engine-side integration (JudgmentScheduler dispatching COMMANDs with `role:`
 
 | File | Change |
 |---|---|
-| `api/.../spi/CommitmentAttestationPolicy.java` | Add `DEFERRED` to `AttestationOutcome` enum |
-| `runtime/.../ledger/LedgerWriteService.java` | Skip attestation write when outcome is DEFERRED |
-| `runtime/.../ledger/MessageLedgerEntryRepository.java` | `hasJudgmentEvent()`, `findRoutingEntries()`, `findDoneEntriesWithoutAttestation()` |
+| `runtime/.../ledger/MessageLedgerEntryRepository.java` | `hasJudgmentEvent()`, `findRoutingEntries()`, `findDoneEntriesWithoutAttestation()`, `findDoneEntriesWithDeferredAttestation()` |
+| `runtime/.../config/QhorusConfig.java` | Add `Attestation.judgmentAcceptedConfidence`, `judgmentRejectedConfidence`, `judgmentPartialConfidence` |
+| `api/.../store/CommitmentStore.java` (or `CommitmentReader`) | Add `findOpenOlderThan(Instant, String)` |
+| `runtime/.../message/Commitment*Store.java` (JPA + InMemory + CrossTenant) | Implement `findOpenOlderThan` |
 | `compliance-report/.../model/ReportType.java` | Add `PROPERTY_VERIFICATION` |
 | `compliance-report/.../schedule/ComplianceReportScheduler.java` | Add `PROPERTY_VERIFICATION` case |
 | `compliance-report/.../api/ComplianceReportResource.java` | Property verification endpoint |
@@ -410,9 +446,9 @@ The engine-side integration (JudgmentScheduler dispatching COMMANDs with `role:`
 | `compliance-report/.../format/CsvReportRenderer.java` | Property verification CSV |
 | `compliance-report/.../format/HtmlReportRenderer.java` | Property verification HTML |
 
-### No Flyway migration
+### No Flyway migration (entire spec)
 
-No schema changes. All data is in existing tables (`ledger_attestation`, `message_ledger_entry`, `commitment`).
+No schema changes anywhere. All data is in existing tables (`ledger_attestation`, `message_ledger_entry`, `commitment`). Verification properties query existing columns. Attestation enrichment writes to the existing `ledger_attestation` table.
 
 ---
 
@@ -428,9 +464,9 @@ No schema changes. All data is in existing tables (`ledger_attestation`, `messag
 | `FairnessProperty` | CDI-free unit tests | Mock repository. Verify: concentrated routing flagged, uniform routing passes. |
 | `EvidenceCompletenessProperty` | CDI-free unit tests | Mock repository + `LedgerEntryRepository`. Verify: pending judgments detected, missing attestations remediated. |
 | `PropertyVerificationService` | CDI-free unit tests | Mock `Instance<VerificationProperty>`. Verify: aggregation, counts, report assembly. |
-| Integration: attestation policy + observer | `@QuarkusTest @TestTransaction` | Dispatch COMMAND, DONE, then VERIFIED EVENT. Verify: no attestation after DONE, attestation written after VERIFIED. |
+| Integration: attestation policy + observer | `@QuarkusTest` with `QuarkusTransaction.requiringNew()` | Dispatch COMMAND, DONE (verify no attestation via Optional.empty()), then VERIFIED EVENT (verify attestation written by observer). Observer fires after commit — must use requiringNew, not @TestTransaction. |
 | Integration: property verification report | `@QuarkusTest` | Generate report via REST/GraphQL. Verify JSON structure and content negotiation. |
-| `AttestationOutcome.DEFERRED` | CDI-free unit tests | Verify `LedgerWriteService` skips attestation write. |
+| `EvidenceCompletenessProperty.remediate()` | CDI-free unit tests | Mock repository. Verify: missing attestations written with correct verdict/confidence. Verify: `check()` is idempotent (no side effects). |
 
 ---
 
