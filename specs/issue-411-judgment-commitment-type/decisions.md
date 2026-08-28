@@ -3,12 +3,13 @@
 **Choice:** Use COMMAND + DONE + EVENTs + attestation for governed yields instead of adding JUDGMENT_REQUEST/JUDGMENT_RESPONSE/JUDGMENT_ACCEPTANCE types.
 **Alternatives:**
 - New message types (JUDGMENT_REQUEST, JUDGMENT_RESPONSE, JUDGMENT_ACCEPTANCE) — violates ADR-0005 stopping criterion; all three occupy existing Searle-category cells
-- PROPOSE-based pattern (inverted commitment direction) — wrong semantics; PROPOSE is sender-binding, judgment is receiver-obligation
-**Rationale:** ADR-0005 stopping criterion: new types justified only when occupying a unique cell in the Searle-category × deontic-effect matrix. JUDGMENT_REQUEST = Directive (action) = COMMAND's cell. JUDGMENT_RESPONSE = Assertive = RESPONSE's cell. JUDGMENT_ACCEPTANCE = Declaration = DONE's cell. The judgment lifecycle composes cleanly with existing types: COMMAND creates the obligation, DONE fulfills it, EVENTs (#413 already landed) track judgment-specific metadata (YIELDED/RESPONDED/VERIFIED/ESCALATED), attestation validates quality.
-**Trade-offs:** No type-level discrimination between regular COMMANDs and judgment COMMANDs — judgment semantics are in telemetry metadata, not the type system. LLMs don't get a dedicated type to classify; they use COMMAND with judgment-specific content.
-**Sources:** ADR-0005 (stopping criterion matrix), PROPOSE spec (#395, taxonomy extension precedent), #413 spec (judgment compliance evidence — already landed with V2004 migration)
+- PROPOSE for judgment requests — PROPOSE has the same commitment direction as COMMAND (requester=sender, obligor=receiver) and RESPONSE is non-fulfilling (desirable for verified acceptance). However, PROPOSE is a commissive ("I offer to do X if you agree") while a judgment request is a directive ("I need you to do X"). Using PROPOSE would misclassify the speech act, undermining LLM classification accuracy — the core design goal of ADR-0005.
+**Rationale:** ADR-0005 stopping criterion: new types justified only when occupying a unique cell in the Searle-category × deontic-effect matrix. None of the proposed types occupy empty cells. Between existing types, COMMAND (directive) is the correct Searle classification for judgment requests — the engine is directing an agent to act, not making a conditional offer. The dual-lifecycle this creates (commitment lifecycle tracks obligation discharge, judgment EVENTs track quality verification) is correct by design: "did you do the work?" and "was the work good?" are orthogonal assessments that should be tracked separately. A reviewer who sends DONE has fulfilled their obligation to provide a review. Whether the review meets quality standards is a separate quality assessment handled by the attestation layer, not the commitment lifecycle.
+**Trade-offs:** No type-level discrimination between regular COMMANDs and judgment COMMANDs — judgment semantics are in telemetry metadata, not the type system. Obligation fulfillment (DONE → FULFILLED) and quality assessment (VERIFIED → ACCEPTED/REJECTED) are tracked in separate systems. This is intentional: a contractor fulfilling their obligation by delivering work is distinct from an inspector accepting the work.
+**Sources:** ADR-0005 (stopping criterion matrix), PROPOSE spec (#395 — commitment direction clarified: same as COMMAND, not inverted), #413 spec (judgment compliance evidence — already landed with V2004 migration)
+**Review response:** R1-01 correctly identified the PROPOSE characterization error (PROPOSE direction IS same as COMMAND). R1-02's dual-lifecycle concern is addressed: the divergence is a deliberate design separation of obligation fulfillment from quality assessment. R1-03's classification concern is addressed: judgment discrimination is in metadata/EVENTs, not content parsing — the type system correctly classifies the speech act.
 **Exploration:** quick
-**Status:** captured
+**Status:** revised
 
 ## D2: Per-capability trust differentiation is an eidos concern
 
@@ -34,17 +35,21 @@
 **Exploration:** quick
 **Status:** captured
 
-## D4: Attestation enrichment via MessageObserver
+## D4: Deferred attestation via SPI + verification observer
 
-**Choice:** JudgmentVerificationObserver (MessageObserver, LOCAL scope) writes supplementary attestations when VERIFIED events land.
+**Choice:** Two-part attestation for judgment commitments: (1) a `JudgmentCommitmentAttestationPolicy` (SPI override) that DEFERS attestation on DONE — writes no attestation at DONE time, returning a "deferred" outcome; (2) a `JudgmentVerificationObserver` (MessageObserver, LOCAL scope) that writes the sole attestation when the VERIFIED event lands. This ensures exactly one attestation per commitment (matching the existing trust model), timed to when quality is actually known.
 **Alternatives:**
+- Supplementary attestation (original approach) — writes TWO attestations per judgment commitment (DONE + VERIFIED). Causes double-counting in Beta trust model, contradictory signals on rejection (SOUND + FLAGGED on same entry). Rejected per R1-04.
 - Scheduled sweep — batched, resilient to missed events, but delayed trust feedback
 - Part of LedgerWriteService — couples ledger writing to attestation logic
-**Rationale:** Reactive, immediate trust feedback. Uses existing dispatch infrastructure (MessageObserver pattern). Observer picks up events with tool_name matching JudgmentEventKinds.VERIFIED, finds the original commitment's ledger entry via correlationId, writes supplementary attestation with "system:judgment-verifier" as attestorId. Original attestation (SOUND/0.7 from DONE) stays — supplementary attestation adds verification-informed confidence. Trust computation aggregates both.
-**Trade-offs:** If the observer misses an event (crash, restart), the supplementary attestation is never written. Mitigated by the offline verification tool (property: evidence completeness) which detects missing attestations.
-**Sources:** MessageObserver SPI (api/gateway/), StoredCommitmentAttestationPolicy (runtime/audit/), JudgmentEventKinds (#413 contract)
+**Rationale:** The `CommitmentAttestationPolicy` SPI exists for exactly this: consumers override default attestation behavior. The judgment flow defers attestation because quality isn't known at DONE time. When the VERIFIED event arrives, the observer writes the attestation with verification-informed verdict and confidence: ACCEPTED → SOUND with `evidenceQuality` as confidence; REJECTED → FLAGGED/0.3; PARTIAL → FLAGGED/0.5. One attestation per commitment, no double-counting.
+**Depends on:** D1 (COMMAND composition — commitment correlationId links DONE to VERIFIED events)
+**Recovery path:** If the observer misses a VERIFIED event (crash, restart), the attestation is never written. The offline verification tool (D8, evidence completeness property) detects this and writes the missing attestation as remediation — not just detection. The remediation query: find DONE ledger entries with matching VERIFIED events but no attestation.
+**Trade-offs:** Attestation is delayed from DONE time to VERIFIED event time. Trust scores for judgment callers update slower than for regular COMMAND callers. The deferred policy must be activated per-channel or per-deployment — judgment channels opt in, regular channels keep the default immediate attestation.
+**Sources:** CommitmentAttestationPolicy SPI (api/spi/), MessageObserver SPI (api/gateway/), JudgmentEventKinds (#413 contract), StoredCommitmentAttestationPolicy (runtime/audit/)
+**Review response:** R1-04 correctly identified double-counting in the supplementary attestation approach. R1-05's recovery concern addressed with remediation in the offline verification tool.
 **Exploration:** quick
-**Status:** captured
+**Status:** revised
 
 ## D5: Java predicates for formal verification
 
@@ -52,7 +57,8 @@
 **Alternatives:**
 - Property DSL (enum-based language compiling to ledger queries) — adds parser/compiler for marginal benefit
 - Full CTL model checker library — massive dependency for ~5 properties
-**Rationale:** Simple, testable, no dependencies. Each property is a class with a `check(tenancyId, from, to)` method that returns `List<PropertyViolation>`. Ledger queries already exist or are straightforward to add. Properties documented in formal CTL/LTL notation in the spec for academic rigor.
+**Rationale:** Simple, testable, no dependencies. Each property is a class with a `check(tenancyId, from, to)` method that returns `List<PropertyViolation>`. Ledger queries already exist or are straightforward to add. Properties documented in formal CTL/LTL notation in the spec for design intent.
+**Semantic gap (R1-06):** CTL/LTL notation describes system properties over ALL paths and ALL futures (model checking). Java predicates are trace checkers — they verify "no violations observed in this time window," not "the system satisfies this temporal property." The spec must be explicit: CTL/LTL documents INTENT; predicates verify observed HISTORY. Consumers must not over-rely on a passing check as a formal proof.
 **Trade-offs:** Not composable or declarative — adding a property means writing a new Java class. Acceptable for 5 properties; reconsider at 20+.
 **Sources:** ADR-0005 (temporal semantics section), CommitmentService state machine, MessageLedgerEntryRepository query methods
 **Exploration:** quick
@@ -89,8 +95,22 @@
 - Core four (skip Fairness) — avoids routing distribution analysis
 - Just Liveness + Safety — minimal viable set
 **Rationale:** Fairness analysis is feasible from qhorus's own ledger data — routing metadata columns (V2003: routing_selected_agent, routing_candidate_count) capture distribution. No eidos dependency needed for post-hoc fairness verification. Per-capability trust differentiation (routing SELECTION quality) is a separate eidos concern — file issue there.
+**Fairness limitation (R1-07):** V2003 captures the selected agent and candidate COUNT per selection, but not the full candidate list. True fairness (comparing selections against the eligible pool) requires knowing WHICH agents were candidates, not just how many. The fairness predicate computes a selection frequency distribution (Gini coefficient over `routing_selected_agent` counts), normalized by `routing_candidate_count` as a pool-size proxy. This is approximate — flagging concentration in the winner column, not provably unfair distribution across the candidate field. The spec must document this limitation.
 **Trade-offs:** Five properties means five predicate classes + tests. Each is small. Volume is manageable.
 **Sources:** V2003 routing metadata migration, MessageLedgerEntryRepository, WatchdogConditionType.CIRCULAR_DELEGATION (#368)
 **Exploration:** quick
 **Cross-repo:** File eidos issue for per-capability trust differentiation in AgentSelector
+**Status:** captured
+
+## D9: Cross-repo dependency management
+
+**Choice:** This branch's deliverables work independently of engine#998 (judgment EVENTs). The formal verification tool verifies properties over the existing commitment lifecycle — judgment EVENTs enrich the data but aren't required. The attestation enrichment observer is dormant until engine#998 dispatches VERIFIED events. #412 closure notes that the qhorus-side routing is covered by #401; engine-side integration (JudgmentScheduler → COMMAND dispatch) is tracked on engine#996.
+**Alternatives:**
+- Block on engine#998 — wait until judgment EVENTs exist before building the verification tool
+- Implement engine-side integration in this branch — scope creep, wrong repo
+**Rationale:** The verification tool operates on the existing commitment lifecycle (liveness, safety, deadlock freedom) and ledger routing data (fairness). These work today with zero judgment EVENTs. Evidence completeness (the fifth property) checks for judgment attestations — it returns "no judgment data" when engine#998 hasn't landed, not "violation." Attestation enrichment activates automatically when VERIFIED events start arriving.
+**Trade-offs:** Evidence completeness property and attestation enrichment are dormant until engine#998. This is acceptable — they're ready, just waiting for data.
+**Sources:** Engine#998 issue body, engine#996 issue body, #413 telemetry contract
+**Review response:** R1-09 (premature #412 closure) addressed by noting engine-side work remains on engine#996. R1-14 (engine#998 dependency) addressed by specifying graceful degradation.
+**Exploration:** quick
 **Status:** captured
