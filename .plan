@@ -17,7 +17,7 @@ flyway-next-v: none
     - [x] Task 1: Deferred attestation policy
     - [x] Task 2: Verification observer
   - [ ] Batch 2: Verification Properties
-    - [ ] Task 3: Interfaces + Liveness + Safety
+    - [x] Task 3: Interfaces + Liveness + Safety
     - [ ] Task 4: Deadlock + Fairness + Evidence
   - [ ] Batch 3: Report Integration
     - [ ] Task 5: Report type + service + REST/GraphQL
