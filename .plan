@@ -13,3 +13,13 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#406 — Issue #406 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: API types + stores + migration
+    - [ ] Task 2: InMemory stores + contract tests
+  - [ ] Batch 2: Backend
+    - [ ] Task 3: Module scaffold + JPA store
+    - [ ] Task 4: Poster + Backend CDI-free tests
+  - [ ] Batch 3: Protocol
+    - [ ] Task 5: A2AResource CRUD + AgentCard
+  - [ ] Batch 4: Wiring
+    - [ ] Task 6: Cleanup job + config + full build
