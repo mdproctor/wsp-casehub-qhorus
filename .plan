@@ -1,0 +1,15 @@
+# Work Plan — issue-420-reasoning-traces-judgment
+
+## State
+branch: issue-420-reasoning-traces-judgment
+state: scaffolded
+project-sha: b1d1913565a59434fd63ae8400d4adcc8c1aa567
+date: 2026-08-28
+issue-repo: casehubio/qhorus
+covers: 420
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#420 — Issue #420 ← active
