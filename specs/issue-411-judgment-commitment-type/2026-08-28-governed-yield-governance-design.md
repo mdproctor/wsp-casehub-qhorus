@@ -389,12 +389,12 @@ The engine-side integration (JudgmentScheduler dispatching COMMANDs with `role:`
 | `compliance-report/.../graphql/dto/PropertyResultType.java` | GraphQL DTO |
 | `compliance-report/.../graphql/dto/PropertyViolationType.java` | GraphQL DTO |
 
-### New files (runtime module)
+### New files (compliance-report module — attestation)
 
 | File | What |
 |---|---|
-| `runtime/.../audit/JudgmentCommitmentAttestationPolicy.java` | SPI override: defers attestation for judgment commitments |
-| `runtime/.../audit/JudgmentVerificationObserver.java` | MessageObserver: writes attestation on VERIFIED events |
+| `compliance-report/.../attestation/JudgmentCommitmentAttestationPolicy.java` | SPI override: defers attestation for judgment commitments. Lives in compliance-report because it queries `MessageLedgerEntryRepository` for judgment events. Activates by classpath presence. |
+| `compliance-report/.../attestation/JudgmentVerificationObserver.java` | MessageObserver: writes attestation on VERIFIED events. Co-located with the policy it complements. |
 
 ### Modified files
 
