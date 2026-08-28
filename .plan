@@ -1,0 +1,15 @@
+# Work Plan — issue-408-enforcement-span-attrs
+
+## State
+branch: issue-408-enforcement-span-attrs
+state: scaffolded
+project-sha: 9fba78a5ac72590ae982ff6967ee38bc2f8b49e4
+date: 2026-08-28
+issue-repo: casehubio/qhorus
+covers: 408,419
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#408 — Issue #408 ← active
