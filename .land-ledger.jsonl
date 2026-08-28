@@ -1,2 +1,0 @@
-{"event":"promote","branch":"issue-408-enforcement-span-attrs","files":[],"timestamp":"2026-08-28T05:35:03.194638+00:00"}
-{"event":"land","repo":"qhorus","branch":"issue-408-enforcement-span-attrs","base_branch":"main","landed_sha":"bf6d1e106aefe1dfe1ad2d1bf0dac958f3332a08","push_target":"upstream","mirrored":true,"stamped":true,"timestamp":"2026-08-28T05:35:38.381458+00:00"}
