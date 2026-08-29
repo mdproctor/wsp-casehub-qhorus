@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-410-governed-yield-attestation
-state: scaffolded
+state: active
 project-sha: 0d2f4f603d5190aaf9f1ce547ff7170f6962df96
 date: 2026-08-29
 issue-repo: casehubio/qhorus
