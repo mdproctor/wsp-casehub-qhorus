@@ -1,2 +1,0 @@
-{"event":"promote","branch":"issue-406-a2a-push-notifications","files":[],"timestamp":"2026-08-29T00:50:13.698870+00:00"}
-{"event":"land","repo":"qhorus","branch":"issue-406-a2a-push-notifications","base_branch":"main","landed_sha":"0d2f4f603d5190aaf9f1ce547ff7170f6962df96","push_target":"upstream","mirrored":true,"stamped":true,"timestamp":"2026-08-29T00:57:48.068810+00:00"}
