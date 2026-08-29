@@ -21,5 +21,5 @@ flyway-next-v: unknown
     - [x] Task 4: Poster + Backend CDI-free tests
   - [x] Batch 3: Protocol
     - [x] Task 5: A2AResource CRUD + AgentCard
-  - [ ] Batch 4: Wiring
-    - [ ] Task 6: Cleanup job + config + full build
+  - [x] Batch 4: Wiring
+    - [x] Task 6: Cleanup job + config + full build
