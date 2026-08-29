@@ -1,0 +1,2 @@
+{"event":"promote","branch":"issue-410-governed-yield-attestation","files":[],"timestamp":"2026-08-29T04:21:27.105560+00:00"}
+{"event":"land","repo":"qhorus","branch":"issue-410-governed-yield-attestation","base_branch":"main","landed_sha":"3e152955e99c2fbe5b4722ff4db74cf808bc0f7e","push_target":"upstream","mirrored":true,"stamped":true,"timestamp":"2026-08-29T04:42:28.289229+00:00"}
