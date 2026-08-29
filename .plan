@@ -13,3 +13,9 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#410 — Issue #410 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: Add findTerminalEntryByCorrelationId
+    - [ ] Task 2: Fix observer dual attestation
+  - [ ] Batch 2: Properties
+    - [ ] Task 3: SafetyProperty exclude judgment DONEs
+    - [ ] Task 4: EvidenceCompleteness dual remediation
