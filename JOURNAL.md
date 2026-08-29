@@ -1,1 +1,1 @@
-# Design Journal — issue-406-a2a-push-notifications
+# Design Journal — issue-410-governed-yield-attestation
