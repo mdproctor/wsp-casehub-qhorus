@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-410-governed-yield-attestation
-state: active
+state: closing:review
 project-sha: 0d2f4f603d5190aaf9f1ce547ff7170f6962df96
 date: 2026-08-29
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#410 — Issue #410 ← active
   - [x] Batch 1: Foundation
