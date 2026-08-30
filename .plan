@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-417-pdf-report-renderer
-state: active
+state: closing:review
 project-sha: aa0922392e1e151b0d8afbcab13e7fabc72206c6
 date: 2026-08-30
 issue-repo: casehubio/qhorus
@@ -11,11 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#417 — Issue #417 ← active
-  - [x] Batch 1: Core PDF
-    - [x] Task 1: PdfDocumentMetadata + HtmlToPdfConverter
-  - [x] Batch 2: PDF enhancement
-    - [x] Task 2: HtmlReportRenderer.renderForPdf + PdfReportRenderer
-  - [x] Batch 3: REST wiring
-    - [x] Task 3: Content negotiation + full build
+- [x] casehubio/qhorus#417 — Issue #417
