@@ -9,3 +9,28 @@
 **Sources:** ReportRenderer.java (compliance-report/format/), HtmlReportRenderer.java, issue-402 design spec D3, OpenHTMLtoPDF GitHub
 **Exploration:** quick
 **Status:** captured
+
+## D2: PDF/A conformance — PDF/A-2b
+
+**Choice:** PDF/A-2b (ISO 19005-2, basic conformance). Visual reproducibility guarantee for regulatory archival. OpenHTMLtoPDF supports this via `PdfRendererBuilder.usePdfAConformance(PdfAConformance.PDFA_2_B)`.
+**Alternatives:**
+- PDF/A-3b — allows embedding arbitrary attachments (XML, CSV), but raw JSON is already available via REST API; embedding is redundant complexity
+- PDF/A-1b — oldest, most universal, but lacks transparency support and has tighter font constraints that cause rendering issues with HTML→PDF conversion
+**Rationale:** Current sweet spot — modern enough for reliable rendering from HTML, widely accepted by EU regulatory bodies, no unnecessary features.
+**Trade-offs:** If a regulator specifically requires PDF/A-3b with embedded machine-readable data, this would need upgrading. Unlikely — JSON/CSV REST endpoints serve that need.
+**Depends on:** D1 (OpenHTMLtoPDF supports PDF/A-2b natively)
+**Sources:** ISO 19005-2, OpenHTMLtoPDF PdfAConformance enum, EU AI Act Article 12
+**Exploration:** quick
+**Status:** captured
+
+## D3: Module placement — platform PDF service + qhorus adapter
+
+**Choice:** New platform module `casehub-platform-pdf` owns the OpenHTMLtoPDF dependency and exposes a `PdfGenerator` service (HTML bytes → PDF bytes, PDF/A conformance config, document metadata). Qhorus's `PdfReportRenderer` in `compliance-report/` becomes a thin adapter injecting `HtmlReportRenderer` + `PdfGenerator`. SPI interface `PdfGenerator` in `casehub-platform-api` with `@DefaultBean NoOpPdfGenerator` (throws UnsupportedOperationException) so modules can compile against the API without pulling in OpenHTMLtoPDF.
+**Alternatives:**
+- Qhorus-local in `compliance-report/` — simpler for now, but other repos (ops reports, engine dashboards) would duplicate the OpenHTMLtoPDF dependency and configuration; creates N copies of PDF infrastructure across the ecosystem
+**Rationale:** PDF rendering is a general-purpose capability, not qhorus-specific. Any CaseHub module producing HTML reports could need PDF export. Platform placement prevents duplication and centralises font management, PDF/A configuration, and library version control. Follows the established pattern: shared infrastructure in platform, domain composition in domain modules.
+**Trade-offs:** Requires a cross-repo change (platform issue + platform PR) before qhorus can consume it. Incremental cost is small — one Maven module with ~2 production classes.
+**Depends on:** D1 (library choice), D2 (PDF/A conformance — configured via PdfGenerator)
+**Sources:** casehub-platform module patterns, CompliancePostureProvider SPI pattern (api/ + @DefaultBean), NoOpCapabilityHealth
+**Exploration:** quick
+**Status:** captured
