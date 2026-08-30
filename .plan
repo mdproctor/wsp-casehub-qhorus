@@ -1,0 +1,15 @@
+# Work Plan — issue-417-pdf-report-renderer
+
+## State
+branch: issue-417-pdf-report-renderer
+state: scaffolded
+project-sha: aa0922392e1e151b0d8afbcab13e7fabc72206c6
+date: 2026-08-30
+issue-repo: casehubio/qhorus
+covers: 417
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#417 — Issue #417 ← active
