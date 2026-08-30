@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-417-pdf-report-renderer
-state: closing:review
+state: active
 project-sha: aa0922392e1e151b0d8afbcab13e7fabc72206c6
 date: 2026-08-30
 issue-repo: casehubio/qhorus
@@ -10,7 +10,8 @@ covers: 417
 design-repo: project
 design-section-hashes: 
 flyway-next-v: none
-
 evidence-era: true
+queue_raw: - [ ] casehubio/qhorus#417 — feat: PDF rendering for compliance evidence export reports ← active
+
 ## Queue
 - [x] casehubio/qhorus#417 — Issue #417
