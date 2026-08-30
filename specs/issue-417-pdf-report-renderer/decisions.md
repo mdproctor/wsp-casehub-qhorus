@@ -46,3 +46,15 @@
 **Sources:** PdfRendererBuilder API (OpenHTMLtoPDF), PdfAConformance enum
 **Exploration:** quick
 **Status:** captured
+
+## D5: Font handling — bundled Liberation Sans
+
+**Choice:** Bundle Liberation Sans font family (~1MB, Apache 2.0) inside `casehub-platform-pdf/src/main/resources/fonts/`. Register at `@PostConstruct` via OpenHTMLtoPDF's `PdfRendererBuilder.useFont()`. Covers Regular, Bold, Italic, BoldItalic — sufficient for structured compliance tables.
+**Alternatives:**
+- System font discovery — scan OS font directories at startup; rendering varies by environment (Docker containers often have no fonts), GraalVM native image complicates filesystem scanning; unreliable for reproducible regulatory documents
+**Rationale:** PDF/A-2b requires all fonts embedded. Bundled fonts guarantee reproducible output regardless of deployment environment. Liberation Sans is metrically equivalent to Arial, covers Latin/Cyrillic/Greek scripts.
+**Trade-offs:** ~1MB added to the module jar. CJK scripts not covered — would need additional font bundles if needed. Not a concern for the current compliance report use case.
+**Depends on:** D1 (OpenHTMLtoPDF font API), D2 (PDF/A requires embedding), D3 (platform module owns fonts)
+**Sources:** Liberation Sans (GitHub), OpenHTMLtoPDF font registration API, PDF/A-2b font embedding requirement
+**Exploration:** quick
+**Status:** captured
