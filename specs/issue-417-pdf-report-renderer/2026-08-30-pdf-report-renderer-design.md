@@ -25,96 +25,41 @@ public interface ReportRenderer {
 }
 ```
 
-`HtmlReportRenderer` already generates well-structured HTML with print-friendly CSS, per-report-type rendering (Attribution, Obligation, Violation, JudgmentAttribution, JudgmentFulfillment, PropertyVerification), and a generic fallback. The HTML output is the natural input for PDF conversion.
+`HtmlReportRenderer` generates structured HTML with print-friendly CSS, per-report-type rendering (Attribution, Obligation, Violation, JudgmentAttribution, JudgmentFulfillment, PropertyVerification), and a generic fallback.
 
-`ComplianceReportResource.renderResponse()` uses `Accept` header content negotiation with hardcoded renderer selection. `ComplianceReportScheduler.generateAndStore()` passes `ReportFormat` from the schedule entity.
+`ComplianceReportResource.renderResponse()` uses `Accept` header content negotiation with hardcoded renderer injection. `ComplianceReportScheduler.generateAndStore()` passes `ReportFormat` from the schedule entity.
 
 ---
 
 ## Architecture
 
-PDF rendering is a general-purpose capability — not qhorus-specific. Any CaseHub module producing HTML reports could need PDF export. The architecture splits into two layers:
+All PDF rendering lives in `compliance-report/` — alongside the existing renderers. No platform module (D3 — single consumer today; extract when a second consumer materialises).
 
-### Platform Layer: `casehub-platform-pdf`
+### Data Flow
 
-New optional platform module owning the OpenHTMLtoPDF dependency and font resources. Exposes a single service.
-
-**SPI in `casehub-platform-api`:**
-
-```java
-package io.casehub.platform.api.pdf;
-
-public interface PdfGenerator {
-    byte[] generateFromHtml(byte[] html, PdfOptions options);
-}
-
-public record PdfOptions(
-    String title,
-    String author,
-    Instant createdAt,
-    PdfAConformance conformance
-) {
-    public static PdfOptions defaults() {
-        return new PdfOptions(null, null, null, PdfAConformance.PDFA_2_B);
-    }
-}
-
-public enum PdfAConformance {
-    PDFA_2_B
-}
+```
+Report model → HtmlReportRenderer.renderForPdf(report, metadata) → HTML String
+    → HtmlToPdfConverter.convert(html, metadata) → PDF byte[]
 ```
 
-`@DefaultBean NoOpPdfGenerator` in `casehub-platform-api` throws `UnsupportedOperationException` — fail-fast when the PDF module is absent.
+The `renderForPdf()` method wraps the existing per-type HTML rendering with `@page` CSS rules for page numbers, headers, and footers. The standard `render()` method is unchanged.
 
-**Implementation in `casehub-platform-pdf`:**
+### New Classes
 
-```java
-@ApplicationScoped
-public class OpenHtmlToPdfGenerator implements PdfGenerator {
-
-    private List<FontResource> fonts;
-
-    @PostConstruct
-    void loadFonts() {
-        // Load bundled Liberation Sans from classpath resources
-    }
-
-    @Override
-    public byte[] generateFromHtml(byte[] html, PdfOptions options) {
-        PdfRendererBuilder builder = new PdfRendererBuilder();
-        builder.usePdfAConformance(PdfAConformance.PDFA_2_B);
-        builder.withHtmlContent(new String(html, StandardCharsets.UTF_8), "/");
-        // Register fonts
-        // Set document metadata (title, author, createdAt) via PDFBox API
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
-        builder.toStream(os);
-        builder.run();
-        return os.toByteArray();
-    }
-}
-```
-
-**Bundled fonts:** Liberation Sans (Regular, Bold, Italic, BoldItalic) — Apache 2.0 licensed, metrically equivalent to Arial, ~1MB total. Registered at `@PostConstruct`. PDF/A-2b requires all fonts embedded; bundled fonts guarantee reproducible output regardless of deployment environment (Docker containers, CI runners).
-
-**Dependencies:**
-
-```xml
-<dependency>
-  <groupId>com.openhtmltopdf</groupId>
-  <artifactId>openhtmltopdf-pdfbox</artifactId>
-</dependency>
-```
-
-### Qhorus Layer: `PdfReportRenderer` in `compliance-report/`
-
-Thin adapter composing `HtmlReportRenderer` and `PdfGenerator`:
+**`PdfReportRenderer`** — `@ApplicationScoped`, implements `ReportRenderer`:
 
 ```java
 @ApplicationScoped
 public class PdfReportRenderer implements ReportRenderer {
 
     @Inject HtmlReportRenderer htmlRenderer;
-    @Inject PdfGenerator pdfGenerator;
+
+    HtmlToPdfConverter converter;
+
+    @PostConstruct
+    void init() {
+        converter = new HtmlToPdfConverter();
+    }
 
     @Override
     public String contentType() {
@@ -123,9 +68,9 @@ public class PdfReportRenderer implements ReportRenderer {
 
     @Override
     public byte[] render(Object report) {
-        byte[] html = htmlRenderer.render(report);
-        return pdfGenerator.generateFromHtml(html,
-            PdfOptions.defaults());
+        PdfDocumentMetadata metadata = PdfDocumentMetadata.fromReport(report);
+        String html = htmlRenderer.renderForPdf(report, metadata);
+        return converter.convert(html, metadata);
     }
 
     @Override
@@ -135,7 +80,83 @@ public class PdfReportRenderer implements ReportRenderer {
 }
 ```
 
-Report-specific metadata (title, author, timestamp) can be extracted from the report object for richer PDF document properties. This is a refinement — the basic flow works with `PdfOptions.defaults()`.
+**`HtmlToPdfConverter`** — package-private, not a CDI bean:
+
+```java
+class HtmlToPdfConverter {
+
+    private static final List<FontResource> FONTS = loadFonts();
+
+    byte[] convert(String html, PdfDocumentMetadata metadata) {
+        PdfRendererBuilder builder = new PdfRendererBuilder();
+        builder.usePdfAConformance(PdfAConformance.PDFA_2_B);
+        builder.withHtmlContent(html, "/");
+
+        for (FontResource font : FONTS) {
+            builder.useFont(font.supplier(), font.family(),
+                font.weight(), font.style(), true);
+        }
+
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        builder.toStream(os);
+        builder.run();
+
+        setDocumentMetadata(os.toByteArray(), metadata);
+        return os.toByteArray();
+    }
+
+    private void setDocumentMetadata(byte[] pdf, PdfDocumentMetadata metadata) {
+        // PDFBox PDDocument: set Title, Author, Subject, CreationDate
+    }
+
+    private static List<FontResource> loadFonts() {
+        // Load Liberation Sans (Regular, Bold, Italic, BoldItalic)
+        // + Liberation Mono (Regular, Bold) from classpath
+    }
+}
+```
+
+**`PdfDocumentMetadata`** — record:
+
+```java
+public record PdfDocumentMetadata(
+    String title,
+    String author,
+    Instant createdAt,
+    String reportType,
+    String tenancyId
+) {
+    public static PdfDocumentMetadata fromReport(Object report) {
+        // Extract metadata from report model via pattern matching
+    }
+}
+```
+
+### HtmlReportRenderer Enhancement
+
+New method `renderForPdf(Object report, PdfDocumentMetadata metadata)` adds `@page` CSS rules for PDF-quality output:
+
+```java
+public String renderForPdf(Object report, PdfDocumentMetadata metadata) {
+    String body = switch (report) {
+        case AttributionReport r -> renderAttribution(r);
+        case ObligationReport r -> renderObligation(r);
+        // ... existing switch cases
+        default -> renderGeneric(report);
+    };
+    return wrapForPdf(body, metadata);
+}
+
+private String wrapForPdf(String body, PdfDocumentMetadata metadata) {
+    // Wraps body HTML with:
+    // - @page rules: margins, page numbers (counter(page)/counter(pages))
+    // - Running header: report type + generation timestamp
+    // - Running footer: tenant ID + schema version
+    // - Liberation Mono font-family for <code>/<tt> elements
+}
+```
+
+The existing `render()` method is unchanged — browser HTML doesn't need page structure.
 
 ---
 
@@ -154,94 +175,86 @@ public enum ReportFormat {
 Add `application/pdf` content negotiation:
 
 ```java
+@Inject PdfReportRenderer pdfRenderer;
+
 private Response renderResponse(Object report, String accept) {
     if (accept != null && accept.contains("application/pdf")) {
         return Response.ok(pdfRenderer.render(report))
                 .header("Content-Type", "application/pdf").build();
     }
-    if (accept != null && accept.contains("text/csv")) {
-        return Response.ok(csvRenderer.render(report))
-                .header("Content-Type", "text/csv").build();
-    }
-    if (accept != null && accept.contains("text/html")) {
-        return Response.ok(htmlRenderer.render(report))
-                .header("Content-Type", "text/html").build();
-    }
-    return Response.ok(jsonRenderer.render(report))
-            .header("Content-Type", "application/json").build();
+    // ... existing CSV, HTML, JSON branches unchanged
 }
 ```
 
-Inject `PdfReportRenderer pdfRenderer` alongside the existing renderers.
-
-### `ComplianceReportScheduler`
-
-No changes needed — scheduled reports already pass `ReportFormat` from the schedule entity. When a schedule has `format=PDF`, `ComplianceReportStorageService.store()` renders the report using the matching renderer. The storage service already uses CDI `Instance<ReportRenderer>` iteration (or should — verify during implementation).
-
-If `ComplianceReportStorageService` doesn't use renderer selection today (it may store JSON unconditionally), this needs a small change: stored reports should use the schedule's requested format for the initial render, while retrieval re-renders from stored JSON via `Accept` header (per the #402 spec).
-
 ### `compliance-report/pom.xml`
 
-Add dependency on `casehub-platform-pdf`:
+Add OpenHTMLtoPDF dependency:
 
 ```xml
 <dependency>
-  <groupId>io.casehub</groupId>
-  <artifactId>casehub-platform-pdf</artifactId>
-  <version>${casehub-platform.version}</version>
+  <groupId>com.openhtmltopdf</groupId>
+  <artifactId>openhtmltopdf-pdfbox</artifactId>
 </dependency>
 ```
 
+Version managed by the parent pom `<dependencyManagement>` section.
+
 ---
 
-## Platform Module Structure
+## Bundled Fonts
 
-```
-casehub-platform/
-├── platform-api/
-│   └── src/main/java/io/casehub/platform/api/pdf/
-│       ├── PdfGenerator.java            — SPI interface
-│       ├── PdfOptions.java              — options record
-│       ├── PdfAConformance.java         — enum
-│       └── NoOpPdfGenerator.java        — @DefaultBean (throws UnsupportedOperationException)
-├── platform-pdf/
-│   ├── pom.xml
-│   └── src/main/
-│       ├── java/io/casehub/platform/pdf/
-│       │   └── OpenHtmlToPdfGenerator.java  — @ApplicationScoped impl
-│       └── resources/fonts/
-│           ├── LiberationSans-Regular.ttf
-│           ├── LiberationSans-Bold.ttf
-│           ├── LiberationSans-Italic.ttf
-│           └── LiberationSans-BoldItalic.ttf
-```
+Liberation Sans (Regular, Bold, Italic, BoldItalic) + Liberation Mono (Regular, Bold) bundled in `compliance-report/src/main/resources/fonts/`. Apache 2.0 licensed, ~1.4MB total.
+
+- **Liberation Sans** — metrically equivalent to Arial, covers Latin/Cyrillic/Greek. Used for body text, headers, table labels.
+- **Liberation Mono** — monospaced, for UUIDs, correlation IDs, Merkle root hashes, trust scores, and entry IDs. Compliance auditors visually verify these values — monospaced rendering aids comparison and detection of transcription errors.
+
+PDF/A-2b requires all fonts embedded. Bundled fonts guarantee reproducible output regardless of deployment environment (Docker containers, CI runners, GraalVM native image).
 
 ---
 
 ## PDF/A-2b Compliance
 
-PDF/A-2b (ISO 19005-2, basic conformance) requirements met by this design:
+PDF/A-2b (ISO 19005-2, basic conformance) requirements:
 
 | Requirement | How satisfied |
 |---|---|
-| All fonts embedded | Liberation Sans bundled; registered via `useFont()` |
+| All fonts embedded | Liberation Sans + Mono bundled; registered via `useFont()` |
 | No external references | HTML uses inline CSS only; no external stylesheets or images |
 | Color profile | sRGB ICC profile embedded by OpenHTMLtoPDF automatically |
-| Document metadata | Set via `PdfOptions` → PDFBox `PDDocumentInformation` |
+| Document metadata | Set via `PdfDocumentMetadata` → PDFBox `PDDocumentInformation` |
 | No JavaScript | HTML reports contain no scripts |
 | No encryption | Reports are unencrypted |
+
+**Validation:** Tests use Apache PDFBox Preflight to validate generated PDFs conform to PDF/A-2b. Setting the conformance flag is necessary but not sufficient — the validation ensures correct XMP metadata, font embedding, and colour space usage.
+
+---
+
+## Page Structure
+
+Regulatory PDFs require structural elements for auditability:
+
+| Element | Implementation |
+|---|---|
+| Page numbers | CSS `@page` with `counter(page)` / `counter(pages)` |
+| Header | Report type + generation timestamp (running element) |
+| Footer | Tenant ID + schema version (running element) |
+| Margins | 2cm all sides for print quality |
+
+Classification markings (CONFIDENTIAL, INTERNAL, PUBLIC) are not included — no current requirement. Can be added to the footer via `PdfDocumentMetadata` if deployers need them.
+
+Bookmarks/PDF outline are not generated — OpenHTMLtoPDF supports bookmarks via CSS `-fs-bookmark-level` but the current report HTML structure (flat tables) doesn't have a natural outline hierarchy. Reports with multiple sections (ObligationReport: channels + agents) could benefit; deferred as a refinement.
 
 ---
 
 ## GraalVM Native Image
 
-OpenHTMLtoPDF uses reflection internally. Native image support requires:
+OpenHTMLtoPDF uses reflection internally (PDFBox, ICU4J text processing). Native image support requires:
 
-1. **Reflection config:** `reflect-config.json` for OpenHTMLtoPDF and PDFBox classes. Generated via `native-image-agent` tracing or manual registration.
-2. **Resource registration:** Font files and ICC color profile must be registered as native image resources. The platform deployment module adds a `@BuildStep` for `NativeImageResourceBuildItem` covering `fonts/*.ttf`.
-3. **`META-INF/services`:** OpenHTMLtoPDF uses ServiceLoader — entries must be included in native image.
+1. **Reflection config:** `reflect-config.json` for OpenHTMLtoPDF and PDFBox classes. Generated via `native-image-agent` tracing during test execution.
+2. **Resource registration:** Font files (`.ttf`) and ICC color profile must be registered as native image resources. The `compliance-report` deployment module (or the existing `QhorusProcessor`) adds `NativeImageResourceBuildItem` entries for `fonts/*.ttf`.
+3. **`META-INF/services`:** OpenHTMLtoPDF uses ServiceLoader — entries included automatically by Quarkus's native image support.
 
-This follows the established pattern — `QhorusProcessor.registerMigrationResources()` already registers Flyway SQL files for native image.
+Native image compatibility must be verified during implementation — if OpenHTMLtoPDF + PDFBox cannot run in native image without excessive configuration, the library choice (D1) would need revisiting. JVM-only deployment is an acceptable fallback for compliance reporting (not a latency-sensitive path).
 
 ---
 
@@ -249,15 +262,14 @@ This follows the established pattern — `QhorusProcessor.registerMigrationResou
 
 | Component | Test type | Notes |
 |---|---|---|
-| `OpenHtmlToPdfGenerator` | CDI-free unit test | Verify PDF bytes produced from known HTML input; verify PDF/A-2b metadata (title, author) via PDFBox `PDDocument` API; verify font embedding |
-| `PdfReportRenderer` | CDI-free unit test | Mock `HtmlReportRenderer` + `PdfGenerator`; verify delegation and content type |
-| `NoOpPdfGenerator` | CDI-free unit test | Verify throws `UnsupportedOperationException` |
+| `HtmlToPdfConverter` | CDI-free unit test | Verify PDF bytes from known HTML; verify document metadata (title, author, createdAt) via PDFBox `PDDocument` API; verify font embedding |
+| `PdfReportRenderer` | CDI-free unit test | Mock `HtmlReportRenderer`; verify delegation, content type, `supports(PDF)` |
+| `PdfDocumentMetadata.fromReport()` | CDI-free unit test | Verify extraction from each report type |
+| `HtmlReportRenderer.renderForPdf()` | CDI-free unit test | Verify `@page` CSS rules present, page number counters, header/footer content |
+| PDF/A-2b validation | CDI-free unit test | Use Apache PDFBox Preflight to validate conformance of generated PDF |
 | REST content negotiation | `@QuarkusTest` | `Accept: application/pdf` returns PDF bytes with correct Content-Type |
-| Scheduled PDF generation | CDI-free unit test | Verify `ReportFormat.PDF` flows through scheduler → storage |
-| PDF/A-2b validation | CDI-free unit test | Use Apache PDFBox Preflight to validate generated PDF conforms to PDF/A-2b |
-| SPI displacement | `@QuarkusTest @TestProfile` | Verify `NoOpPdfGenerator` displaced by `OpenHtmlToPdfGenerator` when platform-pdf on classpath |
-
-Platform module tests are self-contained — no qhorus dependency. Qhorus integration tests verify the composition.
+| Scheduled PDF generation | CDI-free unit test | Verify `ReportFormat.PDF` flows through scheduler → storage service |
+| Each report type → PDF | CDI-free unit test | Generate PDF for each report type (Attribution, Obligation, Violation, JudgmentAttribution, JudgmentFulfillment, PropertyVerification); verify non-empty, valid PDF header |
 
 ---
 
@@ -266,9 +278,11 @@ Platform module tests are self-contained — no qhorus dependency. Qhorus integr
 | Item | Reason | Issue |
 |------|--------|-------|
 | Digital signatures (eIDAS) | Requires PKI infrastructure decisions | casehubio/qhorus#418 |
+| PDF/UA accessibility | Compliance exports are internal audit records, not public services; OpenHTMLtoPDF cannot produce tagged PDF | — |
+| PDF bookmarks/outline | Reports don't have natural outline hierarchy; refinement when needed | — |
+| Platform extraction | Extract `HtmlToPdfConverter` to platform when a second consumer appears | — |
 | CJK font support | No current requirement; add font bundles when needed | — |
-| Streaming PDF generation | Reports are <1MB; in-memory is sufficient | — |
-| PDF/A-3b with embedded attachments | JSON/CSV already served via REST; embedding is redundant | — |
+| Classification markings | No deployer requirement; can be added to footer via metadata | — |
 
 ---
 
@@ -281,6 +295,11 @@ Platform module tests are self-contained — no qhorus dependency. Qhorus integr
 - issue-402 design spec — D3 deferral rationale
 - issue-402 decisions.md — D3 "PDF deferred — JSON/CSV/HTML first"
 - OpenHTMLtoPDF — `com.openhtmltopdf:openhtmltopdf-pdfbox`
-- Liberation Sans — Apache 2.0 font family
+- Liberation Fonts — Apache 2.0 font family (Sans + Mono)
 - ISO 19005-2 — PDF/A-2b specification
 - EU AI Act Article 12 — record-keeping requirements
+- European Accessibility Act (Directive 2019/882) — considered, not applicable to internal audit records
+- W3C CSS Paged Media Module — @page rules for headers/footers/page numbers
+- Decision review R1-11 — single consumer, platform extraction premature
+- Decision review R1-18 — monospaced font for compliance data
+- Decision review R1-21 — page structure for regulatory documents
