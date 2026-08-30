@@ -1,0 +1,15 @@
+# Work Plan — issue-418-digital-signatures-eidas
+
+## State
+branch: issue-418-digital-signatures-eidas
+state: scaffolded
+project-sha: f7753a472c1ca322b87b64202504e295bc865aef
+date: 2026-08-31
+issue-repo: casehubio/qhorus
+covers: 418
+design-repo: project
+design-section-hashes: 
+flyway-next-v: 50
+
+## Queue
+- [ ] casehubio/qhorus#418 — Issue #418 ← active
