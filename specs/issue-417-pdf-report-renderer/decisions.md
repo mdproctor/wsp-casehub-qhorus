@@ -34,3 +34,15 @@
 **Sources:** casehub-platform module patterns, CompliancePostureProvider SPI pattern (api/ + @DefaultBean), NoOpCapabilityHealth
 **Exploration:** quick
 **Status:** captured
+
+## D4: PdfGenerator SPI — single method with options record
+
+**Choice:** `PdfGenerator.generateFromHtml(byte[] html, PdfOptions options)` returns `byte[]`. `PdfOptions` record carries document metadata (title, author, createdAt) and `PdfAConformance` enum (default `PDFA_2_B`). `PdfOptions.defaults()` static factory for callers that just need basic conversion. Interface lives in `casehub-platform-api`. `@DefaultBean NoOpPdfGenerator` throws `UnsupportedOperationException` — fail-fast when platform-pdf module is absent.
+**Alternatives:**
+- Builder pattern with `Request`/`Result` types — more ceremony, validation in builder, but overkill for a single conversion operation
+**Rationale:** Minimal contract that covers all known use cases. Extensible via adding fields to the options record with defaults — no breaking changes when new metadata fields are needed.
+**Trade-offs:** No streaming support — entire HTML and PDF in memory. Acceptable for compliance reports (typically <1MB). If large-document streaming is needed later, a second method can be added without breaking existing callers.
+**Depends on:** D1 (library), D2 (conformance enum), D3 (platform placement)
+**Sources:** PdfRendererBuilder API (OpenHTMLtoPDF), PdfAConformance enum
+**Exploration:** quick
+**Status:** captured
