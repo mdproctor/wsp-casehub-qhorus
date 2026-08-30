@@ -24,43 +24,44 @@
 **Exploration:** quick
 **Status:** revised — added PDF/A-2a and PDF/UA as considered alternatives (R1-08), added validation requirement (R1-09)
 
-## D3: Module placement — qhorus compliance-report local
+## D3: Module placement — platform PDF service + qhorus adapter
 
-**Choice:** `PdfReportRenderer` and `HtmlToPdfConverter` (package-private) live in `compliance-report/src/main/java/io/casehub/qhorus/compliance/format/` alongside the existing renderers. OpenHTMLtoPDF dependency owned by `compliance-report/pom.xml`. Fonts bundled in `compliance-report/src/main/resources/fonts/`.
+**Choice:** New platform module `casehub-platform-pdf` owns the OpenHTMLtoPDF dependency and exposes a `PdfGenerator` service (String HTML → byte[] PDF, PDF/A conformance config, document metadata). Qhorus's `PdfReportRenderer` in `compliance-report/` is a thin adapter injecting `HtmlReportRenderer` + `PdfGenerator`. SPI interface `PdfGenerator` in `casehub-platform-api` with `@DefaultBean NoOpPdfGenerator` returning `Optional.empty()` (graceful degradation, not throwing — per R1-12). Fonts bundled in `casehub-platform-pdf/src/main/resources/fonts/`.
 **Alternatives:**
-- Platform `casehub-platform-pdf` module — shared HTML→PDF service usable by any CaseHub repo; rejected because only one consumer exists today. Platform-api-scope protocol: "implement in domain repo first, extract to platform when a second consumer materialises." Cross-repo coordination cost (platform issue + PR + release) is disproportionate for ~2 classes serving one module.
-**Rationale:** Single consumer (compliance-report). No other CaseHub repo currently produces HTML reports needing PDF export. When a second consumer appears, extract `HtmlToPdfConverter` to platform — the internal API is designed for clean extraction (String in, byte[] out, options record). The @DefaultBean NoOp-that-throws pattern (R1-12) also violates established platform convention where all NoOps degrade gracefully.
-**Trade-offs:** If ops or engine need PDF later, they'll need to either extract to platform or duplicate. Duplication is the signal to extract — not speculation about future need.
-**Depends on:** D1 (library choice)
-**Sources:** platform-api-scope protocol (R1-11), platform-ownership-check protocol, existing renderer placement in compliance-report/format/
+- Qhorus-local in `compliance-report/` — fewer moving parts, but PDF rendering is infrastructure (like HTTP clients or JSON serialization), not a domain type. Keeping it local guarantees duplication when a second consumer appears; the question is when, not if. R1-11 cited platform-api-scope protocol ("wait for second consumer"), but that protocol is too conservative for obviously general-purpose infrastructure — it conflates domain types that *might* be reusable with infrastructure capabilities that *are* reusable. Protocol revision tracked separately.
+**Rationale:** PDF rendering is general-purpose infrastructure. HTML→PDF conversion with font management, PDF/A conformance, and document metadata is the same operation regardless of which module produces the HTML. Platform placement prevents duplication, centralises font management and library version control, and gives every CaseHub module PDF capability without taking on OpenHTMLtoPDF as a direct dependency.
+**Trade-offs:** Cross-repo coordination cost (platform issue + PR + release before qhorus can consume). Acceptable for infrastructure — the platform exists to absorb this cost.
+**Depends on:** D1 (library choice), D2 (PDF/A conformance — configured via PdfGenerator)
+**Sources:** casehub-platform module patterns, CompliancePostureProvider SPI pattern (api/ + @DefaultBean), NoOpCapabilityHealth (graceful degradation)
 **Exploration:** quick
-**Status:** revised — reversed from platform placement to qhorus-local per R1-11 (single consumer, speculative extraction)
+**Status:** revised — restored platform placement (user override of R1-11; protocol too conservative for infrastructure); NoOp returns Optional.empty() per R1-12
 
-## D4: HtmlToPdfConverter — package-private, String parameter
+## D4: PdfGenerator SPI — single method with String parameter and options record
 
-**Choice:** Package-private `HtmlToPdfConverter` class in `compliance-report/format/` with `byte[] convert(String html, PdfDocumentMetadata metadata)`. `PdfDocumentMetadata` record carries title, author, createdAt, reportType. Used only by `PdfReportRenderer`. Not an SPI — no cross-module contract needed with qhorus-local placement.
+**Choice:** `PdfGenerator.generateFromHtml(String html, PdfOptions options)` returns `Optional<byte[]>`. `PdfOptions` record carries document metadata (title, author, createdAt, reportType) and `PdfAConformance` enum (default `PDFA_2_B`). `PdfOptions.defaults()` static factory for callers that just need basic conversion. Interface lives in `casehub-platform-api`. `@DefaultBean NoOpPdfGenerator` returns `Optional.empty()` — graceful degradation when platform-pdf module is absent (per R1-12).
 **Alternatives:**
-- Platform SPI with `byte[]` html parameter — rejected with D3 revision; byte[] obscures charset contract (R1-15), and platform placement is premature
-- Builder pattern — overkill for a single conversion operation within one package
-**Rationale:** Package-private keeps the API surface minimal. String parameter eliminates charset ambiguity. Metadata record maps report model fields to PDF document properties (Title, Author, Subject, CreationDate) for regulatory traceability (R1-22).
-**Trade-offs:** Package-private means extraction to platform later requires promoting to public. Trivial refactor.
-**Depends on:** D1 (library), D2 (conformance), D3 (local placement)
+- `byte[]` html parameter — obscures charset contract (R1-15); String eliminates ambiguity
+- Builder pattern — overkill for a single conversion operation
+- Package-private local class — rejected with D3 restoration to platform placement
+**Rationale:** Minimal contract covering all known use cases. String parameter is the natural Java representation for HTML text. Optional return enables callers to handle PDF-unavailable gracefully (e.g., omit `application/pdf` from content negotiation). Extensible via adding fields to the options record with defaults.
+**Trade-offs:** In-memory only — entire HTML and PDF held in memory. Acceptable for compliance reports (typically <1MB). Streaming is architecturally impossible for PDF/A (R1-16).
+**Depends on:** D1 (library), D2 (conformance enum), D3 (platform placement)
 **Sources:** PdfRendererBuilder API (OpenHTMLtoPDF), PDDocumentInformation (PDFBox)
 **Exploration:** quick
-**Status:** revised — demoted from platform SPI to package-private per D3 revision; String parameter per R1-15; metadata mapping per R1-22
+**Status:** revised — String parameter per R1-15; Optional return per R1-12; restored to platform SPI per D3 restoration
 
 ## D5: Font handling — bundled Liberation Sans + Mono
 
-**Choice:** Bundle Liberation Sans (Regular, Bold, Italic, BoldItalic) and Liberation Mono (Regular, Bold) inside `compliance-report/src/main/resources/fonts/`. ~1.4MB total, Apache 2.0 licensed. Register at converter construction via OpenHTMLtoPDF's `PdfRendererBuilder.useFont()`. Liberation Mono for UUIDs, correlation IDs, Merkle hashes, and trust scores — structured data that benefits from monospaced rendering.
+**Choice:** Bundle Liberation Sans (Regular, Bold, Italic, BoldItalic) and Liberation Mono (Regular, Bold) inside `casehub-platform-pdf/src/main/resources/fonts/`. ~1.4MB total, Apache 2.0 licensed. Register at `@PostConstruct` via OpenHTMLtoPDF's `PdfRendererBuilder.useFont()`. Liberation Mono for UUIDs, correlation IDs, Merkle hashes, and trust scores — structured data that benefits from monospaced rendering.
 **Alternatives:**
 - System font discovery — rendering varies by environment; unreliable for reproducible regulatory documents
 - Sans-serif only — monospaced data (hashes, UUIDs) harder to verify visually for compliance auditors (R1-18)
 **Rationale:** PDF/A-2b requires all fonts embedded. Bundled fonts guarantee reproducible output. Liberation family covers Latin/Cyrillic/Greek scripts. Monospaced font for data fields improves readability of the exact values that make these reports valuable.
 **Trade-offs:** ~1.4MB added to the module jar. CJK scripts not covered — would need additional font bundles if needed.
-**Depends on:** D1 (OpenHTMLtoPDF font API), D2 (PDF/A requires embedding), D3 (compliance-report owns fonts)
+**Depends on:** D1 (OpenHTMLtoPDF font API), D2 (PDF/A requires embedding), D3 (platform module owns fonts)
 **Sources:** Liberation Fonts (GitHub), OpenHTMLtoPDF font registration API, PDF/A-2b font embedding requirement
 **Exploration:** quick
-**Status:** revised — added Liberation Mono per R1-18; moved from platform to compliance-report per D3 revision
+**Status:** revised — added Liberation Mono per R1-18; fonts in platform-pdf per D3 restoration
 
 ## D6: Page structure for regulatory documents
 
