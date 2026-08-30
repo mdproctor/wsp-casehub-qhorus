@@ -13,3 +13,9 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#417 — Issue #417 ← active
+  - [ ] Batch 1: Core PDF
+    - [ ] Task 1: PdfDocumentMetadata + HtmlToPdfConverter
+  - [ ] Batch 2: PDF enhancement
+    - [ ] Task 2: HtmlReportRenderer.renderForPdf + PdfReportRenderer
+  - [ ] Batch 3: REST wiring
+    - [ ] Task 3: Content negotiation + full build
