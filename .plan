@@ -17,5 +17,5 @@ flyway-next-v: none
     - [x] Task 1: PdfDocumentMetadata + HtmlToPdfConverter
   - [x] Batch 2: PDF enhancement
     - [x] Task 2: HtmlReportRenderer.renderForPdf + PdfReportRenderer
-  - [ ] Batch 3: REST wiring
-    - [ ] Task 3: Content negotiation + full build
+  - [x] Batch 3: REST wiring
+    - [x] Task 3: Content negotiation + full build
