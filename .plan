@@ -1,0 +1,18 @@
+# Work Plan — issue-424-signing-hardening
+
+## State
+branch: issue-424-signing-hardening
+state: scaffolded
+project-sha: 6ee4a4cdda15f0e7cf1d3cf587feb47995f63775
+date: 2026-09-01
+issue-repo: casehubio/qhorus
+covers: 424,425,423,426
+design-repo: project
+design-section-hashes: 
+flyway-next-v: 51
+
+## Queue
+- [ ] casehubio/qhorus#424 — Issue #424 ← active
+- [ ] casehubio/qhorus#425 — Per-tenant keystore paths
+- [ ] casehubio/qhorus#423 — Runtime certificate rotation
+- [ ] casehubio/qhorus#426 — EU Trusted List (LOTL) validation
