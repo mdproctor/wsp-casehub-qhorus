@@ -22,3 +22,16 @@
 **Sources:** platform SigningProvider SPI (io.casehub.platform.api.signing), EU DSS SignatureTokenConnection interface
 **Exploration:** quick
 **Status:** captured
+
+## D3: PAdES signature profile level
+
+**Choice:** PAdES-B-T default (with TSA), PAdES-B-B fallback (without TSA). Configurable via `casehub.signing.pades-profile` for deployers who want LT or LTA — DSS supports all levels with the same code path.
+**Alternatives:**
+- Always PAdES-B-LTA — maximum archival but requires CRL/OCSP data sources; fails if not configured
+- PAdES-B-B only — no timestamp; doesn't meet the timestamping requirement
+**Rationale:** B-T proves signature time (required for regulatory submissions) without requiring CRL/OCSP infrastructure. LTA is the gold standard for archival but requires revocation data sources that may not be configured. Making the profile configurable means deployers with full PKI infrastructure can upgrade to LTA without code changes.
+**Trade-offs:** B-T signatures do not survive certificate expiry + CRL unavailability the way LTA does. Deployers who need indefinite archival must configure CRL/OCSP sources and set the profile to LTA.
+**Depends on:** D1 (EU DSS), D2 (DocumentSigningService SPI)
+**Sources:** ETSI EN 319 142 (PAdES profiles), EU DSS PAdES module
+**Exploration:** quick
+**Status:** captured
