@@ -124,7 +124,16 @@ public SharedData storeBinary(String key, String description, String createdBy,
 
 Migration (part of V50): `ALTER TABLE shared_data ADD COLUMN binary_content BYTEA;`
 
-`sizeBytes` in `SharedDataEntity.prePersist()` updated to compute from `binaryContent.length` when the binary field is populated, `content.length()` otherwise. Exactly one of `content` / `binaryContent` is non-null for any given artefact.
+`sizeBytes` in `SharedDataEntity.prePersist()` updated to compute from `binaryContent.length` when the binary field is populated, `content.length()` otherwise. Exactly one of `content` / `binaryContent` is non-null for any given artefact — enforced by a `@PrePersist` validation check that throws `IllegalStateException` when both are non-null or both are null. DB-level: `ALTER TABLE shared_data ADD CONSTRAINT chk_shared_data_content_xor CHECK ((content IS NOT NULL AND binary_content IS NULL) OR (content IS NULL AND binary_content IS NOT NULL));`
+
+**Blast radius:** `SharedData` is in `casehub-qhorus-api` — the record, `DataService` interface, and all store implementations are affected. Existing consumers (artefact lifecycle, chunked upload, compliance report storage, connector mesh bridge) use `content` exclusively. Changes required:
+- `SharedData` record: new `binaryContent` field (nullable, backward-compatible — existing construction sites pass `null`)
+- `DataService`: new `storeBinary()` method (additive, no signature changes to existing methods)
+- `SharedDataEntity`: new `binary_content` BYTEA column + `@PrePersist` XOR check
+- `JpaDataStore` / `InMemoryDataStore`: implement `storeBinary()`, update `toRecord()` mapping
+- `DataServiceTest`: new test cases for binary round-trip
+
+No breaking changes to existing consumers — `content` path is unchanged, `binaryContent` defaults to `null`.
 
 Storage routing in `ComplianceReportStorageService.storeWithSignature()`:
 - JSON/CSV report body: text → `DataService.store()` (existing path)
@@ -318,6 +327,10 @@ class KeyStoreManager {
 ```
 
 `KeyStoreManager` is thread-safe: all mutable fields (`keyStore`, `privateKey`, `certificateChain`) are written once in `@PostConstruct` and never modified thereafter. The `PrivateKey` and `X509Certificate[]` objects passed to DSS signing operations are read-only inputs — DSS does not mutate them. The fields cannot be declared `final` (CDI requires mutable fields for `@PostConstruct` initialization) but are effectively immutable after construction.
+
+**Behavior when `keystorePath` is absent:**
+- `config.required()` = `true` (explicit): `@PostConstruct` throws `IllegalStateException` → startup fails. Deployer intended signing but misconfigured.
+- `config.required()` = `false` (default): `@PostConstruct` logs a warning and sets `loaded = false`. `toDssKeyEntry()` returns `null`. `DssDocumentSigningService.signPdf()` / `signDetached()` check `keyStoreManager.isLoaded()` — when `false`, return `Optional.empty()` (same as `NoOpDocumentSigningService`). This means: `platform-signing` on classpath without a keystore = silent NoOp with a startup warning. The warning is the deployer's signal to configure a keystore.
 
 Loaded once at startup. Certificate rotation: replace the PKCS#12 file and restart the application. Runtime rotation without restart is deferred (#423).
 
