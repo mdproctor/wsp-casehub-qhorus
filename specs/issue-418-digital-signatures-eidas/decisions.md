@@ -35,3 +35,16 @@
 **Sources:** ETSI EN 319 142 (PAdES profiles), EU DSS PAdES module
 **Exploration:** quick
 **Status:** captured
+
+## D4: Detached signature format for JSON/CSV
+
+**Choice:** CAdES detached signature (.p7s) — PKCS#7/CMS binary format
+**Alternatives:**
+- JAdES (JSON Advanced Electronic Signatures) — JSON-based, human-readable-ish, but newer standard with less tool support; regulators may lack verification tools
+- Raw PKCS#7 via SigningProvider — no timestamp embedding, no certificate chain packaging; doesn't meet the framework goal
+**Rationale:** CAdES is the established standard for detached signatures on non-XML data. DSS has full CAdES support with the same profile levels (B-B, B-T, etc.) — zero additional library effort. The .p7s file extension is widely recognized by cryptographic verification tools. Pairs naturally with the report file for download.
+**Trade-offs:** Binary format, not human-inspectable. But signature files aren't meant to be human-read — they're machine-verified.
+**Depends on:** D1 (EU DSS), D3 (profile levels apply to CAdES too)
+**Sources:** ETSI EN 319 122 (CAdES), EU DSS CAdES module
+**Exploration:** quick
+**Status:** captured
