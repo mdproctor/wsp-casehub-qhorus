@@ -10,17 +10,10 @@ covers: 418
 design-repo: project
 design-section-hashes: 
 flyway-next-v: 50
+tasks: [x] Batch 1: Platform SPI\n  [x] Task 1: SPI types + NoOp defaults\n[ ] Batch 2: Platform DSS\n  [x] Task 2: KeyStoreManager + DssDocumentSigningService\n  [x] Task 3: DssDocumentVerificationService\n[ ] Batch 3: Qhorus Foundation\n  [ ] Task 4: SharedData binary + V50 migration\n  [ ] Task 5: SigningService + RenderingService\n[ ] Batch 4: Pipeline + Verification\n  [ ] Task 6: Pipeline wiring\n  [ ] Task 7: Verification endpoint
 
 ## Queue
 - [ ] casehubio/qhorus#418 — Issue #418 ← active
-  - [x] Batch 1: Platform SPI
-    - [x] Task 1: SPI types + NoOp defaults
-  - [ ] Batch 2: Platform DSS
-    - [ ] Task 2: KeyStoreManager + DssDocumentSigningService
-    - [ ] Task 3: DssDocumentVerificationService
-  - [ ] Batch 3: Qhorus Foundation
-    - [ ] Task 4: SharedData binary + V50 migration
-    - [ ] Task 5: SigningService + RenderingService
-  - [ ] Batch 4: Pipeline + Verification
-    - [ ] Task 6: Pipeline wiring
-    - [ ] Task 7: Verification endpoint
+  - [x] Batch 1: Batch 2
+    - [x] Task 1: Platform DSS:Task 2: KeyStoreManager + DssDocumentSigningService
+    - [x] Task 2: Platform DSS:Task 3: DssDocumentVerificationService
