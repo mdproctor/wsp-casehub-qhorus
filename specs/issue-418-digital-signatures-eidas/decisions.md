@@ -61,3 +61,16 @@
 **Sources:** ComplianceReportResource.renderResponse(), ComplianceReportScheduler.generateAndStore(), ComplianceReportStorageService
 **Exploration:** quick
 **Status:** captured
+
+## D6: Verification endpoint design
+
+**Choice:** Unified POST /api/compliance/verify with format detection. Accepts multipart: report file (PDF, JSON, or CSV) + optional detached signature (.p7s). Server detects format from Content-Type. Returns VerificationResult record: outcome (VALID/INVALID/UNSIGNED/ERROR), signer identity (subject DN), signed at (timestamp), certificate chain summary, profile level.
+**Alternatives:**
+- Separate endpoints per format (verify/pdf, verify/detached) — duplicates logic, forces clients to know format before calling
+- Verify by stored report ID only (GET /reports/{id}/verify) — can't verify externally received reports
+**Rationale:** DSS's SignedDocumentValidator handles format detection internally — the unified endpoint is simpler to implement than it looks. Clients upload what they have; the server figures out the format. Also supports verifying reports received from external systems, not just reports stored locally.
+**Trade-offs:** Multipart upload slightly more complex for clients than a simple POST body. Need to handle format detection edge cases (e.g., unsigned PDF uploaded = UNSIGNED result, not error).
+**Depends on:** D1 (EU DSS SignedDocumentValidator)
+**Sources:** EU DSS validation module, ComplianceReportResource
+**Exploration:** quick
+**Status:** captured
