@@ -83,7 +83,8 @@ casehub-qhorus/
 ```
 ReportService.generate(params)
   → Renderer.render(report)              → byte[] (unsigned PDF/JSON/CSV)
-  → ComplianceReportSigningService.sign(bytes, format, tenancyId)
+  → ComplianceReportSigningService.sign(bytes, format)          [request context]
+  → ComplianceReportSigningService.sign(bytes, format, tenancyId)  [scheduler context]
      → DocumentSigningService.signPdf(bytes, identity)        [PDF → PAdES embedded]
      → DocumentSigningService.signDetached(bytes, identity)   [JSON/CSV → CAdES .p7s]
   → ComplianceReportStorageService.store(report, signedBytes, signature)
@@ -361,8 +362,12 @@ public class ComplianceReportSigningService {
     @Inject InboundTenancyContext tenancyContext;
 
     public SigningResult sign(byte[] reportBytes, ReportFormat format) {
+        return sign(reportBytes, format, tenancyContext.tenancyId());
+    }
+
+    public SigningResult sign(byte[] reportBytes, ReportFormat format, String tenancyId) {
         SigningIdentity identity = new SigningIdentity(
-                "system:compliance-signer", tenancyContext.tenancyId());
+                "system:compliance-signer", tenancyId);
 
         return switch (format) {
             case PDF -> {
@@ -428,7 +433,7 @@ private void generateAndStore(ComplianceReportSchedule schedule, Instant from, I
     Object report = switch (schedule.reportType) { ... };  // existing
 
     byte[] rendered = renderForFormat(report, schedule.format);
-    SigningResult signed = signingService.sign(rendered, schedule.format);
+    SigningResult signed = signingService.sign(rendered, schedule.format, schedule.tenancyId);
 
     ComplianceReportRecord record = storageService.storeWithSignature(
             schedule.reportType, signed, schedule.format,
