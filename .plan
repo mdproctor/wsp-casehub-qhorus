@@ -13,3 +13,14 @@ flyway-next-v: 50
 
 ## Queue
 - [ ] casehubio/qhorus#418 — Issue #418 ← active
+  - [ ] Batch 1: Platform SPI
+    - [ ] Task 1: SPI types + NoOp defaults
+  - [ ] Batch 2: Platform DSS
+    - [ ] Task 2: KeyStoreManager + DssDocumentSigningService
+    - [ ] Task 3: DssDocumentVerificationService
+  - [ ] Batch 3: Qhorus Foundation
+    - [ ] Task 4: SharedData binary + V50 migration
+    - [ ] Task 5: SigningService + RenderingService
+  - [ ] Batch 4: Pipeline + Verification
+    - [ ] Task 6: Pipeline wiring
+    - [ ] Task 7: Verification endpoint
