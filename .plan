@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-418-digital-signatures-eidas
-state: scaffolded
+state: active
 project-sha: f7753a472c1ca322b87b64202504e295bc865aef
 date: 2026-08-31
 issue-repo: casehubio/qhorus
@@ -13,8 +13,8 @@ flyway-next-v: 50
 
 ## Queue
 - [ ] casehubio/qhorus#418 — Issue #418 ← active
-  - [ ] Batch 1: Platform SPI
-    - [ ] Task 1: SPI types + NoOp defaults
+  - [x] Batch 1: Platform SPI
+    - [x] Task 1: SPI types + NoOp defaults
   - [ ] Batch 2: Platform DSS
     - [ ] Task 2: KeyStoreManager + DssDocumentSigningService
     - [ ] Task 3: DssDocumentVerificationService
