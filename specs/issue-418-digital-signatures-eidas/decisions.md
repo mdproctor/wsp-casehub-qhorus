@@ -48,3 +48,16 @@
 **Sources:** ETSI EN 319 122 (CAdES), EU DSS CAdES module
 **Exploration:** quick
 **Status:** captured
+
+## D5: Signing pipeline position
+
+**Choice:** Post-render signing service — render() → ComplianceReportSigningService.sign() → store(). New service in compliance-report module orchestrates: receives rendered bytes + format, calls DocumentSigningService (platform SPI), returns signed bytes (PDF) or original bytes + detached signature (JSON/CSV).
+**Alternatives:**
+- Signing inside the renderer — tangles rendering with crypto, breaks single responsibility, every renderer needs signing awareness
+- Post-storage async signing — reports temporarily unsigned, regulatory gap for on-demand reports
+**Rationale:** Signing is logically separate from rendering. The post-render position means: (1) re-signing on certificate rotation doesn't require re-rendering, (2) renderers stay format-focused, (3) both on-demand (REST) and scheduled paths call the same signing service. Graceful degradation: when DocumentSigningService returns empty (NoOp), the unsigned report passes through unchanged.
+**Trade-offs:** One extra pipeline step. Detached signatures for JSON/CSV require storing two artefacts (report + .p7s) — the signing service returns a SignedReport record containing both.
+**Depends on:** D2 (DocumentSigningService SPI), D4 (CAdES for detached)
+**Sources:** ComplianceReportResource.renderResponse(), ComplianceReportScheduler.generateAndStore(), ComplianceReportStorageService
+**Exploration:** quick
+**Status:** captured
