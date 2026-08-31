@@ -9,3 +9,16 @@
 **Sources:** EU DSS GitHub (ec-europa/dss), ETSI EN 319 142 (PAdES), platform SigningProvider SPI (io.casehub.platform.api.signing)
 **Exploration:** quick
 **Status:** captured
+
+## D2: Platform signing SPI composition
+
+**Choice:** New `DocumentSigningService` SPI in platform-api, implementation in casehub-platform-signing, delegates raw crypto to existing `SigningProvider` via a DSS `SignatureTokenConnection` adapter
+**Alternatives:**
+- Bypass SigningProvider, load PKCS#12 directly in DSS — simpler but creates two parallel signing paths in the platform, making SigningProvider irrelevant for document signing
+- Extend SigningProvider with certificate-aware methods — mixes abstraction levels, forces all existing impls to update
+**Rationale:** Preserves clean layering. SigningProvider stays focused on raw cryptographic operations (HSM-backable). DocumentSigningService handles format packaging (PAdES/CAdES). The DSS SignatureTokenConnection adapter bridges them — DSS calls SigningProvider for the actual sign operation, gets certificate chain from the keystore.
+**Trade-offs:** One more SPI interface in platform-api. The adapter layer adds a small indirection. But the separation means swapping from PKCS#12 to cloud KMS only requires a new SigningProvider impl, not touching any document signing code.
+**Depends on:** D1 (EU DSS as the signing library)
+**Sources:** platform SigningProvider SPI (io.casehub.platform.api.signing), EU DSS SignatureTokenConnection interface
+**Exploration:** quick
+**Status:** captured
