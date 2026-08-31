@@ -1,7 +1,7 @@
 format_version: 1
-state: APPROACH_EXPLORATION
-entered: 2026-08-31T10:30:00Z
-decision_count: 0
+state: DECISION_REVIEW
+entered: 2026-08-31T10:45:00Z
+decision_count: 6
 dimensions_completed: 0
 dimensions_total: 0
 ordered: false
