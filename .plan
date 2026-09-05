@@ -1,0 +1,15 @@
+# Work Plan — issue-431-a2a-sse-eventbroadcaster
+
+## State
+branch: issue-431-a2a-sse-eventbroadcaster
+state: scaffolded
+project-sha: 0106b091889e017cd4c73cad2797b1b76cd1c069
+date: 2026-09-06
+issue-repo: casehubio/qhorus
+covers: 431
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#431 — Issue #431 ← active
