@@ -175,7 +175,7 @@ public RedistributionResult redistribute(String actorId, List<Commitment> obliga
 
     int attemptedCount = redistributable.size() - filteredCount;
     executedEvents.fireAsync(
-            RedistributionExecutedEvent.redistributed(actorId, successCount, attemptedCount));
+            RedistributionExecutedEvent.redistributed(actorId, successCount, attemptedCount, filteredCount));
     return new RedistributionResult(successCount, attemptedCount, filteredCount);
 }
 ```
@@ -272,6 +272,16 @@ Normal flow: redistribution fires first (lower threshold), reduces pressure, wat
 6. Verify: redistribution triggers from commitment pressure alone
 7. Verify: HANDOFF message dispatched
 
+**Scenario 3: Compress-fallback when all obligations are channel-filtered**
+1. Register two agents with capabilities
+2. Create channel with `redistributionCapacityThreshold = 0.90`
+3. Dispatch COMMAND to agent-1 (creates OPEN commitment)
+4. Dispatch EVENT with `context_window_pct: 86` for agent-1 (simulates 0.86 pressure)
+5. Fire `CapacityPressureEvent` directly (bypass scheduler)
+6. Verify: NO HANDOFF dispatched (0.86 < 0.90 — all obligations filtered)
+7. Verify: compress triggered as fallback (channel summary update attempted)
+8. Verify: `RedistributionExecutedEvent` with outcome=REDISTRIBUTED, attemptedCount=0, filteredCount>0
+
 Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observer test conventions).
 
 ---
@@ -294,7 +304,7 @@ Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observe
 - `ContextPressureCapacitySource` — already correctly implements `CapacitySignalSource`, no changes
 - `QhorusRedistributionExecutor` — event observation, policy delegation unchanged; escalation guard updated for channel-threshold awareness (see §3)
 - `RedistributionDelegate.compress()` and `escalate()` — unchanged
-- `RedistributionExecutedEvent` — unchanged
+- `RedistributionExecutedEvent` — extended: `totalCount` renamed to `attemptedCount`, `filteredCount` added; factory method `redistributed()` gains `filteredCount` parameter (see §3)
 - Existing unit tests — unchanged (new tests added alongside)
 
 ---
@@ -306,6 +316,7 @@ Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observe
 - `CommitmentCountCapacitySource` is additive — existing deployments gain a second signal source transparently via CDI discovery
 - Per-channel threshold column is nullable — null = use global default (existing behavior)
 - `RedistributionResult` gains `attemptedCount` and `filteredCount` fields (replacing the previous `totalCount`) — existing callers break at compile time, which is the point: they must handle the new semantics explicitly
+- `RedistributionExecutedEvent` renames `totalCount` → `attemptedCount` and adds `filteredCount`; factory method `redistributed()` gains a `filteredCount` parameter — same compile-time break rationale
 - MCP tools are additive — no existing tool signatures change
 
 ---
