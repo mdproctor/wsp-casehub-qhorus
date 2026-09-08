@@ -13,3 +13,13 @@ flyway-next-v: 52
 
 ## Queue
 - [ ] casehubio/qhorus#434 — Issue #434 ← active
+  - [ ] Batch 1: Platform enrichment
+    - [ ] Task 1: Enrich DefaultRedistributionPolicy
+  - [ ] Batch 2: Commitment signal
+    - [ ] Task 2: CommitmentCountCapacitySource + store query
+  - [ ] Batch 3: Channel threshold
+    - [ ] Task 3: Channel.redistributionCapacityThreshold + V52
+    - [ ] Task 4: Executor filtering + RedistributionResult
+  - [ ] Batch 4: Observability
+    - [ ] Task 5: Capacity MCP tools
+    - [ ] Task 6: Integration tests
