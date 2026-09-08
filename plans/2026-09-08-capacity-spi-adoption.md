@@ -211,11 +211,17 @@ Refs casehubio/qhorus#434"
 - Consumes: `CrossTenantCommitmentStore.findOpenByObligor(String)` (existing), `CapacitySignalSource` SPI (platform-api)
 - Produces: `CrossTenantCommitmentStore.findObligorsExceedingCount(int minCount)` → `Map<String, Long>`, `CommitmentCountCapacitySource` (CDI-discovered by AggregatingActorCapacityView)
 
-- [ ] **Step 1: Add findObligorsExceedingCount to CrossTenantCommitmentStore interface**
+- [ ] **Step 1: Add countOpenByObligor + findObligorsExceedingCount to CrossTenantCommitmentStore interface**
 
 Add to `api/src/main/java/io/casehub/qhorus/api/store/CrossTenantCommitmentStore.java`:
 
 ```java
+/**
+ * Count open or acknowledged commitments for a single obligor.
+ * Efficient single-row COUNT(*) — no entity materialization.
+ */
+long countOpenByObligor(String obligor);
+
 /**
  * Find obligors with at least {@code minCount} open or acknowledged commitments.
  * Returns one row per qualifying obligor with their commitment count.
@@ -225,9 +231,18 @@ Map<String, Long> findObligorsExceedingCount(int minCount);
 
 - [ ] **Step 2: Implement in JpaCrossTenantCommitmentStore**
 
-Add to `runtime/src/main/java/io/casehub/qhorus/runtime/store/jpa/JpaCrossTenantCommitmentStore.java`:
+Add both methods to `runtime/src/main/java/io/casehub/qhorus/runtime/store/jpa/JpaCrossTenantCommitmentStore.java`:
 
 ```java
+@Override
+public long countOpenByObligor(String obligor) {
+    return em.createQuery(
+                    "SELECT COUNT(c) FROM CommitmentEntity c " +
+                    "WHERE c.obligor = :obligor AND c.state IN ('OPEN', 'ACKNOWLEDGED')", Long.class)
+            .setParameter("obligor", obligor)
+            .getSingleResult();
+}
+
 @Override
 public Map<String, Long> findObligorsExceedingCount(int minCount) {
     @SuppressWarnings("unchecked")
@@ -247,9 +262,17 @@ public Map<String, Long> findObligorsExceedingCount(int minCount) {
 
 - [ ] **Step 3: Implement in InMemoryCrossTenantCommitmentStore**
 
-Add to `persistence-memory/src/main/java/io/casehub/qhorus/persistence/memory/InMemoryCrossTenantCommitmentStore.java`:
+Add both methods to `persistence-memory/src/main/java/io/casehub/qhorus/persistence/memory/InMemoryCrossTenantCommitmentStore.java`:
 
 ```java
+@Override
+public long countOpenByObligor(String obligor) {
+    return commitments.values().stream()
+            .filter(c -> obligor.equals(c.obligor())
+                    && (c.state() == CommitmentState.OPEN || c.state() == CommitmentState.ACKNOWLEDGED))
+            .count();
+}
+
 @Override
 public Map<String, Long> findObligorsExceedingCount(int minCount) {
     return commitments.values().stream()
@@ -294,8 +317,7 @@ class CommitmentCountCapacitySourceTest {
     @Test
     void observeReturnsPressureFromOpenCommitments() {
         var store = mock(CrossTenantCommitmentStore.class);
-        when(store.findOpenByObligor("agent-1")).thenReturn(List.of(
-                obligation("agent-1"), obligation("agent-1"), obligation("agent-1")));
+        when(store.countOpenByObligor("agent-1")).thenReturn(3L);
 
         var source = new CommitmentCountCapacitySource(store, 20);
 
@@ -309,9 +331,7 @@ class CommitmentCountCapacitySourceTest {
     @Test
     void observeClampsPressureToOne() {
         var store = mock(CrossTenantCommitmentStore.class);
-        var obligations = new java.util.ArrayList<Commitment>();
-        for (int i = 0; i < 25; i++) obligations.add(obligation("agent-1"));
-        when(store.findOpenByObligor("agent-1")).thenReturn(obligations);
+        when(store.countOpenByObligor("agent-1")).thenReturn(25L);
 
         var source = new CommitmentCountCapacitySource(store, 20);
 
@@ -320,9 +340,9 @@ class CommitmentCountCapacitySourceTest {
     }
 
     @Test
-    void observeReturnsEmptyForNoCommitments() {
+    void observeReturnsZeroForNoCommitments() {
         var store = mock(CrossTenantCommitmentStore.class);
-        when(store.findOpenByObligor("agent-1")).thenReturn(List.of());
+        when(store.countOpenByObligor("agent-1")).thenReturn(0L);
 
         var source = new CommitmentCountCapacitySource(store, 20);
 
@@ -402,7 +422,7 @@ public class CommitmentCountCapacitySource implements CapacitySignalSource {
 
     @Override
     public List<CapacitySignal> observe(String actorId) {
-        int count = commitmentStore.findOpenByObligor(actorId).size();
+        long count = commitmentStore.countOpenByObligor(actorId);
         double pressure = Math.min((double) count / maxObligations, 1.0);
         return List.of(new CapacitySignal(
                 actorId, CapacitySignalTypes.TASK_COUNT, pressure, Instant.now(),
@@ -480,7 +500,7 @@ ALTER TABLE channel ADD COLUMN redistribution_capacity_threshold DOUBLE PRECISIO
 
 Add `Double redistributionCapacityThreshold` after `routingTrustThreshold` in the Channel record. Update the canonical constructor parameter list. Add to the Builder. Add backward-compatible constructor that passes `null` for the new field.
 
-The field goes after `routingTrustThreshold` (position after `displayOrder` in the current 25-param constructor — becoming 26 params). Follow the same nullable-Double pattern.
+Append the field at the end of the record (position 26, after `displayOrder` — becoming a 26-param constructor). This follows the established pattern of prior Channel additions where new fields are appended. Follow the same nullable-Double pattern as `routingTrustThreshold`.
 
 - [ ] **Step 3: Add JPA column to ChannelEntity**
 
@@ -628,7 +648,9 @@ public record RedistributionExecutedEvent(
 
 - [ ] **Step 5: Add channel-threshold filtering to RedistributionDelegate.redistribute()**
 
-Inject `globalRedistributeThreshold` config. Add the threshold check inside the existing per-obligation loop, after `channelStore.findById()`, before the HANDOFF dispatch:
+Inject `globalRedistributeThreshold` config via `@ConfigProperty(name = "casehub.capacity.redistribution.redistribute-threshold", defaultValue = "0.85") double globalRedistributeThreshold` as a field on `RedistributionDelegate`. Update the test constructor to accept the new parameter (8th param). In `QhorusRedistributionExecutorTest`, the delegate is mocked — no constructor change needed there.
+
+Add the threshold check inside the existing per-obligation loop, after `channelStore.findById()`, before the HANDOFF dispatch:
 
 ```java
 double threshold = channel.redistributionCapacityThreshold() != null
@@ -749,13 +771,23 @@ public String getRedistributionHistory(
         @ToolArg(description = "channel name or UUID (optional)") String channel,
         @ToolArg(description = "max entries to return (default 20)") Integer limit) {
     int maxEntries = limit != null ? Math.min(limit, 100) : 20;
-    // Query ledger for HANDOFF entries from "system:redistribution"
-    // Filter by routing_original_target (actorId) and/or channelId
-    // Return entries with redistribution metadata
+    UUID channelId = null;
+    if (channel != null) {
+        channelId = resolveChannel(channel).id();
+    }
+    String tenancyId = currentPrincipal.tenancyId();
+    var entries = messageRepo.listEntries(
+            channelId, "HANDOFF", "system:redistribution",
+            null, null, null, maxEntries, null, tenancyId);
+    var filtered = entries.stream()
+            .filter(e -> actorId == null || actorId.equals(e.routingOriginalTarget))
+            .map(e -> toLedgerEntryMap(e))
+            .toList();
+    return renderList("redistribution_history", filtered);
 }
 ```
 
-Implementation queries `messageRepo.listEntries()` with sender filter `system:redistribution`, type filter `HANDOFF`, and optional actorId/channel filtering.
+Uses `MessageLedgerEntryRepository.listEntries()` with sender=`system:redistribution` and type=`HANDOFF`. Post-filters by `routingOriginalTarget` (actorId). The `routingOriginalTarget` column (V2003 migration) stores the original target before routing resolved a delegate.
 
 - [ ] **Step 5: Implement set/get_channel_redistribution_threshold**
 
