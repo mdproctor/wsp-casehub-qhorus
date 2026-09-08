@@ -13,21 +13,27 @@ Qhorus implements `ContextPressureCapacitySource` and `QhorusRedistributionExecu
 
 1. **Platform's DefaultRedistributionPolicy** ignores `RedistributionContext.openObligationCount` and `timeSinceLastActivity` — maps >=0.95 to Escalate instead of immediate Redistribute, and never triggers inactivity-based escalation. The enrichment uses platform-generic concepts and belongs upstream.
 2. **Commitment overload is invisible to prevention layers** — only available in Layer 2 (policy context), not Layers 0/0.5/1 (signal sources, aggregation, routing exclusion). An agent at its commitment limit still receives new work via routing.
-3. **No per-channel threshold granularity** — all channels share global thresholds. High-urgency channels can't trigger earlier routing exclusion or redistribution.
+3. **No per-channel threshold granularity** — all channels share global thresholds. High-urgency channels can't trigger earlier redistribution.
 
 ## Scope
 
 ### Cross-repo: casehub-platform (PR to platform)
 - Enrich `DefaultRedistributionPolicy` with obligation-aware and inactivity-aware decisions (D1)
+- Consolidate config keys under `casehub.capacity.redistribution.*` prefix — replaces `casehub.capacity.threshold.*` (aligns with parent spec and `CapacityPressureMonitor`)
 - Annotate `DefaultRedistributionPolicy` with `@DefaultBean` (D6)
 
 ### This repo: casehub-qhorus
 - `CommitmentCountCapacitySource` — new `CapacitySignalSource` implementation (D2)
-- `Channel.routingCapacityThreshold` + `Channel.redistributionCapacityThreshold` — two per-channel nullable fields (D4)
-- Executor channel-threshold filtering in `RedistributionDelegate.redistribute()` (D5)
-- MCP tools: `get_actor_capacity`, `list_overloaded_actors`, `get_redistribution_history` (D3)
-- V52 migration for the two new channel columns
-- Integration test with HANDOFF verification
+- `Channel.redistributionCapacityThreshold` — per-channel nullable field (D4); `routingCapacityThreshold` deferred until eidos OVERLOADED probe is implemented (tracked: casehubio/qhorus#TBD)
+- Executor channel-threshold filtering integrated into `RedistributionDelegate.redistribute()` (D5)
+- `RedistributionResult` — extended with `attemptedCount` and `filteredCount` for channel-threshold awareness
+- MCP tools: `get_actor_capacity`, `list_overloaded_actors`, `get_redistribution_history`, `set_channel_redistribution_threshold`, `get_channel_redistribution_threshold` (D3)
+- V51 migration for the new channel column
+- Integration test with HANDOFF verification, commitment-count-driven redistribution, and channel-threshold filtering
+
+### Deferred (tracked as GitHub issues)
+- `Channel.routingCapacityThreshold` + eidos OVERLOADED probe integration — the `CapabilityStatus.Overloaded` record type exists in eidos-api but `DefaultCapabilityHealth.probe()` never returns it and `ProbeContext` lacks the required `capacityView` field (casehubio/qhorus#TBD)
+- Platform MCP surface for capacity tools — `get_actor_capacity` and `list_overloaded_actors` read platform-scoped `ActorCapacityView` data; temporarily placed in qhorus MCP surface (casehubio/platform#TBD)
 
 ---
 
@@ -41,15 +47,17 @@ The enriched policy uses the full `RedistributionContext`:
 |----------|------------|------------|----------|
 | < compress (0.7) | any | < 5m | Hold |
 | >= compress, < redistribute | any | < 5m | Compress |
-| >= redistribute (0.85), < immediate (0.95) | > 0 | < 5m | Redistribute (grace period 30s) |
-| >= immediate (0.95) | > 0 | < 5m | Redistribute (grace period 0) |
+| >= redistribute (0.85), < immediate (0.95) | > 0 | < 5m | Redistribute (grace period 30s, excludeActors = {actorId}) |
+| >= immediate (0.95) | > 0 | < 5m | Redistribute (grace period 0, excludeActors = {actorId}) |
 | >= redistribute | 0 | < 5m | Hold — overloaded but no movable work |
 | any | any | >= 5m | Escalate — agent may be stuck |
 
-Config keys (existing names, enriched semantics):
-- `casehub.capacity.threshold.compress` (0.7)
-- `casehub.capacity.threshold.redistribute` (0.85)
-- `casehub.capacity.threshold.escalate` (0.95) — renamed semantics: now the "immediate redistribute" threshold, not escalation
+The `excludeActors` field on `Redistribute` is populated with the context's `actorId` to prevent the overloaded agent from being selected as a redistribution target. This is the only defense against self-routing until the eidos OVERLOADED probe is implemented (see Deferred items above).
+
+Config keys (consolidated under `casehub.capacity.redistribution.*` — replaces old `casehub.capacity.threshold.*` prefix):
+- `casehub.capacity.redistribution.compress-threshold` (0.7) — shared with `CapacityPressureMonitor`
+- `casehub.capacity.redistribution.redistribute-threshold` (0.85)
+- `casehub.capacity.redistribution.immediate-threshold` (0.95)
 - `casehub.capacity.redistribution.grace-period` (30s) — new
 - `casehub.capacity.redistribution.inactivity-escalation` (5m) — new
 
@@ -78,86 +86,155 @@ public class CommitmentCountCapacitySource implements CapacitySignalSource {
 
     @Override
     public List<CapacitySignal> observeOverloaded(double threshold) {
-        // Query all actors with open obligations
-        // Filter by count/max >= threshold
+        // Efficient query: CrossTenantCommitmentStore.findObligorsExceedingCount(minCount)
+        //   where minCount = ceil(threshold * maxObligations)
+        // Returns Map<String, Long> of obligor → count
+        // Convert to CapacitySignal with pressure = count / maxObligations
     }
 }
 ```
+
+`observeOverloaded` requires a new efficient query method on `CrossTenantCommitmentStore`:
+
+```java
+/**
+ * Find obligors with at least {@code minCount} open commitments.
+ * Executes: SELECT obligor, COUNT(*) FROM commitment
+ *           WHERE state IN ('OPEN','ACKNOWLEDGED') GROUP BY obligor HAVING COUNT(*) >= ?
+ * Returns one row per qualifying obligor — O(qualifying-actors), not O(all-commitments).
+ */
+Map<String, Long> findObligorsExceedingCount(int minCount);
+```
+
+This mirrors `ContextPressureCapacitySource.observeOverloaded()` which uses the efficient `findLatestContextPressureGlobal()` (one row per actor).
 
 Signal type: `CapacitySignalTypes.TASK_COUNT` (reuses existing constant — commitment is the qhorus analogue of a task).
 
 Config: `casehub.qhorus.capacity.max-obligations` (default 20).
 
-Aggregation effect: `AggregatingActorCapacityView` uses max-pressure (D9). An agent at 0.9 commitment pressure and 0.3 context pressure is at 0.9 aggregate — correctly excluded from new routing via the OVERLOADED probe.
+Aggregation effect: `AggregatingActorCapacityView` uses max-pressure (D9). An agent at 0.9 commitment pressure and 0.3 context pressure is at 0.9 aggregate.
 
 ### 2. Per-Channel Capacity Thresholds
 
-Two new nullable `Double` fields on `Channel`:
+One new nullable `Double` field on `Channel`:
 
 | Field | Purpose | Fallback |
 |-------|---------|----------|
-| `routingCapacityThreshold` | Eidos OVERLOADED probe — excludes agent from new `role:X` routing in this channel | `casehub.eidos.routing.default-capacity-threshold` (0.8) |
-| `redistributionCapacityThreshold` | Executor filtering — only redistribute obligations from channels where this threshold is exceeded | `casehub.capacity.threshold.redistribute` (0.85) |
+| `redistributionCapacityThreshold` | Executor filtering — only redistribute obligations from channels where this threshold is exceeded | `casehub.capacity.redistribution.redistribute-threshold` (0.85) |
 
-Separation rationale: routing exclusion (prevention) is near-zero cost — exclude early. Redistribution (HANDOFF) has real cost — trigger only when genuinely necessary. A high-urgency channel might set routing exclusion at 0.6 but redistribution at 0.8.
+`routingCapacityThreshold` is deferred until the eidos OVERLOADED probe is implemented (tracked: casehubio/qhorus#TBD). The probe type (`CapabilityStatus.Overloaded`) exists in eidos-api but `DefaultCapabilityHealth.probe()` does not return it, and `ProbeContext` lacks the required `capacityView` field. Adding the routing threshold column now would create dead data with no consumer.
 
-V52 migration:
+V51 migration:
 ```sql
-ALTER TABLE channel ADD COLUMN routing_capacity_threshold DOUBLE PRECISION;
 ALTER TABLE channel ADD COLUMN redistribution_capacity_threshold DOUBLE PRECISION;
 ```
 
 MCP tools:
-- `set_channel_capacity_thresholds(channel, routing_threshold?, redistribution_threshold?)` — both nullable, null clears
-- `get_channel_capacity_thresholds(channel)` — returns both with effective values (including fallback)
+- `set_channel_redistribution_threshold(channel, threshold?)` — nullable, null clears
+- `get_channel_redistribution_threshold(channel)` — returns value with effective fallback
 
 ### 3. Executor Channel-Threshold Filtering
 
-In `RedistributionDelegate.redistribute()`, after the policy returns Redistribute, filter obligations by channel threshold:
+Channel-threshold filtering is integrated into the existing per-obligation loop in `RedistributionDelegate.redistribute()`, eliminating a separate pre-filter pass and avoiding double channel lookups:
 
 ```java
-// Existing: var redistributable = obligations.stream()
-//     .filter(c -> c.capabilityTag() != null).toList();
+@Transactional
+public RedistributionResult redistribute(String actorId, List<Commitment> obligations,
+                                          RedistributionDecision.Redistribute decision,
+                                          double aggregatePressure) {
+    var redistributable = obligations.stream()
+            .filter(c -> c.capabilityTag() != null)
+            .toList();
 
-// Added: per-channel threshold filter
-var qualifying = redistributable.stream()
-    .filter(c -> {
-        var ch = channelStore.findById(c.channelId()).orElse(null);
-        if (ch == null) return false;
-        double threshold = ch.redistributionCapacityThreshold() != null
-            ? ch.redistributionCapacityThreshold()
-            : globalRedistributeThreshold;
-        return aggregatePressure >= threshold;
-    })
-    .toList();
+    int successCount = 0;
+    int filteredCount = 0;
+    for (var commitment : redistributable) {
+        try {
+            inboundTenancyContext.set(commitment.tenancyId());
 
-if (qualifying.isEmpty() && !redistributable.isEmpty()) {
-    LOG.debugf("No obligations qualify after channel-threshold filtering for %s", actorId);
-    return new RedistributionResult(0, redistributable.size());
+            // ... existing message lookup ...
+
+            var channel = channelStore.findById(commitment.channelId()).orElse(null);
+            if (channel == null) continue;
+
+            // Channel-threshold filtering — single lookup, no pre-filter
+            double threshold = channel.redistributionCapacityThreshold() != null
+                ? channel.redistributionCapacityThreshold()
+                : globalRedistributeThreshold;
+            if (aggregatePressure < threshold) {
+                filteredCount++;
+                continue;
+            }
+
+            // ... existing HANDOFF dispatch logic ...
+            successCount++;
+        } catch (Exception e) {
+            // ... existing error handling ...
+        }
+    }
+
+    int attemptedCount = redistributable.size() - filteredCount;
+    executedEvents.fireAsync(
+            RedistributionExecutedEvent.redistributed(actorId, successCount, attemptedCount));
+    return new RedistributionResult(successCount, attemptedCount, filteredCount);
 }
 ```
 
-The executor iterates `qualifying` (not `redistributable`) for the HANDOFF loop. When no obligations qualify, the caller (`QhorusRedistributionExecutor`) triggers escalation via the existing `successCount == 0 && totalCount > 0` guard.
+`RedistributionResult` is extended to distinguish channel-filtered obligations from failed HANDOFF attempts:
+
+```java
+public record RedistributionResult(int successCount, int attemptedCount, int filteredCount) {}
+```
+
+The executor's escalation guard is updated to handle the three outcomes:
+
+```java
+case RedistributionDecision.Redistribute r -> {
+    // ... grace period check ...
+    RedistributionResult result = delegate.redistribute(actorId, obligations, r, pressure);
+    if (result.successCount() == 0 && result.attemptedCount() > 0) {
+        // HANDOFF attempted but all targets unavailable — escalate
+        delegate.escalate(actorId, "redistribution requested but no targets available");
+    } else if (result.attemptedCount() == 0 && result.filteredCount() > 0) {
+        // All obligations filtered by channel thresholds — compress as fallback
+        LOG.infof("All obligations filtered by channel thresholds for %s — compressing", actorId);
+        delegate.compress(actorId, obligations);
+    }
+}
+```
+
+This correctly distinguishes:
+- **All attempted, all failed** → escalate (target unavailability — operator attention needed)
+- **All filtered** → compress fallback (channels have higher thresholds than aggregate pressure — try freeing context)
+- **Some succeeded** → normal success (no further action)
 
 ### 4. MCP Tools
 
-Three new `@Tool` methods in `QhorusMcpTools`:
+Five `@Tool` methods in `QhorusMcpTools`:
 
 **`get_actor_capacity(actor_id)`**
 - Delegates to `ActorCapacityView.getCapacity(actorId)`
 - Returns: actorId, aggregatePressure, pressureBySignalType map, observedAt
-- Boundary note: reads platform-scoped data; temporary placement until platform MCP surface exists
+- Boundary note: reads platform-scoped data; temporary placement until platform MCP surface exists (tracked: casehubio/platform#TBD)
 
 **`list_overloaded_actors(threshold?)`**
 - Delegates to `ActorCapacityView.getOverloaded(threshold)` — threshold defaults to compress threshold (0.7)
 - Returns: list of ActorCapacity records
-- Boundary note: same as get_actor_capacity
+- Boundary note: same as get_actor_capacity (tracked: casehubio/platform#TBD)
 
 **`get_redistribution_history(actor_id?, channel?, limit?)`**
 - Queries ledger for HANDOFF entries from sender `system:redistribution`
 - Filters by actorId (as routing_original_target) and/or channel
 - Returns: list of ledger entries with redistribution metadata
 - Qhorus-scoped — queries MessageLedgerEntryRepository
+
+**`set_channel_redistribution_threshold(channel, threshold?)`**
+- Sets `redistributionCapacityThreshold` on the channel; null clears
+- Qhorus-scoped — updates Channel record
+
+**`get_channel_redistribution_threshold(channel)`**
+- Returns the channel's `redistributionCapacityThreshold` with effective value (including fallback to global `casehub.capacity.redistribution.redistribute-threshold`)
+- Qhorus-scoped — reads Channel record
 
 ### 5. Watchdog Interaction (D7)
 
@@ -172,15 +249,28 @@ Normal flow: redistribution fires first (lower threshold), reduces pressure, wat
 
 `@QuarkusTest` in `runtime/src/test/` with `@TestProfile` enabling capacity:
 
+**Scenario 1: Context-pressure-driven redistribution with channel-threshold filtering**
 1. Register two agents with capabilities
-2. Create channel with `routingCapacityThreshold` and `redistributionCapacityThreshold`
-3. Dispatch COMMAND to agent-1 (creates OPEN commitment)
-4. Dispatch EVENT with `context_window_pct: 90` for agent-1 (simulates pressure)
-5. Fire `CapacityPressureEvent` directly (bypass scheduler)
-6. Verify: HANDOFF message dispatched with sender `system:redistribution`
-7. Verify: commitment for agent-1 is DELEGATED
-8. Verify: new OPEN commitment exists for agent-2
-9. Verify: ledger entry recorded with `routing_original_target`, `routing_strategy = "redistribution"`
+2. Create channel-A with `redistributionCapacityThreshold = 0.80`
+3. Create channel-B with `redistributionCapacityThreshold = 0.95`
+4. Dispatch COMMAND to agent-1 in both channels (creates OPEN commitments)
+5. Dispatch EVENT with `context_window_pct: 90` for agent-1 (simulates 0.90 pressure)
+6. Fire `CapacityPressureEvent` directly (bypass scheduler)
+7. Verify: HANDOFF message dispatched for channel-A obligation (0.90 >= 0.80)
+8. Verify: NO HANDOFF for channel-B obligation (0.90 < 0.95 — filtered)
+9. Verify: commitment for agent-1 in channel-A is DELEGATED
+10. Verify: new OPEN commitment exists for agent-2 in channel-A
+11. Verify: commitment for agent-1 in channel-B remains OPEN
+12. Verify: ledger entry recorded with `routing_original_target`, `routing_strategy = "redistribution"`
+
+**Scenario 2: Commitment-count-driven redistribution**
+1. Register two agents with capabilities
+2. Create channel with default thresholds
+3. Create 20 OPEN commitments for agent-1 (max-obligations = 20, pressure = 1.0)
+4. Context pressure is LOW (0.1)
+5. Fire `CapacityPressureEvent` — aggregate pressure should be max(1.0, 0.1) = 1.0
+6. Verify: redistribution triggers from commitment pressure alone
+7. Verify: HANDOFF message dispatched
 
 Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observer test conventions).
 
@@ -190,9 +280,9 @@ Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observe
 
 | Key | Default | Where |
 |-----|---------|-------|
-| `casehub.capacity.threshold.compress` | `0.7` | platform (existing, unchanged) |
-| `casehub.capacity.threshold.redistribute` | `0.85` | platform (existing, enriched semantics) |
-| `casehub.capacity.threshold.escalate` | `0.95` | platform (existing, renamed semantics → immediate redistribute) |
+| `casehub.capacity.redistribution.compress-threshold` | `0.7` | platform (existing in CapacityPressureMonitor, adopted by DefaultRedistributionPolicy — replaces `casehub.capacity.threshold.compress`) |
+| `casehub.capacity.redistribution.redistribute-threshold` | `0.85` | platform (replaces `casehub.capacity.threshold.redistribute`) |
+| `casehub.capacity.redistribution.immediate-threshold` | `0.95` | platform (replaces `casehub.capacity.threshold.escalate` — name now matches semantics) |
 | `casehub.capacity.redistribution.grace-period` | `30s` | platform (new) |
 | `casehub.capacity.redistribution.inactivity-escalation` | `5m` | platform (new) |
 | `casehub.qhorus.capacity.max-obligations` | `20` | qhorus (new) |
@@ -202,20 +292,20 @@ Uses `QuarkusTransaction.requiringNew()` for setup and verification (per observe
 ## What's NOT Changing
 
 - `ContextPressureCapacitySource` — already correctly implements `CapacitySignalSource`, no changes
-- `QhorusRedistributionExecutor` — event observation, policy delegation, grace-period logic unchanged
+- `QhorusRedistributionExecutor` — event observation, policy delegation unchanged; escalation guard updated for channel-threshold awareness (see §3)
 - `RedistributionDelegate.compress()` and `escalate()` — unchanged
 - `RedistributionExecutedEvent` — unchanged
-- `RedistributionResult` — unchanged
 - Existing unit tests — unchanged (new tests added alongside)
 
 ---
 
 ## Migration & Compatibility
 
-- Platform `DefaultRedistributionPolicy` enrichment is backward-compatible — same config keys, additional branching uses fields already present in `RedistributionContext`
+- Platform `DefaultRedistributionPolicy` enrichment includes config key rename from `casehub.capacity.threshold.*` to `casehub.capacity.redistribution.*` — deployments with custom values for the old keys must update their config. This is deliberate: the old naming was inconsistent with `CapacityPressureMonitor` and the parent spec.
 - `@DefaultBean` annotation is backward-compatible — no consumer changes unless they want to override
 - `CommitmentCountCapacitySource` is additive — existing deployments gain a second signal source transparently via CDI discovery
-- Per-channel threshold columns are nullable — null = use global default (existing behavior)
+- Per-channel threshold column is nullable — null = use global default (existing behavior)
+- `RedistributionResult` gains `attemptedCount` and `filteredCount` fields (replacing the previous `totalCount`) — existing callers break at compile time, which is the point: they must handle the new semantics explicitly
 - MCP tools are additive — no existing tool signatures change
 
 ---
