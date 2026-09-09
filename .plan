@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-434-capacity-spi-adoption
-state: active
+state: closing:promoted
 project-sha: 1f6397cd68a736f3d3e5eae63ec12639d6fc3572
 date: 2026-09-08
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: 52
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#434 — Issue #434 ← active
   - [x] Batch 1: Platform enrichment
