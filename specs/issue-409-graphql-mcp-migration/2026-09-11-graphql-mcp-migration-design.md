@@ -22,9 +22,9 @@ Resolvers use MicroProfile GraphQL annotations (`@Query`, `@Mutation`, `@Descrip
 
 Six conceptual domains grouped by agent concern:
 
-### `channels` — Communication infrastructure
+### `channels` — Communication infrastructure (~58 ops, largest domain)
 
-Channel lifecycle, configuration, topics, membership, spaces, projections, gateway backends, summaries.
+Channel lifecycle, configuration, topics, membership, spaces, projections, gateway backends, summaries. This is the largest domain because channels are the central abstraction in qhorus — all sub-features (topics, membership, spaces, projections, gateway) are channel-scoped. If tool count proves unwieldy for agents, the domain can be split further (e.g., `channels-config` for the 15+ setter operations), but start unified.
 
 | Operation | Type | Current @Tool method | API facade |
 |-----------|------|---------------------|------------|
@@ -109,6 +109,8 @@ Sending messages, checking history, replies, reactions, search, wait/approval pa
 | requestApproval | M | requestApproval | ConsumerMessaging |
 | respondToApproval | M | respondToApproval | MessageDispatcher |
 | cancelWait | M | cancelWait | ConsumerMessaging |
+
+`waitForReply` and `requestApproval` are blocking long-poll operations with SSE keepalives. They stay as mutations for now (they have side effects: creating a polling registration). A subscription-based alternative could be added later alongside the mutation.
 
 ### `governance` — Commitments, watchdogs, enforcement
 
@@ -281,6 +283,10 @@ The current `graphql/` module has:
 - `QhorusModelEnricher` → becomes `ChannelsModelEnricher` or shared enricher
 
 Existing DTOs (`ChannelType`, `MessageType`, `CommitmentType`, etc.) move to domain-specific `dto/` packages or stay shared.
+
+The existing `QhorusSubscriptionResolver` (channelActivity, channelPresence) stays in the `channels/` package as `ChannelsSubscriptionResolver` with `@McpDomain("channels")`.
+
+`QhorusEntityMapper` (shared `@ApplicationScoped` mapper used by `QhorusMcpToolsBase` and `QhorusDashboardService`) is replaced by GraphQL DTO `from()` factories. If `QhorusDashboardService` still needs it after migration, retain it as a standalone mapper bean — but it no longer needs to serve the MCP layer.
 
 ## MCP Server Transition
 
