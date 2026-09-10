@@ -13,3 +13,9 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#409 — Issue #409 ← active
+  - [ ] Batch 1: Domain resolvers
+    - [ ] Task 1: Create channels domain resolvers
+    - [ ] Task 2: Create governance and messaging resolvers
+  - [ ] Batch 2: Cleanup
+    - [ ] Task 3: Remove unified resolvers and update tests
+    - [ ] Task 4: Domain registration verification test
