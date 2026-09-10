@@ -57,3 +57,29 @@
 **Sources:** Issue #409 domain table, #401 established pattern
 **Exploration:** quick
 **Status:** captured
+
+## D6: API-layer facades — create incrementally for each domain
+
+**Choice:** For each domain, create read/write API facade interfaces in `api/` (e.g., `InstanceManager`, `LedgerReader`, `ProjectionReader`). Runtime module implements them. GraphQL resolvers inject only API-layer interfaces.
+**Alternatives:**
+- Resolvers inject stores directly — stores are in api/ but resolvers would contain business logic that belongs in services
+- Resolvers inject runtime services — violates API-layer separation, creates tight coupling between graphql/ and runtime/
+**Rationale:** Follows the established pattern (ChannelManager interface in api/, ChannelService impl in runtime/). Keeps the graphql module's dependency graph clean — it depends only on api/, never on runtime/. Business logic stays in service implementations.
+**Trade-offs:** More interfaces and implementations to create upfront. For domains with simple CRUD, the facade may be thin. Acceptable — consistency and separation justify the boilerplate.
+**Depends on:** D1 (separate domains determine which facades are needed)
+**Sources:** Existing `ChannelManager.java`, `ChannelService.java`, `ChannelReader.java` pattern
+**Exploration:** quick
+**Status:** captured
+
+## D7: Compliance domain — own @McpDomain("compliance")
+
+**Choice:** The compliance-report module's resolvers migrate from `@McpDomain("qhorus")` to `@McpDomain("compliance")`.
+**Alternatives:**
+- Keep under "qhorus" — contradicts D1 (separate domains)
+- Nested "qhorus-compliance" — contradicts D2 (bare names)
+**Rationale:** Compliance is a distinct concern (EU AI Act reports, verification, property checks, signing). Agents should activate it independently. Consistent with D1.
+**Trade-offs:** None significant. The compliance module is already a separate Maven module.
+**Depends on:** D1 (separate domains), D2 (bare names)
+**Sources:** `ComplianceQueryResolver.java`, `ComplianceMutationResolver.java`
+**Exploration:** quick
+**Status:** captured
