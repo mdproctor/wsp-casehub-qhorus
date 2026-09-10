@@ -1,0 +1,15 @@
+# Work Plan — issue-409-graphql-mcp-migration
+
+## State
+branch: issue-409-graphql-mcp-migration
+state: scaffolded
+project-sha: 6c666caa3639d9fd5784769db52220388f7fc0ea
+date: 2026-09-10
+issue-repo: casehubio/qhorus
+covers: 409
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#409 — Issue #409 ← active
