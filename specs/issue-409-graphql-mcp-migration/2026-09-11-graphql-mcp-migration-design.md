@@ -16,7 +16,9 @@ Migrate all qhorus MCP operations to `@GraphQLApi`-annotated resolvers organized
 - A GraphQL HTTP API (via SmallRye GraphQL at `/graphql`)
 - MCP tools (via `DynamicToolRegistrar` → `casehub_action` + `casehub_activate`)
 
-Resolvers use MicroProfile GraphQL annotations (`@Query`, `@Mutation`, `@Description`) with `@McpDomain` for domain scoping. `@PlatformQuery`/`@PlatformMutation` are NOT used — those are for non-GraphQL APIs.
+Resolvers use MicroProfile GraphQL annotations (`@Query`, `@Mutation`, `@Description`) with `@McpDomain` for domain scoping. `@PlatformQuery`/`@PlatformMutation` are NOT used — those are for non-GraphQL APIs that still want MCP domain registration.
+
+**Note:** Issue #409's body references `@PlatformQuery`/`@PlatformMutation` as the target annotations. The correct annotations are `@Query`/`@Mutation` from MicroProfile GraphQL, as established by the existing resolver pattern and confirmed by the fact that `@PlatformQuery`/`@PlatformMutation` have zero usages in qhorus. The issue body should be updated to match this spec.
 
 ## Domain Architecture
 
@@ -24,7 +26,9 @@ Six conceptual domains grouped by agent concern:
 
 ### `channels` — Communication infrastructure (~58 ops, largest domain)
 
-Channel lifecycle, configuration, topics, membership, spaces, projections, gateway backends, summaries. This is the largest domain because channels are the central abstraction in qhorus — all sub-features (topics, membership, spaces, projections, gateway) are channel-scoped. If tool count proves unwieldy for agents, the domain can be split further (e.g., `channels-config` for the 15+ setter operations), but start unified.
+Channel lifecycle, configuration, topics, membership, spaces, projections, gateway backends, summaries. This is the largest domain because channels are the central abstraction in qhorus — all sub-features (topics, membership, spaces, projections, gateway) are channel-scoped.
+
+**Size concern (from spec review R1-05):** 58 operations in one `casehub_activate` call may overwhelm agent context windows. If this proves true during the channels sub-issue implementation, split into: `channels` (core CRUD + config, ~33 ops), `topics` (6 ops), `membership` (7 ops), `spaces` (9 ops). The split is deferred because (a) most agents use `casehub_action` dispatch, not activated tools, and (b) the conceptual grouping should be validated empirically before fragmenting.
 
 | Operation | Type | Current @Tool method | API facade |
 |-----------|------|---------------------|------------|
@@ -110,7 +114,9 @@ Sending messages, checking history, replies, reactions, search, wait/approval pa
 | respondToApproval | M | respondToApproval | MessageDispatcher |
 | cancelWait | M | cancelWait | ConsumerMessaging |
 
-`waitForReply` and `requestApproval` are blocking long-poll operations with SSE keepalives. They stay as mutations for now (they have side effects: creating a polling registration). A subscription-based alternative could be added later alongside the mutation.
+`waitForReply` and `requestApproval` are blocking long-poll operations with SSE keepalives. They stay as mutations for now (they have side effects: creating a polling registration).
+
+**Risk (from spec review R1-07):** SmallRye GraphQL dispatches mutations on Vert.x worker threads. A `waitForReply(timeoutS=300)` blocks a worker for 5 minutes, risking thread pool exhaustion under load. Mitigations: (a) cap GraphQL-layer timeout lower than MCP, (b) return `Uni<WaitResult>` for non-blocking execution. A subscription-based `waitForReply` should be filed as a follow-up issue.
 
 ### `governance` — Commitments, watchdogs, enforcement
 
@@ -250,29 +256,40 @@ public class ChannelsQueryResolver {
 
 ## API-Layer Gap Analysis
 
-### Tier 1 — Ready (facades already exist)
+**Important:** The gap is larger than just "create 4 new facades." Many operation-table mappings reference methods that don't yet exist on the listed API interfaces, or reference runtime classes that are not in `api/`. Each domain's sub-issue must verify the exact interface surface before coding resolvers.
 
-| Domain | Existing interfaces |
-|--------|-------------------|
-| channels | `ChannelReader`, `ChannelManager`, `TopicManager`, `TopicReader`, `MembershipManager`, `MembershipReader`, `BackendRegistry`, `PresenceTracker`, `ProjectionRegistry` |
-| messaging | `ConsumerMessaging`, `MessageDispatcher`, `MessageReader`, `ReactionManager`, `ReactionReader` |
-| governance | `CommitmentReader` |
-| agents | `PresenceTracker` |
-| data | `DataStore` |
+### Tier 1 — Partially ready (some facade methods exist, others need adding)
 
-### Tier 2 — Stores exist, facade may be needed for business logic
+| Domain | Existing interfaces | Missing methods (need adding to existing interfaces) |
+|--------|-------------------|------------------------------------------------------|
+| channels | `ChannelReader`, `ChannelManager` (partial), `TopicManager`, `TopicReader`, `MembershipManager` (partial), `MembershipReader` (partial) | `ChannelManager` needs: `clear`, `setDeliveryTracking`, `setEnforcementMode/Exclusions`, `setRoutingConfig`, `set*Threshold`, `updateChannelBinding`, `forceReleaseChannel`, `moveChannelToSpace`. `MembershipReader` needs: `unreadCounts`, `deliveryStatus`. |
+| messaging | `MessageDispatcher`, `MessageReader` (partial), `ReactionManager`, `ReactionReader` | `ConsumerMessaging` needs: `search`, `waitForReply`, `requestApproval`, `cancelWait`. `MessageReader` needs: `findReplies`. |
+| governance | `CommitmentReader` | — |
+| agents | `PresenceTracker` | — |
+| data | `DataStore` | — |
 
-| Domain | Gap | Action |
-|--------|-----|--------|
-| agents | Instance registration has business logic (capability management, online/offline state) | Create `InstanceManager` in `api/instance/` |
-| governance | Watchdog registration/deletion has validation logic | Create `WatchdogManager` in `api/watchdog/` |
+### Tier 2 — Need new facade interfaces (business logic in runtime services)
 
-### Tier 3 — New reader interfaces needed
+| Domain | Runtime class | Action |
+|--------|--------------|--------|
+| agents | `InstanceService` | Create `InstanceManager` in `api/instance/` |
+| governance | `WatchdogEvaluationService` | Create `WatchdogManager` in `api/watchdog/` |
+| channels | `ChannelSummaryService` | Create `ChannelSummaryManager` in `api/channel/` or extend `ChannelManager` |
+| channels | `SpaceService` | Create `SpaceManager` in `api/channel/` |
+| channels | `RoutingBridge.diagnose()` | Create `RoutingDiagnostics` reader in `api/` |
+| channels | `ProjectionRegistry`, `ProjectionService` | Create `ProjectionReader` in `api/` |
 
-| Domain | Gap | Action |
-|--------|-----|--------|
-| audit | Ledger queries are currently internal (`MessageLedgerEntryRepository`) | Create `LedgerReader` in `api/store/` — read-only facade over ledger query methods |
-| governance | Capacity queries are in runtime `ActorCapacityView` | Promote `ActorCapacityView` to `api/` or create `CapacityReader` |
+### Tier 3 — Need new reader interfaces (queries currently internal)
+
+| Domain | Runtime class | Action |
+|--------|--------------|--------|
+| audit | `MessageLedgerEntryRepository`, `CausalGraphService` | Create `LedgerReader` in `api/store/` — obligation chain, causal chain/graph, stalled obligations, stats, telemetry, timeline, obligation activity, attestations |
+| governance | `ActorCapacityView` (runtime) | Promote to `api/` or create `CapacityReader` |
+| channels | Digest aggregation logic in `QhorusMcpTools.channelDigest()` | Move aggregation into an API facade method |
+
+### Business logic migration
+
+~25 record types in `QhorusMcpToolsBase` (`ChannelDigest`, `ObligationChainSummary`, `TelemetrySummary`, etc.) contain aggregation business logic in their construction sites. This logic moves into the new API facades — e.g., `LedgerReader.getObligationChain()` returns a domain record, and the GraphQL DTO's `from()` factory maps it. The resolvers stay thin.
 
 ## Existing Resolver Migration
 
