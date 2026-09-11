@@ -2,18 +2,21 @@
 
 ## Last Session
 
-Implemented judgment compliance evidence for E5 audit reports (#413) — two new report types (JUDGMENT_ATTRIBUTION, JUDGMENT_FULFILLMENT) with telemetry contract constants, V2004 migration, dedicated columns, backward-compatible Merkle chain extension, SQL aggregation queries, full API exposure. Decision review caught the `telemetry_json` approach and steered to dedicated columns; spec review caught domainContentBytes() backward-compat and pending scope issues. Then extended with reasoning trace integration (#420) leveraging slot 140 worker reasoning traces — V2005 migration, extraction, model/DTO/renderer updates. Also fixed pre-existing XSS bug in HtmlReportRenderer.esc(). Engine#998 comment updated with full telemetry contract.
+Designed and implemented sub-issue 1 of epic #409 — migrating qhorus MCP tools to a GraphQL-backed hierarchical model. Brainstormed the full migration architecture (9 decisions, light decision review, light spec review), then implemented the first sub-issue: refactoring the `graphql/` module from a single `@McpDomain("qhorus")` to 3 domain-specific packages — `channels/`, `governance/`, `messaging/`. Existing unified resolvers (`QhorusQueryResolver`, `QhorusMutationResolver`, `QhorusSubscriptionResolver`, `QhorusModelEnricher`) deleted; replaced by domain-specific classes with `@McpDomain("channels")`, `@McpDomain("governance")`, `@McpDomain("messaging")`. 24 tests passing. Branch closed, squashed (6 → 3 commits), merged to main, issue #409 closed.
 
 ## Immediate Next Step
 
-Engine#998 (judgment ledger events) is aspirational — no immediate qhorus follow-up. Next work should come from the epic #410 roadmap or unrelated issues.
+Epic #409 has 6 remaining sub-issues. Next: sub-issue 2 (messaging domain expansion — add remaining message operations to `MessagingMutationResolver`/new `MessagingQueryResolver`). The design spec at `docs/specs/issue-409-graphql-mcp-migration/` covers all 6 domains with operation tables and API-layer gap analysis.
 
 ## Cross-Module
 
-- casehubio/engine#998 — telemetry contract defined, comment posted. Engine implements `JudgmentEventKinds` constants when judgment yield work begins.
+- `casehub-platform` `mcp/` — `GraphQLModelScanner`, `DynamicToolRegistrar` are the platform infrastructure. No platform changes needed for this work.
+- `compliance-report/` module still uses `@McpDomain("qhorus")` — sub-issue 7 renames to `@McpDomain("compliance")`.
 
 ## References
 
-- `docs/specs/issue-413-judgment-compliance-evidence/` — design spec + decisions
-- `docs/blog/2026-08-27-mdp01-the-contract-before-the-caller.md` — session diary
-- `api/src/main/java/io/casehub/qhorus/api/judgment/JudgmentEventKinds.java` — contract constants
+- `docs/specs/issue-409-graphql-mcp-migration/2026-09-11-graphql-mcp-migration-design.md` — full migration design spec
+- `docs/specs/issue-409-graphql-mcp-migration/decisions.md` — D1-D9 validated decisions
+- `graphql/src/main/java/io/casehub/qhorus/graphql/channels/` — new channels domain resolvers
+- `graphql/src/main/java/io/casehub/qhorus/graphql/governance/` — new governance domain
+- `graphql/src/main/java/io/casehub/qhorus/graphql/messaging/` — new messaging domain
