@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-409-graphql-mcp-migration
-state: active
+state: closing:promoted
 project-sha: 6c666caa3639d9fd5784769db52220388f7fc0ea
 date: 2026-09-10
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#409 — Issue #409 ← active
   - [x] Batch 1: Domain resolvers
