@@ -1,0 +1,15 @@
+# Work Plan — issue-436-messaging-graphql
+
+## State
+branch: issue-436-messaging-graphql
+state: scaffolded
+project-sha: 510fde09da078691837391c06b5e913e21c1ca89
+date: 2026-09-11
+issue-repo: casehubio/qhorus
+covers: 436
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#436 — Issue #436 ← active
