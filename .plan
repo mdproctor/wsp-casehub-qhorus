@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-429-summary-tenant-context-fix
-state: closing:review
+state: closing:promoted
 project-sha: 4d450243d587d16164a771ca7a385be415524fb3
 date: 2026-09-11
 issue-repo: casehubio/qhorus
