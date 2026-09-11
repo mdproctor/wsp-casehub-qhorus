@@ -347,17 +347,17 @@ Observes `CapacityPressureEvent`. Execution sequence:
 - No-op defaults for all SPIs
 - Tests: CDI-free unit tests for aggregation + policy
 
-### Batch 2: Eidos Selection Enrichment (eidos-api + eidos)
+### Batch 2: Eidos Selection Enrichment (eidos-api + eidos + qhorus)
 - `SelectionContext` extension (capacityView field)
 - `CapabilityHealth.OVERLOADED` probe step
 - `casehub.eidos.routing.default-capacity-threshold` config
+- `Channel.routingCapacityThreshold` + migration (consumed by eidos OVERLOADED probe)
 - Tests: selection with overloaded candidates excluded
 
 ### Batch 3: Qhorus Signal Source + Redistribution (qhorus)
 - `ContextPressureCapacitySource` implements `CapacitySignalSource`
 - `QhorusRedistributionExecutor` observes `CapacityPressureEvent`
 - Compression-first flow (channel summary → re-evaluate → HANDOFF)
-- `Channel.routingCapacityThreshold` + migration
 - `RedistributionExecutedEvent` CDI event
 - Tests: CDI-free executor tests, integration test with HANDOFF verification
 
