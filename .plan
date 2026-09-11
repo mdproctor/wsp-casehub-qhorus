@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-430-reconcile-capacity-spec
-state: active
+state: closing:review
 project-sha: 83d3a0127ae8e88e9cbe73074e13ae062b560da4
 date: 2026-09-11
 issue-repo: casehubio/qhorus
@@ -11,5 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#430 — Issue #430 ← active
