@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-430-reconcile-capacity-spec
-state: closing:review
+state: closing:promoted
 project-sha: 83d3a0127ae8e88e9cbe73074e13ae062b560da4
 date: 2026-09-11
 issue-repo: casehubio/qhorus
