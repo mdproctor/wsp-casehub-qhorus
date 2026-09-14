@@ -70,3 +70,38 @@
 **Sources:** TrustScoreSource SPI, TrustGateService, TrustScoreComputer, RoutingBridge
 **Exploration:** quick
 **Status:** captured
+
+## D7: Module structure for signing implementation
+
+**Choice:** New `agent-card-signing` optional module — activates by classpath presence, contains `JwsAgentCardSigningService` (real impl using Nimbus JOSE+JWT), key loading from CredentialResolver
+**Alternatives:**
+- Inline in runtime — simpler but adds Nimbus JOSE+JWT as transitive dependency for all qhorus consumers whether they want signing or not
+**Rationale:** Follows established optional module pattern (slack-channel, webhook-observer, a2a-outbound). @DefaultBean NoOp in runtime means unsigned cards by default; adding the optional module overrides it. Keeps runtime classpath lean.
+**Trade-offs:** One more Maven module to maintain. Consumers must add an explicit dependency to enable signing.
+**Depends on:** D4 (SPI in qhorus-api, NoOp default in runtime)
+**Sources:** slack-channel/, webhook-observer/, a2a-outbound/ module patterns
+**Exploration:** quick
+**Status:** captured
+
+## D8: AgentCard record changes
+
+**Choice:** Additive nullable `List<AgentCardSignature>` field on `io.casehub.a2a.model.AgentCard` (Layer 0 shared library in casehub-a2a-protocol)
+**Alternatives:**
+- Separate `SignedAgentCard` wrapper record — avoids touching the shared record but complicates serialization and doubles the type surface
+**Rationale:** A2A v1.0 defines `signatures` as an optional repeated field on the agent card itself. Adding it as nullable preserves backward compat — unsigned cards serialize with signatures omitted. `AgentCardSignature` record carries `protected` (base64url JWS header) and `signature` (base64url).
+**Trade-offs:** Touches Layer 0 shared library — requires casehub-a2a-protocol release. But the change is purely additive (new nullable field + new record type).
+**Sources:** A2A v1.0 spec (AgentCard.signatures), io.casehub.a2a.model.AgentCard
+**Exploration:** quick
+**Status:** captured
+
+## D9: JWKS endpoint location
+
+**Choice:** `/.well-known/jwks.json` served by `AgentCardResource` — co-located with agent cards, matches A2A `jku` convention
+**Alternatives:**
+- Separate JwksResource — unnecessary separation for a single GET endpoint
+- No JWKS endpoint (key embedded in JWS header) — works but doesn't support key rotation; verifiers must re-fetch the full card to get the new key
+**Rationale:** Co-locating with agent cards means one resource serves the complete A2A identity surface. The `jku` field in JWS protected headers points here. Key rotation = update JWKS, re-sign cards — verifiers re-fetch keys from the same well-known URL.
+**Trade-offs:** JWKS endpoint is unauthenticated (public keys are public). Rate limiting may be needed in production.
+**Sources:** RFC 7517 (JWK), A2A v1.0 jku convention, AgentCardResource.java
+**Exploration:** quick
+**Status:** captured
