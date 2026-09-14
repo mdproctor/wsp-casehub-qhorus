@@ -6,26 +6,31 @@
 
 ## Overview
 
-Adds JWS (RFC 7515, ES256) signing to agent cards served at `/.well-known/agent.json` and `/.well-known/agents/{instanceId}.json`, with signature verification on inbound A2A card fetches and a trust score bonus for cryptographically verified agents.
+Adds JWS (RFC 7515) signing to agent cards served at `/.well-known/agent.json` and `/.well-known/agents/{instanceId}.json`, with signature verification on inbound agent card fetch at binding creation time, and a trust score contribution for cryptographically verified agents.
 
-This is the first implementation pass of E6. DID anchoring (did:web, did:key), verifiable credential issuance, and per-agent signing keys are deferred to child issues — they build on this foundation without requiring rework.
+This is a **platform security extension** — cryptographic agent identity anchoring for the casehub ecosystem. The A2A protocol does not define agent card signing; the `signatures` envelope and JWKS endpoint are casehub-specific. Signing uses the existing platform `SigningProvider` SPI (promoted to `casehub-platform-api` by platform#244 specifically for this use case), following the algorithm-transparent signing protocol (PP-20260523-e7b577).
+
+The design builds on existing platform identity infrastructure: `ActorDIDProvider` for DID resolution, `VerificationMethod` and `VerificationMethodType` for key material typing, and `SigningProvider` for raw cryptographic operations. Deferred DID work (did:web, did:key) extends these existing SPIs rather than creating parallel infrastructure.
+
+This is the first implementation pass of E6. DID anchoring, verifiable credential issuance, and per-agent signing keys are deferred to child issues — they build on this foundation without requiring rework.
 
 ## Scope
 
 **In scope:**
-- `AgentCardSigningService` SPI in `casehub-qhorus-api` (sign + verify)
-- `agent-card-signing` optional module with JWS implementation (Nimbus JOSE+JWT)
-- `AgentCard` record extended with `signatures` field (`casehub-a2a-protocol`)
-- `AgentCardResource` enhanced to sign outbound cards and serve JWKS at `/.well-known/jwks.json`
-- Inbound card verification in `a2a-outbound` (soft failure — unsigned cards accepted)
-- `identity-verification` trust score dimension via decorator `TrustScoreSource`
+- `AgentCardSigner` SPI in `casehub-qhorus-api` (sign + verify + JWKS)
+- `agent-card-signing` optional module with JWS implementation (Nimbus JOSE+JWT), using platform `SigningProvider` for raw crypto
+- Outbound card signing in `AgentCardResource` — signed JSON envelope wrapping `AgentCard`
+- JWKS endpoint at `/.well-known/jwks.json` with Cache-Control and CORS headers
+- Inbound card verification on binding creation/update in `ExternalAgentBindingResource`
+- `ExternalAgentBinding` extended with verification status fields
+- `identity-verification` trust score dimension via `@Decorator TrustScoreSource`
 
 **Out of scope:**
-- DID anchoring (did:web, did:key) — child issue
+- DID anchoring (did:web, did:key) — child issue (builds on existing `ActorDIDProvider`)
 - Verifiable credential issuance for capabilities — child issue
 - Per-agent signing keys — requires DID infrastructure
 - Key rotation automation — operational concern, manual rotation supported via CredentialResolver
-- Flyway migrations in qhorus runtime — ExternalAgentBinding is in `a2a-outbound`
+- Pluggable trust dimension provider SPI in ledger — child issue (replaces tactical decorator)
 
 ## Architecture
 
@@ -34,19 +39,26 @@ This is the first implementation pass of E6. DID anchoring (did:web, did:key), v
 | Standard | Usage |
 |----------|-------|
 | JWS (RFC 7515) | Signature envelope format |
-| ES256 (ECDSA P-256) | Signing algorithm (A2A v1.0 primary) |
+| EdDSA / Ed25519 (RFC 8032, RFC 8037) | Default signing algorithm (per issue #403 and platform `SigningProvider`) |
+| ES256 (ECDSA P-256) | Supported alternative (configure via key type) |
 | JCS (RFC 8785) | JSON Canonicalization Scheme for deterministic signing input |
 | JWK (RFC 7517) | Public key format for JWKS endpoint |
 
-A2A v1.0 (sections 4.4.7, 8.4) specifies JWS with ES256/RS256 for agent card signing. ES256 is the primary algorithm. The JWS protected header carries `alg`, `typ`, `kid`, and optionally `jku` pointing to the JWKS endpoint.
+The signing algorithm is determined by the configured key material via `SigningProvider`, following the platform's algorithm-transparent signing protocol (PP-20260523-e7b577). No algorithm string is hardcoded. The default key type is Ed25519 (matching issue #403's specification: "Ed25519 via platform SigningService SPI"). Deployments using EC P-256 keys will produce ES256 signatures automatically.
+
+The JWS protected header carries `alg`, `typ`, `kid`, and optionally `jku` pointing to the JWKS endpoint. The `typ` value `agentcard+jws` is a casehub-defined media type (not A2A-specified).
+
+**Design decision:** Issue #403 specifies "Ed25519 via platform SigningService SPI." The original spec used ES256 based on a misattribution to A2A v1.0 sections 4.4.7 and 8.4. Those sections do not exist in the A2A specification — the A2A protocol does not define agent card signing. Since the algorithm choice is unconstrained by the protocol, Ed25519 (EdDSA) is the correct default: it matches the issue, aligns with `SigningProvider`'s design origin, and is supported by `VerificationMethodType.ED25519` in the platform identity infrastructure.
 
 ### Key Management
 
-Platform-level — one EC P-256 key pair per deployment/tenant, managed via the platform `CredentialResolver` SPI. The platform signs all agent cards centrally. Key material is never exposed in agent card responses, ledger entries, or logs (per protocol PP-20260612-bd6f8c).
+Platform-level — one key pair per deployment/tenant, managed via the platform `CredentialResolver` SPI. The platform signs all agent cards centrally. Key material is never exposed in agent card responses, ledger entries, or logs (per protocol PP-20260612-bd6f8c).
+
+The key pair type (Ed25519 or EC P-256) determines the JWS algorithm automatically via `SigningProvider`'s algorithm-transparent design.
 
 ### Canonicalization
 
-Before signing, the `AgentCard` is serialized to JSON with the `signatures` field excluded, then canonicalized via JCS (RFC 8785). JCS produces a deterministic JSON byte sequence by:
+Before signing, the `AgentCard` is serialized to JSON (without any `signatures` field — the card record has no signatures), then canonicalized via JCS (RFC 8785). JCS produces a deterministic JSON byte sequence by:
 - Sorting object keys lexicographically
 - Normalizing numbers (no trailing zeros, no leading plus)
 - Normalizing strings (shortest UTF-8 escape sequences)
@@ -56,218 +68,44 @@ The canonical form is the JWS payload. Verification re-canonicalizes the receive
 
 ## SPI Contract
 
-### AgentCardSigningService (api/spi/)
+### AgentCardSigner (casehub-qhorus-api)
 
 ```java
 package io.casehub.qhorus.api.spi;
 
-import io.casehub.a2a.model.AgentCardSignature;
-import java.util.List;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.casehub.a2a.model.AgentCard;
 
-public interface AgentCardSigningService {
+public interface AgentCardSigner {
 
-    SignedCard sign(String canonicalJson);
+    ObjectNode sign(AgentCard card);
 
-    VerificationResult verify(String canonicalJson, List<AgentCardSignature> signatures);
+    VerificationResult verify(ObjectNode signedCardJson);
 
-    record SignedCard(List<AgentCardSignature> signatures) {}
+    ObjectNode jwks();
 
     record VerificationResult(boolean verified, String keyId, String error) {}
 }
 ```
 
-- `sign()` takes JCS-canonicalized card JSON, returns JWS signatures
-- `verify()` takes canonical JSON + inbound signatures, returns verification status with the `kid` that verified (or error message on failure)
-- `@DefaultBean NoOpAgentCardSigningService` in runtime returns empty signatures on sign and `VerificationResult(false, null, null)` on verify — signing is off by default
+- `sign()` takes an `AgentCard`, serializes and canonicalizes it, signs with `SigningProvider`, and returns a `ObjectNode` containing all card fields plus a `signatures` array
+- `verify()` takes a signed card JSON node, extracts signatures, re-canonicalizes the card payload, and verifies via JWKS resolution
+- `jwks()` returns the JWKS document for the `/.well-known/jwks.json` endpoint
+- `AgentCard` record is unchanged — no `signatures` field. The signatures are part of the JWS envelope, not the protocol model
 
-### AgentCardSignature (casehub-a2a-protocol)
+The `AgentCardResource` injects `Instance<AgentCardSigner>` and checks `isResolvable()` — the same optional-module pattern used for `PushNotificationConfigStore`. When the signing module is absent, cards are served unsigned (plain `AgentCard` serialization).
 
-```java
-package io.casehub.a2a.model;
+### AgentCard — no changes
 
-public record AgentCardSignature(
-    String protectedHeader,  // base64url-encoded JWS protected header
-    String signature         // base64url-encoded JWS signature value
-) {}
-```
+The `AgentCard` record in `casehub-a2a-protocol` is **not modified**. Agent card signing is a casehub platform extension, not an A2A protocol feature. Putting signing-specific types (`AgentCardSignature`, `signatures` field) into the Layer 0 protocol model would be architectural contamination — coupling a pure protocol module to a platform security extension.
 
-### AgentCard changes (casehub-a2a-protocol)
+The signing module works at the JSON level: it wraps the serialized `AgentCard` with a `signatures` array in the output JSON, and strips it before verification. The `AgentCard` record stays pure A2A.
 
-Additive field on the existing `AgentCard` record:
+For inbound deserialization, `AgentCard` already tolerates unknown properties (Jackson default with `@JsonIgnoreProperties(ignoreUnknown = true)` or Quarkus configuration). The signing module extracts `signatures` from the raw JSON before deserializing the card.
 
-```java
-public record AgentCard(
-    String name,
-    String description,
-    String url,
-    String version,
-    List<AgentSkill> skills,
-    AgentCapabilities capabilities,
-    Map<String, Object> authentication,
-    String tenancyId,
-    List<AgentRef> agents,
-    List<AgentCardSignature> signatures  // nullable — null/omitted for unsigned cards
-) {
-    // Backward-compatible 9-arg constructor (delegates with signatures=null)
-    public AgentCard(String name, String description, String url, String version,
-                     List<AgentSkill> skills, AgentCapabilities capabilities,
-                     Map<String, Object> authentication, String tenancyId,
-                     List<AgentRef> agents) {
-        this(name, description, url, version, skills, capabilities,
-             authentication, tenancyId, agents, null);
-    }
-    // ...existing methods...
-}
-```
+### ExternalAgentBinding Changes
 
-JSON serialization: `@JsonInclude(JsonInclude.Include.NON_NULL)` on the `signatures` field ensures unsigned cards omit it entirely.
-
-## Module Structure
-
-### agent-card-signing/ (new optional module)
-
-```
-agent-card-signing/
-├── pom.xml
-└── src/main/java/io/casehub/qhorus/signing/
-    ├── JwsAgentCardSigningService.java  — @ApplicationScoped impl
-    ├── JwsKeyProvider.java              — EC key pair from CredentialResolver
-    ├── JcsCanonicalizer.java            — RFC 8785 canonicalization
-    ├── SigningConfig.java               — @ConfigMapping
-    └── IdentityVerificationTrustSource.java — TrustScoreSource decorator
-```
-
-Activates by classpath presence. `JwsAgentCardSigningService` is `@ApplicationScoped` (not `@Alternative`) — it displaces the `@DefaultBean NoOpAgentCardSigningService` in runtime automatically via CDI priority.
-
-**Dependencies:**
-- `casehub-qhorus-api` (SPI interface)
-- `casehub-a2a-protocol` (AgentCardSignature)
-- `casehub-ledger` (TrustScoreSource, TrustGateService)
-- `com.nimbusds:nimbus-jose-jwt` (JWS implementation)
-- `casehub-platform-api` (CredentialResolver)
-
-### Configuration
-
-```properties
-# Signing
-casehub.qhorus.signing.enabled=true
-casehub.qhorus.signing.key-ref=agent-card-signing-key
-casehub.qhorus.signing.algorithm=ES256
-casehub.qhorus.signing.key-id=default
-casehub.qhorus.signing.jwks-url=
-
-# Trust integration
-casehub.qhorus.signing.trust.verified-floor-score=0.6
-casehub.qhorus.signing.trust.dimension-weight=0.15
-```
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `enabled` | `true` | Gate — `false` disables signing even with module on classpath |
-| `key-ref` | `agent-card-signing-key` | CredentialResolver key reference for the EC key pair |
-| `algorithm` | `ES256` | JWS algorithm identifier |
-| `key-id` | `default` | `kid` value in JWS protected header and JWKS |
-| `jwks-url` | (empty) | Override for `jku` in JWS header; defaults to `/.well-known/jwks.json` on self |
-| `trust.verified-floor-score` | `0.6` | Floor trust score for verified agents in the `identity-verification` dimension |
-| `trust.dimension-weight` | `0.15` | Weight of identity-verification dimension in global trust aggregate |
-
-## Data Flow
-
-### Outbound Signing (AgentCardResource)
-
-```
-1. AgentCardResource.getAgentCard()
-2.   → build AgentCard with signatures=null (existing logic)
-3.   → serialize to JSON, exclude signatures field
-4.   → JcsCanonicalizer.canonicalize(json)
-5.   → AgentCardSigningService.sign(canonicalJson)
-6.     → if NoOp: return SignedCard(List.of()) → card served unsigned
-7.     → if JWS impl: build JWS protected header {alg:ES256, typ:agentcard+jwt, kid:default, jku:/.well-known/jwks.json}
-8.       → ECDSA-sign canonical payload with private key from JwsKeyProvider
-9.       → return SignedCard(List.of(new AgentCardSignature(protectedB64, signatureB64)))
-10.  → construct final AgentCard with signatures populated (or null if empty)
-11.  → return to client
-```
-
-Same flow applies to per-agent cards at `/.well-known/agents/{instanceId}.json`.
-
-### Inbound Verification (a2a-outbound)
-
-```
-1. A2AOutboundBackend fetches remote /.well-known/agent.json
-2.   → deserialize AgentCard
-3.   → if card.signatures() is null or empty:
-4.       → binding.verificationStatus = UNVERIFIED; proceed
-5.   → extract jku from first signature's protected header
-6.   → fetch JWKS from jku URL (HTTP GET, cached)
-7.   → serialize card without signatures → JcsCanonicalizer.canonicalize()
-8.   → AgentCardSigningService.verify(canonicalJson, card.signatures())
-9.     → resolve public key from JWKS by kid in protected header
-10.    → ECDSA-verify canonical payload against signature
-11.    → return VerificationResult(verified, keyId, error)
-12.  → if verified:
-13.      → binding.verificationStatus = VERIFIED
-14.      → binding.verifiedAt = Instant.now()
-15.      → binding.verificationKeyId = result.keyId()
-16.  → if not verified:
-17.      → binding.verificationStatus = FAILED
-18.      → LOG.warn("Agent card verification failed for {}: {}", endpoint, result.error())
-19.  → proceed with dispatch regardless (soft failure)
-```
-
-### JWKS Endpoint
-
-```
-GET /.well-known/jwks.json → AgentCardResource
-
-Response:
-{
-  "keys": [{
-    "kty": "EC",
-    "crv": "P-256",
-    "kid": "default",
-    "use": "sig",
-    "x": "<base64url>",
-    "y": "<base64url>"
-  }]
-}
-```
-
-The public key is extracted from the same key pair used for signing. The JWKS endpoint is unauthenticated (public keys are public by definition).
-
-## Trust Score Integration
-
-### IdentityVerificationTrustSource (decorator pattern)
-
-```java
-@Alternative @Priority(100)
-@ApplicationScoped
-public class IdentityVerificationTrustSource implements TrustScoreSource {
-
-    private final TrustScoreSource delegate;
-    private final ExternalAgentBindingStore bindingStore;
-    private final SigningConfig config;
-
-    // All TrustScoreSource methods delegate to the ledger-based source.
-    // dimensionScore(actorId, "identity-verification") returns:
-    //   - config.trust.verified-floor-score for VERIFIED agents
-    //   - OptionalDouble.empty() for UNVERIFIED/FAILED/unknown
-    // globalScore(actorId) merges identity dimension into aggregate
-    //   using config.trust.dimension-weight
-}
-```
-
-The decorator wraps the existing ledger-based `TrustScoreSource`. When `agent-card-signing` is on the classpath, the `@Alternative @Priority(100)` displaces the default source. All existing dimension scores pass through unchanged; the identity-verification dimension is additive.
-
-**Composition with existing trust consumers:**
-- `TrustGateService.meetsThreshold()` — works unchanged (reads globalScore)
-- `RoutingBridge.lookupTrustScore()` — works unchanged (reads globalScore via TrustGateService)
-- `TrustScoreResource` — returns the identity dimension alongside existing dimensions
-- `DefaultObligorTrustPolicy` — works unchanged (delegates to TrustGateService)
-
-### ExternalAgentBinding Changes (a2a-outbound)
-
-New nullable fields on the existing entity:
+New fields on the `ExternalAgentBinding` record:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -281,7 +119,249 @@ public enum VerificationStatus {
 }
 ```
 
-Flyway migration in `a2a-outbound` module (not qhorus runtime — ExternalAgentBinding is owned by a2a-outbound).
+**Scope of change:** `ExternalAgentBinding` is a Java record (6 → 9 components). This changes the canonical constructor and requires updating all construction sites:
+- `ExternalAgentBindingEntity.toDomain()` and `fromDomain()` in `runtime/`
+- `ExternalAgentBindingResource.put()` in `a2a-outbound/`
+- `InMemoryExternalAgentBindingStore` in `persistence-memory/`
+- `ExternalAgentBindingResourceTest` and `ExternalAgentBindingStoreContractTest`
+- `A2AOutboundBackendTest` (any binding construction)
+
+No backward-compatible constructor — the platform has no end users; breaking changes are the point, forcing every caller to be explicit about verification state.
+
+**Flyway migration** in `runtime/src/main/resources/db/qhorus/migration/` (following Flyway consumer versioning protocol PP-20260521-0ba358):
+
+```sql
+-- V54__external_agent_binding_verification.sql
+ALTER TABLE external_agent_binding ADD COLUMN verification_status VARCHAR(20) DEFAULT 'UNVERIFIED';
+ALTER TABLE external_agent_binding ADD COLUMN verified_at TIMESTAMP;
+ALTER TABLE external_agent_binding ADD COLUMN verification_key_id VARCHAR(255);
+```
+
+The entity, record, store interface, and Flyway migration are all in their established locations:
+- Record: `api/src/main/java/io/casehub/qhorus/api/instance/ExternalAgentBinding.java`
+- Entity: `runtime/src/main/java/io/casehub/qhorus/runtime/instance/ExternalAgentBindingEntity.java`
+- Migration: `runtime/src/main/resources/db/qhorus/migration/V54__external_agent_binding_verification.sql`
+- FK constraint `fk_eab_instance` ties this to the qhorus runtime schema
+
+## Module Structure
+
+### agent-card-signing/ (new optional module)
+
+```
+agent-card-signing/
+├── pom.xml
+└── src/main/java/io/casehub/qhorus/signing/
+    ├── JwsAgentCardSigner.java          — @ApplicationScoped AgentCardSigner impl
+    ├── JwsKeyProvider.java              — key pair from SigningProvider
+    ├── JcsCanonicalizer.java            — RFC 8785 canonicalization
+    ├── JwksCache.java                   — remote JWKS fetching with caching
+    ├── SigningConfig.java               — @ConfigMapping
+    └── IdentityVerificationTrustDecorator.java — @Decorator TrustScoreSource
+```
+
+Activates by classpath presence. `JwsAgentCardSigner` is `@ApplicationScoped` — when present, `Instance<AgentCardSigner>.isResolvable()` returns true in `AgentCardResource`.
+
+**Dependencies:**
+- `casehub-qhorus-api` (AgentCardSigner SPI)
+- `casehub-a2a-protocol` (AgentCard — for serialization)
+- `casehub-platform-api` (SigningProvider, CredentialResolver)
+- `casehub-ledger-api` (TrustScoreSource — for decorator)
+- `com.nimbusds:nimbus-jose-jwt` (JWS implementation)
+
+**Key architectural relationship:** `JwsAgentCardSigner` uses `SigningProvider.sign(actorId, canonicalBytes)` for the raw cryptographic operation, then wraps the `SignatureResult` in a JWS envelope (base64url-encoded protected header + signature). This follows the same pattern as `ComplianceReportSigningService` wrapping `DocumentSigningService` — application-level orchestration atop a platform signing SPI. The `NoOpSigningProvider` (`@DefaultBean`) means signing is no-op when no signing backend is configured, even with the agent-card-signing module on the classpath.
+
+### Configuration
+
+```properties
+# Signing
+casehub.qhorus.signing.enabled=true
+casehub.qhorus.signing.actor-id=system:agent-card-signer
+casehub.qhorus.signing.key-id=default
+casehub.qhorus.signing.jwks-url=
+
+# Inbound JWKS caching
+casehub.qhorus.signing.jwks-cache.ttl=3600
+casehub.qhorus.signing.jwks-cache.max-response-bytes=65536
+casehub.qhorus.signing.jwks-cache.connect-timeout-ms=5000
+casehub.qhorus.signing.jwks-cache.read-timeout-ms=5000
+
+# Trust integration
+casehub.qhorus.signing.trust.verified-floor-score=0.6
+casehub.qhorus.signing.trust.dimension-weight=0.15
+```
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `enabled` | `true` | Gate — `false` disables signing even with module on classpath |
+| `actor-id` | `system:agent-card-signer` | actorId passed to `SigningProvider.sign()` for key resolution |
+| `key-id` | `default` | `kid` value in JWS protected header and JWKS |
+| `jwks-url` | (empty) | Override for `jku` in JWS header; defaults to `/.well-known/jwks.json` on self |
+| `jwks-cache.ttl` | `3600` | Cache TTL in seconds for remote JWKS responses |
+| `jwks-cache.max-response-bytes` | `65536` | Maximum JWKS response size (DoS protection) |
+| `jwks-cache.connect-timeout-ms` | `5000` | HTTP connect timeout for JWKS fetch |
+| `jwks-cache.read-timeout-ms` | `5000` | HTTP read timeout for JWKS fetch |
+| `trust.verified-floor-score` | `0.6` | Floor trust score for verified agents in the `identity-verification` dimension |
+| `trust.dimension-weight` | `0.15` | Weight of identity-verification dimension in global trust aggregate |
+
+## Data Flow
+
+### Outbound Signing (AgentCardResource)
+
+```
+1. AgentCardResource.getAgentCard()
+2.   → build AgentCard (existing logic, unchanged record)
+3.   → if AgentCardSigner is resolvable:
+4.       → AgentCardSigner.sign(card)
+5.         → serialize AgentCard to JSON via ObjectMapper
+6.         → JcsCanonicalizer.canonicalize(cardJson) → canonical bytes
+7.         → SigningProvider.sign(actorId, canonicalBytes)
+8.           → if NoOpSigningProvider: return Optional.empty() → card served unsigned
+9.           → if signing backend configured: sign with private key → SignatureResult
+10.        → build JWS protected header {alg:<from key>, typ:agentcard+jws, kid:default, jku:/.well-known/jwks.json}
+11.        → base64url-encode protected header and signature bytes
+12.        → construct ObjectNode: all AgentCard fields + signatures array
+13.        → return signed ObjectNode
+14.   → if AgentCardSigner not resolvable:
+15.       → return AgentCard directly (plain JSON serialization, no signatures)
+```
+
+Same flow applies to per-agent cards at `/.well-known/agents/{instanceId}.json`.
+
+### Inbound Verification (ExternalAgentBindingResource)
+
+Verification occurs **on binding creation/update** (`PUT /a2a-outbound/bindings/{instanceId}`), not during message dispatch. This is the natural lifecycle point where the remote endpoint is first known.
+
+```
+1. ExternalAgentBindingResource.put(instanceId, request)
+2.   → create/update ExternalAgentBinding (existing logic)
+3.   → if AgentCardSigner is resolvable:
+4.       → HTTP GET {binding.endpoint}/.well-known/agent.json
+5.       → if fetch fails (timeout, 4xx, 5xx):
+6.           → binding.verificationStatus = UNVERIFIED
+7.           → LOG.info("Could not fetch agent card for verification: {}", endpoint)
+8.           → store binding and return
+9.       → parse response as ObjectNode
+10.      → if response has no "signatures" array or it is empty:
+11.          → binding.verificationStatus = UNVERIFIED
+12.          → store binding and return
+13.      → extract jku from first signature's protected header
+14.      → JwksCache.fetch(jku):
+15.          → check in-memory cache (keyed by jku URL, TTL from config)
+16.          → if cache miss: HTTP GET jku URL
+17.              → enforce max-response-bytes limit
+18.              → enforce connect-timeout-ms and read-timeout-ms
+19.              → if fetch fails: return cached value if available (stale-while-error), else fail
+20.          → parse JWKS, cache result
+21.      → AgentCardSigner.verify(signedCardJson):
+22.          → remove "signatures" from JSON → re-canonicalize via JCS
+23.          → resolve public key from JWKS by kid in protected header
+24.          → if kid not found in JWKS:
+25.              → invalidate JWKS cache for this jku → re-fetch JWKS
+26.              → retry kid lookup (handles key rotation)
+27.              → if still not found: return VerificationResult(false, null, "kid not found")
+28.          → verify signature against canonical bytes using resolved public key
+29.          → return VerificationResult(verified, keyId, error)
+30.      → if verified:
+31.          → binding.verificationStatus = VERIFIED
+32.          → binding.verifiedAt = Instant.now()
+33.          → binding.verificationKeyId = result.keyId()
+34.      → if not verified:
+35.          → binding.verificationStatus = FAILED
+36.          → LOG.warn("Agent card verification failed for {}: {}", endpoint, result.error())
+37.   → store binding and return (verification never blocks binding creation — soft failure)
+```
+
+**On-demand re-verification:**
+
+```
+POST /a2a-outbound/bindings/{instanceId}/verify → ExternalAgentBindingResource
+
+Re-runs the verification flow for an existing binding. Use cases:
+- After remote agent key rotation
+- After JWKS cache expiry
+- Manual re-verification trigger
+```
+
+**Failure mode semantics:**
+- `UNVERIFIED` — unsigned card, fetch failed, or signing module absent. Not an error.
+- `VERIFIED` — card signature validated against JWKS-published key.
+- `FAILED` — card has signatures but verification failed (tampered, bad key, expired). Logged as warning.
+- Verification never blocks binding creation or message dispatch (soft failure model).
+
+### JWKS Endpoint
+
+```
+GET /.well-known/jwks.json → AgentCardResource
+
+Response headers:
+  Content-Type: application/json
+  Cache-Control: public, max-age=86400
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET
+  Access-Control-Allow-Headers: Accept
+
+Response body:
+{
+  "keys": [{
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "kid": "default",
+    "use": "sig",
+    "x": "<base64url>"
+  }]
+}
+```
+
+The key type (`OKP`/`Ed25519` or `EC`/`P-256`) is determined by the configured key material. The JWKS endpoint is unauthenticated (public keys are public by definition). Rate limiting recommended in production.
+
+When `AgentCardSigner` is not resolvable (signing module absent), the JWKS endpoint returns 404.
+
+## Trust Score Integration
+
+### IdentityVerificationTrustDecorator
+
+```java
+@jakarta.decorator.Decorator
+@Priority(1000)
+public class IdentityVerificationTrustDecorator implements TrustScoreSource {
+
+    @Inject @Delegate @Any
+    TrustScoreSource delegate;
+
+    @Inject
+    ExternalAgentBindingStore bindingStore;
+
+    @Inject
+    SigningConfig config;
+
+    @Override
+    public OptionalDouble dimensionScore(String actorId, String dimensionKey) {
+        if ("identity-verification".equals(dimensionKey)) {
+            return computeIdentityScore(actorId);
+        }
+        return delegate.dimensionScore(actorId, dimensionKey);
+    }
+
+    @Override
+    public Map<String, Double> allDimensionScores(String actorId) {
+        Map<String, Double> scores = new LinkedHashMap<>(delegate.allDimensionScores(actorId));
+        computeIdentityScore(actorId).ifPresent(s -> scores.put("identity-verification", s));
+        return scores;
+    }
+
+    // All other methods delegate unchanged to the underlying TrustScoreSource
+}
+```
+
+The `@Decorator` correctly wraps whatever `TrustScoreSource` implementation is active (Computed, Cached, or Materialized) without displacing it. This fixes the `@Alternative` circular-dependency problem in the original design.
+
+**Architectural note:** The identity-verification dimension is fundamentally different from attestation-based dimensions (quality, capability) — it's a static property derived from `ExternalAgentBinding.verificationStatus`, not computed from ledger attestation history. The `@Decorator` is a tactical integration for E6 first pass. A child issue will propose a pluggable `TrustDimensionContributor` SPI in the ledger for cleanly composing heterogeneous trust signals without decorating the full `TrustScoreSource` interface.
+
+**Composition with existing trust consumers:**
+- `TrustGateService.meetsThreshold()` — works unchanged (reads globalScore)
+- `RoutingBridge.lookupTrustScore()` — works unchanged (reads globalScore via TrustGateService)
+- `TrustScoreResource` — returns the identity dimension alongside existing dimensions
+- `DefaultObligorTrustPolicy` — works unchanged (delegates to TrustGateService)
 
 ## Testing Strategy
 
@@ -290,54 +370,72 @@ Flyway migration in `a2a-outbound` module (not qhorus runtime — ExternalAgentB
 | Test | What it validates |
 |------|-------------------|
 | `JcsCanonicalizerTest` | Deterministic canonicalization: nested objects, unicode, numeric edge cases, key ordering |
-| `JwsAgentCardSigningServiceTest` | Sign/verify round-trip with generated test EC keys; tampered payload detection; missing key handling |
-| `IdentityVerificationTrustSourceTest` | Decorator delegation; dimension score for VERIFIED/UNVERIFIED/unknown; global score weight merging |
-| `AgentCardSignatureTest` | Record serialization; base64url encoding round-trip |
+| `JwsAgentCardSignerTest` | Sign/verify round-trip with generated test Ed25519 keys; tampered payload detection; missing key handling; ES256 key support |
+| `IdentityVerificationTrustDecoratorTest` | Decorator delegation; dimension score for VERIFIED/UNVERIFIED/unknown; delegate passthrough for non-identity dimensions |
+| `JwksCacheTest` | Cache TTL expiry; cache invalidation on kid miss; max response size enforcement; timeout handling |
 
 ### Integration Tests (@QuarkusTest)
 
 | Test | What it validates |
 |------|-------------------|
-| `SignedAgentCardTest` | GET `/.well-known/agent.json` returns signed card when signing module active; unsigned when NoOp |
-| `JwksEndpointTest` | GET `/.well-known/jwks.json` returns valid JWKS with correct key parameters |
-| `AgentCardVerificationTest` | Mock HTTP server serves signed card → A2AOutboundBackend fetches and verifies → ExternalAgentBinding.verificationStatus updated |
-| `VerificationTrustIntegrationTest` | Verified agent gets identity-verification dimension score; unverified agent does not; routing threshold affected |
+| `SignedAgentCardTest` | GET `/.well-known/agent.json` returns signed JSON envelope when signing module active; unsigned AgentCard when absent |
+| `JwksEndpointTest` | GET `/.well-known/jwks.json` returns valid JWKS with correct key parameters; 404 when signing absent; Cache-Control and CORS headers present |
+| `BindingVerificationTest` | PUT binding with mock HTTP server serving signed card → ExternalAgentBinding.verificationStatus updated; unsigned card → UNVERIFIED; tampered card → FAILED |
+| `ReVerificationTest` | POST `/verify` endpoint re-runs verification; JWKS cache invalidation on key rotation |
+| `VerificationTrustIntegrationTest` | Verified agent gets identity-verification dimension score; unverified agent does not; decorator delegates all other dimensions unchanged |
 
 ### CDI-free test patterns
 
-- `JwsAgentCardSigningService` tests generate ephemeral EC key pairs (no CredentialResolver mock needed for unit tests)
-- `IdentityVerificationTrustSource` tests use a stub `TrustScoreSource` delegate and a stub `ExternalAgentBindingStore`
+- `JwsAgentCardSigner` tests generate ephemeral Ed25519 key pairs (no CredentialResolver mock needed)
+- `IdentityVerificationTrustDecorator` tests use a stub `TrustScoreSource` delegate and a stub `ExternalAgentBindingStore`
 - `JcsCanonicalizer` tests are pure function tests — input JSON string → canonical output bytes
 
 ## Security Considerations
 
-- **Key material in ledger:** Signing keys must never appear in `MessageDispatch.content` or any ledger-persisted field (protocol PP-20260612-bd6f8c). The `key-ref` config property points to CredentialResolver, which resolves the actual key material at runtime.
+- **Key material in ledger:** Signing keys must never appear in `MessageDispatch.content` or any ledger-persisted field (protocol PP-20260612-bd6f8c). The `actor-id` config property identifies the signing actor; `SigningProvider` resolves the actual key material at runtime.
 - **JWKS endpoint:** Public keys only. No private key material exposed. Rate limiting recommended in production.
-- **Soft failure:** Unsigned or failed-verification cards are accepted but marked. The trust score penalty is the only consequence — verification is never an access gate. This is intentional for ecosystem compatibility.
+- **Soft failure:** Unsigned or failed-verification cards are accepted but marked. The trust score adjustment is the only consequence — verification is never an access gate. This is intentional for ecosystem compatibility.
+- **JWKS DoS protection:** Remote JWKS responses are bounded by `max-response-bytes` (default 64KB). Connection and read timeouts prevent hung connections.
 - **Key compromise:** Platform-level key compromise affects all agent cards for that tenant. Rotation is manual via CredentialResolver (update key, re-deploy). Future DID work will add key rotation semantics.
+- **Cache poisoning:** JWKS is fetched only from the `jku` URL declared in the JWS protected header. The `jku` URL should be validated against a trusted domain allowlist in production (future hardening).
 
 ## Future Work (Child Issues)
 
 | Topic | Dependency | Notes |
 |-------|------------|-------|
-| DID anchoring (did:web) | This issue | Maps `/.well-known/` to `did:web:host` naturally; adds DID Document endpoint |
-| DID anchoring (did:key) | This issue | Self-certifying IDs for ephemeral agents; key is the DID |
-| Verifiable Credentials | DID anchoring | VC Data Model 2.0 credentials asserting agent capabilities |
-| Per-agent signing keys | DID anchoring | Each Instance gets its own key pair, anchored to a DID |
+| DID anchoring (did:web) | This issue | Maps `/.well-known/` to `did:web:host`; extends existing `ActorDIDProvider` SPI with `didFor()` → did:web URI; adds DID Document endpoint |
+| DID anchoring (did:key) | This issue | Self-certifying IDs for ephemeral agents; key is the DID; extends `ActorDIDProvider` with did:key resolution using `VerificationMethod.publicKeyBytes()` |
+| Verifiable Credentials | DID anchoring | VC Data Model 2.0 credentials asserting agent capabilities; uses `VerificationMethodType` for proof type |
+| Per-agent signing keys | DID anchoring | Each Instance gets its own key pair, anchored to a DID; `SigningProvider.sign(actorId, data)` already supports per-actor resolution |
 | Key rotation automation | This issue | Scheduled key rotation with JWKS versioning |
+| Pluggable trust dimension provider | This issue | Replace `@Decorator TrustScoreSource` with a `TrustDimensionContributor` SPI in `casehub-ledger-api`; enables heterogeneous trust signals (identity verification, credential status, network reputation) without decorating the full scoring interface |
+
+**Existing platform infrastructure for deferred items:**
+- `ActorDIDProvider` — `didFor(actorId)` + `invalidate(actorId)`, with implementations: `ConfiguredActorDIDProvider`, `CompositeActorDIDProvider`, `ScimActorDIDProvider`, `NoOpActorDIDProvider`
+- `VerificationMethod(id, type, publicKeyBytes)` — key material with type discriminator
+- `VerificationMethodType` — `ED25519`, `P256`, `SECP256K1` constants
+- `SigningProvider.sign(actorId, data)` — already supports per-actor key resolution (deferred per-agent signing keys build on this directly)
+
+Child issues must be filed on GitHub (not just noted here) for tracking and priority assignment.
 
 ## References
 
-- [A2A v1.0 spec, sections 4.4.7, 8.4](https://google.github.io/A2A/) — agent card signing format
 - [RFC 7515](https://tools.ietf.org/html/rfc7515) — JSON Web Signature
+- [RFC 8032](https://tools.ietf.org/html/rfc8032) — Edwards-Curve Digital Signature Algorithm (Ed25519)
+- [RFC 8037](https://tools.ietf.org/html/rfc8037) — CFRG Elliptic Curve Diffie-Hellman (ECDH) and Signatures in JOSE (EdDSA for JWS)
 - [RFC 8785](https://tools.ietf.org/html/rfc8785) — JSON Canonicalization Scheme
 - [RFC 7517](https://tools.ietf.org/html/rfc7517) — JSON Web Key
 - [W3C DID v1.0](https://www.w3.org/TR/did-core/) — Decentralized Identifiers (future work)
 - [W3C VC Data Model 2.0](https://www.w3.org/TR/vc-data-model-2.0/) — Verifiable Credentials (future work)
 - `runtime/src/main/java/io/casehub/qhorus/runtime/api/AgentCardResource.java` — existing resource
-- `a2a-protocol/src/main/java/io/casehub/a2a/model/AgentCard.java` — Layer 0 agent card record
+- `a2a-protocol/src/main/java/io/casehub/a2a/model/AgentCard.java` — Layer 0 agent card record (unchanged)
 - `api/src/main/java/io/casehub/qhorus/api/spi/` — existing SPI pattern
-- `compliance-report/.../ComplianceReportSigningService.java` — existing signing integration pattern
-- `runtime/.../message/RoutingBridge.java` — trust score consumption point
+- `compliance-report/.../ComplianceReportSigningService.java` — existing signing orchestration pattern (wraps `DocumentSigningService`)
+- `io.casehub.platform.api.signing.SigningProvider` — platform raw signing SPI
+- `io.casehub.platform.api.identity.ActorDIDProvider` — platform DID resolution SPI
+- `io.casehub.platform.api.identity.VerificationMethod` — platform key material record
+- Protocol PP-20260523-e7b577 — algorithm-transparent signing
 - Protocol PP-20260612-bd6f8c — no credentials in ledger content
+- Protocol PP-20260521-0ba358 — Flyway consumer versioning
 - casehubio/qhorus#403 — parent epic
+- casehubio/platform#244 — SigningProvider SPI promotion (completed)
