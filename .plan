@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-439-restore-defaultbean-spi
-state: active
+state: closing:review
 project-sha: a9262f99a114d6b2e95d50c20ca4f09e042becfc
 date: 2026-09-14
 issue-repo: casehubio/qhorus
@@ -11,5 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#439 — Issue #439 ← active
+- [x] casehubio/qhorus#439 — Issue #439
