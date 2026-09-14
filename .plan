@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-403-signed-agent-cards-did
-state: scaffolded
+state: active
 project-sha: cd6d084bc5999c4a175111ae447c5f5539347333
 date: 2026-09-14
 issue-repo: casehubio/qhorus
@@ -13,13 +13,13 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#403 — Issue #403 ← active
-  - [ ] Batch 1: Foundation
-    - [ ] Task 1: AgentCardSigner SPI and events
-    - [ ] Task 2: ExternalAgentBinding expansion and V54
-  - [ ] Batch 2: Signing Module
-    - [ ] Task 3: Module scaffold and JcsCanonicalizer
-    - [ ] Task 4: JwsAgentCardSigner sign verify jwks
-  - [ ] Batch 3: Integration
-    - [ ] Task 5: AgentCardResource signing and JWKS
-    - [ ] Task 6: Async binding verification
-    - [ ] Task 7: Trust decorator and full build
+  - [x] Batch 1: Foundation
+    - [x] Task 1: AgentCardSigner SPI and events
+    - [x] Task 2: ExternalAgentBinding expansion and V54
+  - [x] Batch 2: Signing Module
+    - [x] Task 3: Module scaffold and JcsCanonicalizer
+    - [x] Task 4: JwsAgentCardSigner sign verify jwks
+  - [x] Batch 3: Integration
+    - [x] Task 5: AgentCardResource signing and JWKS
+    - [x] Task 6: Async binding verification
+    - [x] Task 7: Trust decorator and full build
