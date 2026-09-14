@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-403-signed-agent-cards-did
-state: active
+state: closing:promoted
 project-sha: cd6d084bc5999c4a175111ae447c5f5539347333
 date: 2026-09-14
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#403 — Issue #403 ← active
   - [x] Batch 1: Foundation
