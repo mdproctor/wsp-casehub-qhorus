@@ -101,7 +101,7 @@ The `AgentCard` record in `casehub-a2a-protocol` is **not modified**. Agent card
 
 The signing module works at the JSON level: it wraps the serialized `AgentCard` with a `signatures` array in the output JSON, and strips it before verification. The `AgentCard` record stays pure A2A.
 
-For inbound deserialization, `AgentCard` already tolerates unknown properties (Jackson default with `@JsonIgnoreProperties(ignoreUnknown = true)` or Quarkus configuration). The signing module extracts `signatures` from the raw JSON before deserializing the card.
+For inbound verification, the signing module operates on the raw `ObjectNode` — it extracts and removes the `signatures` array before re-canonicalizing the card payload for signature verification. The `AgentCard` record is not deserialized during verification; the canonical JSON (minus signatures) is compared directly against the signature. This avoids any dependency on Jackson's unknown-property handling behavior.
 
 ### ExternalAgentBinding Changes
 
@@ -201,7 +201,7 @@ casehub.qhorus.signing.trust.dimension-weight=0.15
 | `jwks-cache.connect-timeout-ms` | `5000` | HTTP connect timeout for JWKS fetch |
 | `jwks-cache.read-timeout-ms` | `5000` | HTTP read timeout for JWKS fetch |
 | `trust.verified-floor-score` | `0.6` | Floor trust score for verified agents in the `identity-verification` dimension |
-| `trust.dimension-weight` | `0.15` | Weight of identity-verification dimension in global trust aggregate |
+| `trust.dimension-weight` | `0.15` | Additive boost weight: `globalScore += floor × weight` for verified agents (clamped at 1.0) |
 
 ## Data Flow
 
@@ -217,66 +217,87 @@ casehub.qhorus.signing.trust.dimension-weight=0.15
 7.         → SigningProvider.sign(actorId, canonicalBytes)
 8.           → if NoOpSigningProvider: return Optional.empty() → card served unsigned
 9.           → if signing backend configured: sign with private key → SignatureResult
-10.        → build JWS protected header {alg:<from key>, typ:agentcard+jws, kid:default, jku:/.well-known/jwks.json}
-11.        → base64url-encode protected header and signature bytes
-12.        → construct ObjectNode: all AgentCard fields + signatures array
-13.        → return signed ObjectNode
-14.   → if AgentCardSigner not resolvable:
-15.       → return AgentCard directly (plain JSON serialization, no signatures)
+10.        → derive JWS alg from SignatureResult.publicKey():
+11.            → parse public key bytes (X.509 SubjectPublicKeyInfo format) as JCA PublicKey
+12.            → construct Nimbus JWK from JCA PublicKey (OctetKeyPair for Ed25519, ECKey for P-256)
+13.            → read kty + crv from JWK → map to alg: OKP/Ed25519 → "EdDSA", EC/P-256 → "ES256"
+14.            → (this JWK is the same object served by the jwks() endpoint — constructed once, reused)
+15.        → build JWS protected header {alg:<derived>, typ:agentcard+jws, kid:default, jku:/.well-known/jwks.json}
+16.        → base64url-encode protected header and signature bytes
+17.        → construct ObjectNode: all AgentCard fields + signatures array
+18.        → return signed ObjectNode
+19.   → if AgentCardSigner not resolvable:
+20.       → return AgentCard directly (plain JSON serialization, no signatures)
 ```
+
+**Algorithm derivation:** `SigningProvider` is algorithm-transparent (PP-20260523-e7b577) — `SignatureResult` carries raw `publicKey` bytes but no algorithm identifier. The JWS `alg` header is derived from the public key's JWK representation: the same JWK constructed for the `/.well-known/jwks.json` endpoint encodes the key type (`kty`+`crv`), which maps deterministically to a JWS algorithm. The `JwsKeyProvider` constructs this JWK once at startup from `SigningProvider.keyMaterial(actorId)` and caches it. Nimbus JOSE+JWT's `JWK.parse(publicKey)` handles the X.509 SubjectPublicKeyInfo → JWK conversion natively.
 
 Same flow applies to per-agent cards at `/.well-known/agents/{instanceId}.json`.
 
 ### Inbound Verification (ExternalAgentBindingResource)
 
-Verification occurs **on binding creation/update** (`PUT /a2a-outbound/bindings/{instanceId}`), not during message dispatch. This is the natural lifecycle point where the remote endpoint is first known.
+Verification is triggered by binding creation/update (`PUT /a2a-outbound/bindings/{instanceId}`) but runs **asynchronously** — the binding is stored immediately with `UNVERIFIED` status and the PUT returns without waiting for verification. This ensures binding availability is never coupled to remote endpoint responsiveness.
 
 ```
+PUT flow (synchronous — immediate return):
+
 1. ExternalAgentBindingResource.put(instanceId, request)
-2.   → create/update ExternalAgentBinding (existing logic)
-3.   → if AgentCardSigner is resolvable:
-4.       → HTTP GET {binding.endpoint}/.well-known/agent.json
-5.       → if fetch fails (timeout, 4xx, 5xx):
-6.           → binding.verificationStatus = UNVERIFIED
-7.           → LOG.info("Could not fetch agent card for verification: {}", endpoint)
-8.           → store binding and return
-9.       → parse response as ObjectNode
-10.      → if response has no "signatures" array or it is empty:
-11.          → binding.verificationStatus = UNVERIFIED
-12.          → store binding and return
-13.      → extract jku from first signature's protected header
-14.      → JwksCache.fetch(jku):
-15.          → check in-memory cache (keyed by jku URL, TTL from config)
-16.          → if cache miss: HTTP GET jku URL
-17.              → enforce max-response-bytes limit
-18.              → enforce connect-timeout-ms and read-timeout-ms
-19.              → if fetch fails: return cached value if available (stale-while-error), else fail
-20.          → parse JWKS, cache result
-21.      → AgentCardSigner.verify(signedCardJson):
-22.          → remove "signatures" from JSON → re-canonicalize via JCS
-23.          → resolve public key from JWKS by kid in protected header
-24.          → if kid not found in JWKS:
-25.              → invalidate JWKS cache for this jku → re-fetch JWKS
-26.              → retry kid lookup (handles key rotation)
-27.              → if still not found: return VerificationResult(false, null, "kid not found")
-28.          → verify signature against canonical bytes using resolved public key
-29.          → return VerificationResult(verified, keyId, error)
-30.      → if verified:
-31.          → binding.verificationStatus = VERIFIED
-32.          → binding.verifiedAt = Instant.now()
-33.          → binding.verificationKeyId = result.keyId()
-34.      → if not verified:
-35.          → binding.verificationStatus = FAILED
-36.          → LOG.warn("Agent card verification failed for {}: {}", endpoint, result.error())
-37.   → store binding and return (verification never blocks binding creation — soft failure)
+2.   → create/update ExternalAgentBinding with verificationStatus = UNVERIFIED
+3.   → store binding
+4.   → if AgentCardSigner is resolvable:
+5.       → fire CDI event BindingVerificationRequestedEvent(binding)
+6.   → return binding to caller (status: UNVERIFIED)
 ```
+
+```
+Verification flow (async observer — same logic for PUT trigger and POST /verify):
+
+1. BindingVerificationObserver.onVerificationRequested(@ObservesAsync event)
+2.   → HTTP GET {binding.endpoint}/.well-known/agent.json
+3.   → if fetch fails (timeout, 4xx, 5xx):
+4.       → binding.verificationStatus = UNVERIFIED
+5.       → LOG.info("Could not fetch agent card for verification: {}", endpoint)
+6.       → update binding and return
+7.   → parse response as ObjectNode
+8.   → if response has no "signatures" array or it is empty:
+9.       → binding.verificationStatus = UNVERIFIED
+10.      → update binding and return
+11.  → AgentCardSigner.verify(signedCardJson):
+12.      → extract jku from first signature's protected header
+13.      → JwksCache.fetch(jku):
+14.          → check in-memory cache (keyed by jku URL, TTL from config)
+15.          → if cache miss: HTTP GET jku URL
+16.              → enforce max-response-bytes limit
+17.              → enforce connect-timeout-ms and read-timeout-ms
+18.              → if fetch fails: return cached value if available (stale-while-error), else fail
+19.          → parse JWKS, cache result
+20.      → remove "signatures" from JSON → re-canonicalize via JCS
+21.      → resolve public key from JWKS by kid in protected header
+22.      → if kid not found in JWKS:
+23.          → invalidate JWKS cache for this jku → re-fetch JWKS
+24.          → retry kid lookup (handles key rotation)
+25.          → if still not found: return VerificationResult(false, null, "kid not found")
+26.      → verify signature against canonical bytes using resolved public key
+27.      → return VerificationResult(verified, keyId, error)
+28.  → if verified:
+29.      → binding.verificationStatus = VERIFIED
+30.      → binding.verifiedAt = Instant.now()
+31.      → binding.verificationKeyId = result.keyId()
+32.  → if not verified:
+33.      → binding.verificationStatus = FAILED
+34.      → LOG.warn("Agent card verification failed for {}: {}", endpoint, result.error())
+35.  → update binding
+```
+
+JWKS fetching (steps 13-19) is internal to `AgentCardSigner.verify()` — the caller passes the signed card JSON and the signer handles jku extraction, JWKS resolution via `JwksCache`, kid lookup, and cryptographic verification. The SPI boundary is `verify(ObjectNode signedCardJson)` → `VerificationResult`.
 
 **On-demand re-verification:**
 
 ```
 POST /a2a-outbound/bindings/{instanceId}/verify → ExternalAgentBindingResource
 
-Re-runs the verification flow for an existing binding. Use cases:
+Runs verification synchronously (blocking the POST response) so the caller
+gets the updated status in the response body. Use cases:
 - After remote agent key rotation
 - After JWKS cache expiry
 - Manual re-verification trigger
@@ -286,7 +307,7 @@ Re-runs the verification flow for an existing binding. Use cases:
 - `UNVERIFIED` — unsigned card, fetch failed, or signing module absent. Not an error.
 - `VERIFIED` — card signature validated against JWKS-published key.
 - `FAILED` — card has signatures but verification failed (tampered, bad key, expired). Logged as warning.
-- Verification never blocks binding creation or message dispatch (soft failure model).
+- Binding creation never blocks on verification (async observer). Message dispatch uses stored status.
 
 ### JWKS Endpoint
 
@@ -335,6 +356,16 @@ public class IdentityVerificationTrustDecorator implements TrustScoreSource {
     SigningConfig config;
 
     @Override
+    public OptionalDouble globalScore(String actorId) {
+        OptionalDouble base = delegate.globalScore(actorId);
+        OptionalDouble identity = computeIdentityScore(actorId);
+        if (identity.isEmpty()) return base;
+        double baseVal = base.orElse(0.0);
+        double boost = identity.getAsDouble() * config.trust().dimensionWeight();
+        return OptionalDouble.of(Math.min(1.0, baseVal + boost));
+    }
+
+    @Override
     public OptionalDouble dimensionScore(String actorId, String dimensionKey) {
         if ("identity-verification".equals(dimensionKey)) {
             return computeIdentityScore(actorId);
@@ -350,18 +381,30 @@ public class IdentityVerificationTrustDecorator implements TrustScoreSource {
     }
 
     // All other methods delegate unchanged to the underlying TrustScoreSource
+
+    private OptionalDouble computeIdentityScore(String actorId) {
+        return bindingStore.findByInstanceId(actorId)
+            .filter(b -> b.verificationStatus() == VerificationStatus.VERIFIED)
+            .map(b -> OptionalDouble.of(config.trust().verifiedFloorScore()))
+            .orElse(OptionalDouble.empty());
+    }
 }
 ```
+
+**`globalScore()` override — additive boost model:** The identity-verification dimension contributes an additive boost to the base global score: `min(1.0, base + floor × weight)`. With defaults (`floor=0.6, weight=0.15`), a verified agent gets a `+0.09` boost. This model ensures verification never penalizes agents whose attestation-based score exceeds the floor. A weighted-average model (`base × (1-w) + identity × w`) would reduce the global score for any agent with `base > floor`, contradicting the "trust score bonus" intent from issue #403.
+
+The base global score from `ComputedTrustScoreSource`/`CachedTrustScoreSource` is computed independently from dimension scores — it uses a Beta model over attestation history via `TrustScoreCalculator`. The global score and dimension scores are NOT derived from each other. The decorator must therefore explicitly incorporate the identity dimension into `globalScore()` — delegating `globalScore()` unchanged would make the identity dimension invisible to all routing consumers.
 
 The `@Decorator` correctly wraps whatever `TrustScoreSource` implementation is active (Computed, Cached, or Materialized) without displacing it. This fixes the `@Alternative` circular-dependency problem in the original design.
 
 **Architectural note:** The identity-verification dimension is fundamentally different from attestation-based dimensions (quality, capability) — it's a static property derived from `ExternalAgentBinding.verificationStatus`, not computed from ledger attestation history. The `@Decorator` is a tactical integration for E6 first pass. A child issue will propose a pluggable `TrustDimensionContributor` SPI in the ledger for cleanly composing heterogeneous trust signals without decorating the full `TrustScoreSource` interface.
 
 **Composition with existing trust consumers:**
-- `TrustGateService.meetsThreshold()` — works unchanged (reads globalScore)
-- `RoutingBridge.lookupTrustScore()` — works unchanged (reads globalScore via TrustGateService)
-- `TrustScoreResource` — returns the identity dimension alongside existing dimensions
-- `DefaultObligorTrustPolicy` — works unchanged (delegates to TrustGateService)
+- `TrustGateService.meetsThreshold()` — reads `globalScore()` → now includes identity boost
+- `TrustGateService.currentScore()` — reads `globalScore()` → now includes identity boost
+- `RoutingBridge.lookupTrustScore()` — reads `currentScore()` via TrustGateService → now includes identity boost
+- `DefaultObligorTrustPolicy` — delegates to `meetsThreshold()` → now includes identity boost
+- `TrustScoreResource` — returns the identity dimension alongside existing dimensions via `allDimensionScores()`
 
 ## Testing Strategy
 
@@ -371,7 +414,7 @@ The `@Decorator` correctly wraps whatever `TrustScoreSource` implementation is a
 |------|-------------------|
 | `JcsCanonicalizerTest` | Deterministic canonicalization: nested objects, unicode, numeric edge cases, key ordering |
 | `JwsAgentCardSignerTest` | Sign/verify round-trip with generated test Ed25519 keys; tampered payload detection; missing key handling; ES256 key support |
-| `IdentityVerificationTrustDecoratorTest` | Decorator delegation; dimension score for VERIFIED/UNVERIFIED/unknown; delegate passthrough for non-identity dimensions |
+| `IdentityVerificationTrustDecoratorTest` | globalScore boost for VERIFIED agents; no boost for UNVERIFIED/FAILED; additive clamping at 1.0; dimension score for VERIFIED/UNVERIFIED/unknown; delegate passthrough for non-identity dimensions and all non-overridden methods |
 | `JwksCacheTest` | Cache TTL expiry; cache invalidation on kid miss; max response size enforcement; timeout handling |
 
 ### Integration Tests (@QuarkusTest)
