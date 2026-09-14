@@ -1,0 +1,15 @@
+# Work Plan — issue-403-signed-agent-cards-did
+
+## State
+branch: issue-403-signed-agent-cards-did
+state: scaffolded
+project-sha: cd6d084bc5999c4a175111ae447c5f5539347333
+date: 2026-09-14
+issue-repo: casehubio/qhorus
+covers: 403
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#403 — Issue #403 ← active
