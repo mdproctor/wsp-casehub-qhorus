@@ -156,8 +156,11 @@ agent-card-signing/
     ├── JcsCanonicalizer.java            — RFC 8785 canonicalization
     ├── JwksCache.java                   — remote JWKS fetching with caching
     ├── SigningConfig.java               — @ConfigMapping
+    ├── BindingVerificationObserver.java  — @ObservesAsync handler for async verification
     └── IdentityVerificationTrustDecorator.java — @Decorator TrustScoreSource
 ```
+
+**Event class:** `BindingVerificationRequestedEvent` lives in `casehub-qhorus-api` (`api/src/main/java/io/casehub/qhorus/api/event/`) — both `a2a-outbound` (fires it in `ExternalAgentBindingResource`) and `agent-card-signing` (observes it in `BindingVerificationObserver`) depend on `casehub-qhorus-api`, so the event type is visible to both.
 
 Activates by classpath presence. `JwsAgentCardSigner` is `@ApplicationScoped` — when present, `Instance<AgentCardSigner>.isResolvable()` returns true in `AgentCardResource`.
 
@@ -301,6 +304,10 @@ gets the updated status in the response body. Use cases:
 - After remote agent key rotation
 - After JWKS cache expiry
 - Manual re-verification trigger
+
+When AgentCardSigner is not resolvable (signing module absent):
+- Returns 501 (Not Implemented) with body:
+  {"error": "Agent card signing module not configured — verification unavailable"}
 ```
 
 **Failure mode semantics:**
@@ -382,6 +389,12 @@ public class IdentityVerificationTrustDecorator implements TrustScoreSource {
 
     // All other methods delegate unchanged to the underlying TrustScoreSource
 
+    // ASSUMPTION: actorId == instanceId for external agents.
+    // True with DefaultInstanceActorIdProvider (identity mapping, the only production impl).
+    // Custom InstanceActorIdProvider that transforms external agent IDs will break this
+    // lookup — the SPI is one-way (instanceId → actorId), no reverse mapping exists.
+    // The pluggable TrustDimensionContributor child issue should resolve this by receiving
+    // the instanceId directly rather than going through the actorId namespace.
     private OptionalDouble computeIdentityScore(String actorId) {
         return bindingStore.findByInstanceId(actorId)
             .filter(b -> b.verificationStatus() == VerificationStatus.VERIFIED)
