@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-439-restore-defaultbean-spi
-state: scaffolded
+state: active
 project-sha: a9262f99a114d6b2e95d50c20ca4f09e042becfc
 date: 2026-09-14
 issue-repo: casehubio/qhorus
