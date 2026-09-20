@@ -2,21 +2,14 @@
 
 ## Last Session
 
-Designed and implemented sub-issue 1 of epic #409 — migrating qhorus MCP tools to a GraphQL-backed hierarchical model. Brainstormed the full migration architecture (9 decisions, light decision review, light spec review), then implemented the first sub-issue: refactoring the `graphql/` module from a single `@McpDomain("qhorus")` to 3 domain-specific packages — `channels/`, `governance/`, `messaging/`. Existing unified resolvers (`QhorusQueryResolver`, `QhorusMutationResolver`, `QhorusSubscriptionResolver`, `QhorusModelEnricher`) deleted; replaced by domain-specific classes with `@McpDomain("channels")`, `@McpDomain("governance")`, `@McpDomain("messaging")`. 24 tests passing. Branch closed, squashed (6 → 3 commits), merged to main, issue #409 closed.
+Migrated 23 `@Tool` methods from `QhorusMcpTools` to `@McpDomain` interfaces across 3 domains (agents, data, governance). Created `InstanceManager` and `DataManager` API-layer interfaces with runtime implementations. `@Tool` annotations stripped but Java methods kept as public non-`@Tool` helpers — tests in different packages still call them directly. Pattern is locked: `*Api` interface in `api/spi/`, `*Service` in `graphql/`, CDI-free Mockito tests, `DomainRegistrationTest` guard. Compliance-report module has a pre-existing build failure (`@HandWrittenEndpoint` check) unrelated to this work. Three capacity operations (getActorCapacity, listOverloadedActors, getRedistributionHistory) deferred from governance to Batch 6 due to cross-module `ActorCapacityView` dependency.
 
 ## Immediate Next Step
 
-Epic #409 has 6 remaining sub-issues. Next: sub-issue 2 (messaging domain expansion — add remaining message operations to `MessagingMutationResolver`/new `MessagingQueryResolver`). The design spec at `docs/specs/issue-409-graphql-mcp-migration/` covers all 6 domains with operation tables and API-layer gap analysis.
-
-## Cross-Module
-
-- `casehub-platform` `mcp/` — `GraphQLModelScanner`, `DynamicToolRegistrar` are the platform infrastructure. No platform changes needed for this work.
-- `compliance-report/` module still uses `@McpDomain("qhorus")` — sub-issue 7 renames to `@McpDomain("compliance")`.
+Batch 4: Create `AuditApi` + `AuditService` — needs a new `LedgerReader` facade in `api/store/` to expose `MessageLedgerEntryRepository` queries. Aggregation logic (obligation chain, telemetry summary) moves from QhorusMcpTools into the service.
 
 ## References
 
-- `docs/specs/issue-409-graphql-mcp-migration/2026-09-11-graphql-mcp-migration-design.md` — full migration design spec
-- `docs/specs/issue-409-graphql-mcp-migration/decisions.md` — D1-D9 validated decisions
-- `graphql/src/main/java/io/casehub/qhorus/graphql/channels/` — new channels domain resolvers
-- `graphql/src/main/java/io/casehub/qhorus/graphql/governance/` — new governance domain
-- `graphql/src/main/java/io/casehub/qhorus/graphql/messaging/` — new messaging domain
+- `plans/2026-09-20-mcpdomain-migration.md` — implementation plan (7 batches)
+- `docs/specs/issue-409-graphql-mcp-migration/` — design spec + decisions
+- `blog/2026-09-20-mdp01-from-113-tools-to-six-domains.md` — session diary
