@@ -13,3 +13,17 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#451 — Issue #451 ← active
+  - [ ] Batch 1: Agents
+    - [ ] Task 1: Create AgentsApi + Service + tests
+  - [ ] Batch 2: Data
+    - [ ] Task 2: Create DataApi + Service + tests
+  - [ ] Batch 3: Governance
+    - [ ] Task 3: Expand GovernanceApi + Service
+  - [ ] Batch 4: Audit
+    - [ ] Task 4: Create AuditApi + LedgerReader + Service
+  - [ ] Batch 5: Channels-Part1
+    - [ ] Task 5: Topics + membership + spaces + gateway
+  - [ ] Batch 6: Channels-Part2
+    - [ ] Task 6: Config + summary + projection + capacity
+  - [ ] Batch 7: Cleanup
+    - [ ] Task 7: Retire QhorusMcpTools + compliance refactor
