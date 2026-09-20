@@ -15,8 +15,8 @@ flyway-next-v: none
 - [ ] casehubio/qhorus#451 — Issue #451 ← active
   - [x] Batch 1: Agents
     - [x] Task 1: Create AgentsApi + Service + tests
-  - [ ] Batch 2: Data
-    - [ ] Task 2: Create DataApi + Service + tests
+  - [x] Batch 2: Data
+    - [x] Task 2: Create DataApi + Service + tests
   - [ ] Batch 3: Governance
     - [ ] Task 3: Expand GovernanceApi + Service
   - [ ] Batch 4: Audit
