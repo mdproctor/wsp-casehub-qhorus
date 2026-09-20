@@ -1,0 +1,15 @@
+# Work Plan — issue-451-mcpdomain-migration
+
+## State
+branch: issue-451-mcpdomain-migration
+state: scaffolded
+project-sha: 6932ef4f7a66d348c2c3cdf82d884480f15ece98
+date: 2026-09-20
+issue-repo: casehubio/qhorus
+covers: 451
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#451 — Issue #451 ← active
