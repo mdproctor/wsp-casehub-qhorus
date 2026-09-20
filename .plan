@@ -17,8 +17,8 @@ flyway-next-v: none
     - [x] Task 1: Create AgentsApi + Service + tests
   - [x] Batch 2: Data
     - [x] Task 2: Create DataApi + Service + tests
-  - [ ] Batch 3: Governance
-    - [ ] Task 3: Expand GovernanceApi + Service
+  - [x] Batch 3: Governance
+    - [x] Task 3: Expand GovernanceApi + Service
   - [ ] Batch 4: Audit
     - [ ] Task 4: Create AuditApi + LedgerReader + Service
   - [ ] Batch 5: Channels-Part1
