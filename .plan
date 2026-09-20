@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-451-mcpdomain-migration
-state: scaffolded
+state: active
 project-sha: 6932ef4f7a66d348c2c3cdf82d884480f15ece98
 date: 2026-09-20
 issue-repo: casehubio/qhorus
@@ -13,8 +13,8 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#451 — Issue #451 ← active
-  - [ ] Batch 1: Agents
-    - [ ] Task 1: Create AgentsApi + Service + tests
+  - [x] Batch 1: Agents
+    - [x] Task 1: Create AgentsApi + Service + tests
   - [ ] Batch 2: Data
     - [ ] Task 2: Create DataApi + Service + tests
   - [ ] Batch 3: Governance
