@@ -19,8 +19,8 @@ flyway-next-v: none
     - [x] Task 2: Create DataApi + Service + tests
   - [x] Batch 3: Governance
     - [x] Task 3: Expand GovernanceApi + Service
-  - [ ] Batch 4: Audit
-    - [ ] Task 4: Create AuditApi + LedgerReader + Service
+  - [x] Batch 4: Audit
+    - [x] Task 4: Create AuditApi + LedgerReader + Service
   - [ ] Batch 5: Channels-Part1
     - [ ] Task 5: Topics + membership + spaces + gateway
   - [ ] Batch 6: Channels-Part2
