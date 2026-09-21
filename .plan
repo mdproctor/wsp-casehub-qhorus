@@ -1,0 +1,15 @@
+# Work Plan — issue-447-fix-hibernate-channel-entity
+
+## State
+branch: issue-447-fix-hibernate-channel-entity
+state: scaffolded
+project-sha: 5c4e87bb033ab44b6a92c867d5b621ba7f51967d
+date: 2026-09-21
+issue-repo: casehubio/qhorus
+covers: 447
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#447 — Issue #447 ← active
