@@ -2,15 +2,21 @@
 
 ## Last Session
 
-Completed Batch 4 (Audit domain) of the @McpDomain migration. Created `AuditApi` + `AuditService` with 13 operations covering ledger queries, obligation chains, causal graphs, telemetry summaries, attestations, and peer review. This was the most complex batch — required a new `LedgerReader` API facade (12 query methods wrapping `MessageLedgerEntryRepository`), `CausalGraphReader` (wraps `CausalGraphService`), plus `PeerAttestor` and `ReviewerProvider` SPI interfaces. Created runtime adapter classes (`LedgerReaderAdapter`, `CausalGraphReaderAdapter`, `PeerAttestorAdapter`) and made `ReviewerResolver` implement `ReviewerProvider` directly. Promoted 10 records from `QhorusMcpToolsBase` to `api/audit/`. Updated 3 test files (10 assertions) from `ToolCallException` → `IllegalArgumentException` since `@WrapBusinessError` only fires on `@Tool` methods. 6 domains now registered: channels, messaging, governance, agents, data, audit.
+Completed Batches 5 and 6 of the @McpDomain migration (issue #451). Two sessions' worth of progress in one sitting — 6/7 batches now done.
 
-Key pattern established this session: runtime adapters wire existing implementations to new API interfaces, so `AuditService` (in graphql module) can inject API-layer types only. The adapters handle entity → record conversion.
+**Batch 5 (Channels-Part1):** Migrated 25 @Tool ops covering topics, membership, spaces, and gateway. Created `SpaceManager` API facade, extended `TopicManager` with `move()` and actor-id overloads, extended `MembershipManager` with `listMembers()`/`markRead()`. Promoted 5 result records from `QhorusMcpToolsBase` to API layer. Created 3 new test files (24 tests). Fixed 32 runtime test failures (26 new from removed methods + 6 pre-existing `ToolCallException` assertion mismatches from Batches 2-3).
 
-Pre-existing failures: `SharedDataToolTest` (3) and `WatchdogDisabledTest` (3) from Batches 2-3 — same `ToolCallException` → `IllegalArgumentException` issue. `compliance-report` module has `@HandWrittenEndpoint` build failure unrelated to this work.
+**Batch 6 (Channels-Part2):** Added ~25 config/summary/projection/capacity/enforcement/routing operations to `ChannelsApi` (now 57 total ops). Created 4 new API facades: `ChannelSummaryManager`, `ProjectionReader`, `ProtocolReader`, `RoutingDiagnostics`. Created 4 runtime adapters. Extended `ChannelManager` with 7 new methods. Created 2 new test files (18 tests). Removed 33 @Tool methods initially, but restored test-infrastructure methods (`checkMessages`, `listChannels`, `findChannel`, `channelDigest`, `projectChannel`) because 49 test classes depend on them as test helpers — these will be removed with QhorusMcpTools in Batch 7.
+
+**Lesson learned:** `checkMessages` and `listChannels` are used pervasively as test infrastructure, not just as tool-specific tests. 253 test failures when removed prematurely. These must be migrated to direct service calls when QhorusMcpTools is deleted.
+
+**Key observation from this session:** Fork-based subagents don't inherit hook enforcement (e.g. `intellij-first.sh`), so they fall back to bash grep. For code-heavy refactoring, inline work with IntelliJ MCP tools is faster and more reliable than forking.
 
 ## Immediate Next Step
 
-Batch 5: Expand `ChannelsApi` + `ChannelsService` with ~25 ops covering topics, membership, spaces, and gateway operations. These are mostly thin delegations to existing `TopicManager`, `MembershipManager`, `SpaceService`, and `ChannelGateway` — simpler than Batch 4. May need API facades for runtime classes that don't have API-layer interfaces yet.
+**Batch 7 (Cleanup):** Retire `QhorusMcpTools.java` and `QhorusMcpToolsBase.java` entirely. This is the largest remaining task — 49 test classes need migrating from `tools.checkMessages()`/`tools.listChannels()` etc. to direct service calls. Do this inline with IntelliJ tools, not forked. Also: change `ComplianceApi` from `@McpDomain("qhorus")` to `@McpDomain("compliance")`, update `DomainRegistrationTest` to final 7-domain state, remove `ToolOverloadDiscoverabilityTest`.
+
+Pre-existing: `compliance-report` module has `@HandWrittenEndpoint` build failure (unrelated to this work).
 
 ## References
 
