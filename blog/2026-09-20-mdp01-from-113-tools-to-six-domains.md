@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "From 113 Tools to Six Domains"
+title: "From 113 Tools to Seven Domains"
 date: 2026-09-20
 entry_type: note
 subtype: diary
@@ -17,6 +17,12 @@ We started the migration with the smallest domains to lock in the pattern. `Agen
 
 The pattern that emerged is mechanical: a `*Api` interface in the api module with `@McpDomain` and `@PlatformQuery`/`@PlatformMutation` annotations, a `*Service` implementation in the graphql module, CDI-free tests with Mockito. The graphql module depends only on the api module — it never touches runtime classes. Runtime services implement the api-layer manager interfaces, and CDI wires them at deployment time. The APT generator handles everything else.
 
-The one complication worth noting: removing `@Tool` annotations from methods that fifty-plus test files call directly. The first instinct — make the de-annotated methods package-private — failed because the tests live in a different package. The pragmatic answer: keep the methods `public` but strip the `@Tool` annotation. Without `@Tool`, the method isn't registered on the MCP server. The Java method survives for test backward compatibility until `QhorusMcpTools` is deleted entirely.
+`AuditApi` was the most interesting domain — thirteen operations covering the ledger query surface, obligation chain computation, causal graph traversal, and telemetry aggregation. The aggregation logic had been living inside MCP tool methods and needed a proper home: `LedgerReader`, `CausalGraphReader`, and `ReviewerProvider` facades now own it at the api layer.
 
-Four batches remain. Audit is the most interesting — it needs a `LedgerReader` facade to expose the ledger query surface through the api layer, and some of the aggregation logic (obligation chain computation, telemetry summarisation) currently lives in the MCP tool methods and needs a proper home. The two channels batches are large (~50 operations) but straightforward delegation. The final batch deletes `QhorusMcpTools` and its 600-line base class.
+The two channels batches were the largest by count — fifty-seven operations across topics, membership, spaces, gateways, protocols, enforcement, routing, summaries, projections, and capacity thresholds. Each needed its own api-layer facade: `TopicManager`, `MembershipManager`, `SpaceManager`, `ChannelSummaryManager`, `ProjectionReader`, `ProtocolReader`, `RoutingDiagnostics`. The code is straightforward delegation, but the sheer surface area meant promoting a dozen result records from the old `QhorusMcpToolsBase` inner types to proper api-layer records.
+
+The final step was stripping MCP exposure from `QhorusMcpTools` itself — removing `@McpServer`, fifty-two `@Tool` annotations, a hundred and ninety-five `@ToolArg` annotations, and `@WrapBusinessError`. The class is now an inert `@ApplicationScoped` bean with no MCP footprint. All tool discovery goes through seven `@McpDomain` interfaces: channels, messaging, governance, agents, data, audit, compliance.
+
+That left eighty-seven test files still injecting `QhorusMcpTools` and calling its convenience methods. The `@WrapBusinessError` removal surfaced an interesting gotcha: the interceptor fires on all methods of the annotated class (CDI binding is class-level), but only wraps exceptions for `@Tool`-annotated methods. Remove `@Tool` while keeping `@WrapBusinessError`, and the interceptor activates but does nothing — exceptions pass through unwrapped. Twenty-three test files that asserted `ToolCallException` needed to switch to the raw exception types: `IllegalArgumentException` for invalid input, `IllegalStateException` for state violations like paused channels and ACL denials.
+
+Deleting `QhorusMcpTools` entirely is deferred. The class is dead weight — zero MCP exposure, zero production value — but eighty-seven test files with twelve hundred call sites is a lot of mechanical rewriting. It'll happen, but as a separate cleanup pass. The migration goal is met: every operation is discoverable via `@McpDomain`, and the `DomainRegistrationTest` asserts all seven domains.
