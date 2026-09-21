@@ -1,0 +1,15 @@
+# Work Plan — issue-452-delete-qhorus-mcp-tools
+
+## State
+branch: issue-452-delete-qhorus-mcp-tools
+state: scaffolded
+project-sha: 3b6ae2c65fcd471cb206a4400a2a041848d85e92
+date: 2026-09-21
+issue-repo: casehubio/qhorus
+covers: 452,453
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#452 — Issue #452 ← active
