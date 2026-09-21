@@ -23,7 +23,7 @@ flyway-next-v: none
     - [x] Task 4: Create AuditApi + LedgerReader + Service
   - [x] Batch 5: Channels-Part1
     - [x] Task 5: Topics + membership + spaces + gateway
-  - [ ] Batch 6: Channels-Part2
-    - [ ] Task 6: Config + summary + projection + capacity
+  - [x] Batch 6: Channels-Part2
+    - [x] Task 6: Config + summary + projection + capacity
   - [ ] Batch 7: Cleanup
     - [ ] Task 7: Retire QhorusMcpTools + compliance refactor
