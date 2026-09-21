@@ -3,7 +3,7 @@
 ## State
 branch: issue-451-mcpdomain-migration
 state: active
-project-sha: 6932ef4f7a66d348c2c3cdf82d884480f15ece98
+project-sha: 07d89ede60b67f1b8608f848f6dbfad9fc984699
 date: 2026-09-20
 issue-repo: casehubio/qhorus
 covers: 451
@@ -13,17 +13,8 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#451 — Issue #451 ← active
-  - [x] Batch 1: Agents
-    - [x] Task 1: Create AgentsApi + Service + tests
-  - [x] Batch 2: Data
-    - [x] Task 2: Create DataApi + Service + tests
-  - [x] Batch 3: Governance
-    - [x] Task 3: Expand GovernanceApi + Service
-  - [x] Batch 4: Audit
-    - [x] Task 4: Create AuditApi + LedgerReader + Service
-  - [x] Batch 5: Channels-Part1
-    - [x] Task 5: Topics + membership + spaces + gateway
-  - [x] Batch 6: Channels-Part2
-    - [x] Task 6: Config + summary + projection + capacity
-  - [ ] Batch 7: Cleanup
-    - [ ] Task 7: Retire QhorusMcpTools + compliance refactor
+  - [ ] Batch 1: Batch 7
+    - [ ] Task 1: Strip MCP annotations from QhorusMcpTools (done)
+    - [ ] Task 2: Fix ToolCallException test assertions (done)
+    - [ ] Task 3: Update DomainRegistrationTest + delete ToolOverloadDiscoverabilityTest (done)
+    - [ ] Task 4: Add missing deleteSummary to ChannelSummaryManager (done)
