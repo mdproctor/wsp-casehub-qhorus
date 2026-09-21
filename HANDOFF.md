@@ -2,21 +2,16 @@
 
 ## Last Session
 
-Completed Batches 5 and 6 of the @McpDomain migration (issue #451). Two sessions' worth of progress in one sitting — 6/7 batches now done.
+Completed Batch 7a of the @McpDomain migration (issue #451). QhorusMcpTools is now fully stripped of MCP exposure — all tool discovery is exclusively via @McpDomain APIs.
 
-**Batch 5 (Channels-Part1):** Migrated 25 @Tool ops covering topics, membership, spaces, and gateway. Created `SpaceManager` API facade, extended `TopicManager` with `move()` and actor-id overloads, extended `MembershipManager` with `listMembers()`/`markRead()`. Promoted 5 result records from `QhorusMcpToolsBase` to API layer. Created 3 new test files (24 tests). Fixed 32 runtime test failures (26 new from removed methods + 6 pre-existing `ToolCallException` assertion mismatches from Batches 2-3).
+**Batch 7a (MCP de-registration):** Stripped all `@McpServer`, `@Tool` (52), `@ToolArg` (195), and `@WrapBusinessError` annotations from `QhorusMcpTools.java`. The class remains as an inert `@ApplicationScoped` CDI bean used by 87 test files as test infrastructure. Fixed `ToolCallException` → `IllegalArgumentException`/`IllegalStateException` across 23+ test files (SSR + manual fixups). Added `ComplianceApi` to `DomainRegistrationTest` (7 domains verified). Deleted `ToolOverloadDiscoverabilityTest`. Removed obsolete HTTP-level MCP tool tests from `ToolErrorHandlingTest`. Added missing `deleteSummary()` to `ChannelSummaryManager`/`ChannelSummaryService`. Fixed pre-existing `ChannelSummaryServiceTest.setSummary_advancesCursor` mock issue.
 
-**Batch 6 (Channels-Part2):** Added ~25 config/summary/projection/capacity/enforcement/routing operations to `ChannelsApi` (now 57 total ops). Created 4 new API facades: `ChannelSummaryManager`, `ProjectionReader`, `ProtocolReader`, `RoutingDiagnostics`. Created 4 runtime adapters. Extended `ChannelManager` with 7 new methods. Created 2 new test files (18 tests). Removed 33 @Tool methods initially, but restored test-infrastructure methods (`checkMessages`, `listChannels`, `findChannel`, `channelDigest`, `projectChannel`) because 49 test classes depend on them as test helpers — these will be removed with QhorusMcpTools in Batch 7.
+**Build status:** 2038 runtime tests pass (0 failures). All modules succeed except pre-existing `compliance-report` `@HandWrittenEndpoint` build failure (unrelated).
 
-**Lesson learned:** `checkMessages` and `listChannels` are used pervasively as test infrastructure, not just as tool-specific tests. 253 test failures when removed prematurely. These must be migrated to direct service calls when QhorusMcpTools is deleted.
-
-**Key observation from this session:** Fork-based subagents don't inherit hook enforcement (e.g. `intellij-first.sh`), so they fall back to bash grep. For code-heavy refactoring, inline work with IntelliJ MCP tools is faster and more reliable than forking.
-
-## Immediate Next Step
-
-**Batch 7 (Cleanup):** Retire `QhorusMcpTools.java` and `QhorusMcpToolsBase.java` entirely. This is the largest remaining task — 49 test classes need migrating from `tools.checkMessages()`/`tools.listChannels()` etc. to direct service calls. Do this inline with IntelliJ tools, not forked. Also: change `ComplianceApi` from `@McpDomain("qhorus")` to `@McpDomain("compliance")`, update `DomainRegistrationTest` to final 7-domain state, remove `ToolOverloadDiscoverabilityTest`.
-
-Pre-existing: `compliance-report` module has `@HandWrittenEndpoint` build failure (unrelated to this work).
+**What remains for Batch 7b (follow-up issue):**
+- Migrate 87 test files from `QhorusMcpTools` to direct service/store calls
+- Delete `QhorusMcpTools.java` and `QhorusMcpToolsBase.java` entirely
+- This is a large but low-risk refactoring task — all MCP tool exposure is already via @McpDomain
 
 ## References
 
