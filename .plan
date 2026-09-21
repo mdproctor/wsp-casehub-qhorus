@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-451-mcpdomain-migration
-state: active
+state: closing:promoted
 project-sha: 07d89ede60b67f1b8608f848f6dbfad9fc984699
 date: 2026-09-20
 issue-repo: casehubio/qhorus
@@ -11,10 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#451 — Issue #451 ← active
-  - [ ] Batch 1: Batch 7
-    - [ ] Task 1: Strip MCP annotations from QhorusMcpTools (done)
-    - [ ] Task 2: Fix ToolCallException test assertions (done)
-    - [ ] Task 3: Update DomainRegistrationTest + delete ToolOverloadDiscoverabilityTest (done)
-    - [ ] Task 4: Add missing deleteSummary to ChannelSummaryManager (done)
+- [x] casehubio/qhorus#451 — Issue #451
