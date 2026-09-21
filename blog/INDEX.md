@@ -89,3 +89,4 @@
 | [2026-08-11-mdp01-three-out-of-four-were-fine.md](2026-08-11-mdp01-three-out-of-four-were-fine.md) | 2026-08-11 | CDI audit flagged 4 classes — 3 were false positives using CDI for SPI displacement, not dependency wiring |
 | [2026-08-14-mdp02-the-commissive-that-wasnt.md](2026-08-14-mdp02-the-commissive-that-wasnt.md) | 2026-08-14 | The commissive that wasn't — why PROPOSE fills the last genuine speech act gap in the 10-type taxonomy |
 | [2026-08-14-mdp01-who-watches-the-watchers.md](2026-08-14-mdp01-who-watches-the-watchers.md) | 2026-08-14 | Attestor credibility tracking — design decisions, Bayesian Beta for attestors, NaN sentinel, cross-repo SNAPSHOT friction |
+| [2026-09-20-mdp01-from-113-tools-to-six-domains.md](2026-09-20-mdp01-from-113-tools-to-six-domains.md) | 2026-09-20 | Migrating 113 @Tool methods from QhorusMcpTools to @McpDomain interfaces — pattern, complications, and what remains |

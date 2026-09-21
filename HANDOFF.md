@@ -2,21 +2,18 @@
 
 ## Last Session
 
-Designed and implemented sub-issue 1 of epic #409 — migrating qhorus MCP tools to a GraphQL-backed hierarchical model. Brainstormed the full migration architecture (9 decisions, light decision review, light spec review), then implemented the first sub-issue: refactoring the `graphql/` module from a single `@McpDomain("qhorus")` to 3 domain-specific packages — `channels/`, `governance/`, `messaging/`. Existing unified resolvers (`QhorusQueryResolver`, `QhorusMutationResolver`, `QhorusSubscriptionResolver`, `QhorusModelEnricher`) deleted; replaced by domain-specific classes with `@McpDomain("channels")`, `@McpDomain("governance")`, `@McpDomain("messaging")`. 24 tests passing. Branch closed, squashed (6 → 3 commits), merged to main, issue #409 closed.
+Completed Batch 7a of the @McpDomain migration (issue #451). QhorusMcpTools is now fully stripped of MCP exposure — all tool discovery is exclusively via @McpDomain APIs.
 
-## Immediate Next Step
+**Batch 7a (MCP de-registration):** Stripped all `@McpServer`, `@Tool` (52), `@ToolArg` (195), and `@WrapBusinessError` annotations from `QhorusMcpTools.java`. The class remains as an inert `@ApplicationScoped` CDI bean used by 87 test files as test infrastructure. Fixed `ToolCallException` → `IllegalArgumentException`/`IllegalStateException` across 23+ test files (SSR + manual fixups). Added `ComplianceApi` to `DomainRegistrationTest` (7 domains verified). Deleted `ToolOverloadDiscoverabilityTest`. Removed obsolete HTTP-level MCP tool tests from `ToolErrorHandlingTest`. Added missing `deleteSummary()` to `ChannelSummaryManager`/`ChannelSummaryService`. Fixed pre-existing `ChannelSummaryServiceTest.setSummary_advancesCursor` mock issue.
 
-Epic #409 has 6 remaining sub-issues. Next: sub-issue 2 (messaging domain expansion — add remaining message operations to `MessagingMutationResolver`/new `MessagingQueryResolver`). The design spec at `docs/specs/issue-409-graphql-mcp-migration/` covers all 6 domains with operation tables and API-layer gap analysis.
+**Build status:** 2038 runtime tests pass (0 failures). All modules succeed except pre-existing `compliance-report` `@HandWrittenEndpoint` build failure (unrelated).
 
-## Cross-Module
-
-- `casehub-platform` `mcp/` — `GraphQLModelScanner`, `DynamicToolRegistrar` are the platform infrastructure. No platform changes needed for this work.
-- `compliance-report/` module still uses `@McpDomain("qhorus")` — sub-issue 7 renames to `@McpDomain("compliance")`.
+**What remains for Batch 7b (follow-up issue):**
+- Migrate 87 test files from `QhorusMcpTools` to direct service/store calls
+- Delete `QhorusMcpTools.java` and `QhorusMcpToolsBase.java` entirely
+- This is a large but low-risk refactoring task — all MCP tool exposure is already via @McpDomain
 
 ## References
 
-- `docs/specs/issue-409-graphql-mcp-migration/2026-09-11-graphql-mcp-migration-design.md` — full migration design spec
-- `docs/specs/issue-409-graphql-mcp-migration/decisions.md` — D1-D9 validated decisions
-- `graphql/src/main/java/io/casehub/qhorus/graphql/channels/` — new channels domain resolvers
-- `graphql/src/main/java/io/casehub/qhorus/graphql/governance/` — new governance domain
-- `graphql/src/main/java/io/casehub/qhorus/graphql/messaging/` — new messaging domain
+- `plans/2026-09-20-mcpdomain-migration.md` — implementation plan (7 batches)
+- `docs/specs/issue-409-graphql-mcp-migration/` — design spec + decisions
