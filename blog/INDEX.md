@@ -90,3 +90,4 @@
 | [2026-08-14-mdp02-the-commissive-that-wasnt.md](2026-08-14-mdp02-the-commissive-that-wasnt.md) | 2026-08-14 | The commissive that wasn't — why PROPOSE fills the last genuine speech act gap in the 10-type taxonomy |
 | [2026-08-14-mdp01-who-watches-the-watchers.md](2026-08-14-mdp01-who-watches-the-watchers.md) | 2026-08-14 | Attestor credibility tracking — design decisions, Bayesian Beta for attestors, NaN sentinel, cross-repo SNAPSHOT friction |
 | [2026-09-20-mdp01-from-113-tools-to-six-domains.md](2026-09-20-mdp01-from-113-tools-to-six-domains.md) | 2026-09-20 | Migrating 113 @Tool methods from QhorusMcpTools to @McpDomain interfaces — pattern, complications, and what remains |
+| [2026-09-23-mdp01-the-bug-that-wasnt-there.md](2026-09-23-mdp01-the-bug-that-wasnt-there.md) | 2026-09-23 | SNAPSHOT build fix — reported CDI constructor errors led to a graphql module boundary violation and 37 orphaned tests |
