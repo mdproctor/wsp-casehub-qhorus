@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-438-snapshot-cdi-constructor
-state: active
+state: closing:review
 project-sha: 3178951f25936d71f9efa29ee51fdd9f34b20910
 date: 2026-09-22
 issue-repo: casehubio/qhorus
@@ -11,5 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#438 — Issue #438 ← active
+- [x] casehubio/qhorus#438 — Issue #438
