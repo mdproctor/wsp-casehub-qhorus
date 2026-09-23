@@ -473,6 +473,17 @@ The bridge does NOT observe `CommitmentDeclinedEvent` or `CommitmentExpiredEvent
 
 `CommitmentDeclinedEvent` and `CommitmentExpiredEvent` are preserved as-is (existing consumers depend on them). `CommitmentStateChangedEvent` is additive — it fires in addition to the dedicated events, not as a replacement. This is step 5 in the implementation sequence.
 
+**Prerequisite — wire up `ChannelActivityEvent` as CDI event:** `ChannelActivityEvent` is currently a nested record inside `ChannelActivityBroadcaster` (`@FunctionalInterface`), broadcast via direct method call: `broadcaster.broadcast(new ChannelActivityEvent(...))` in `MessageService.dispatch()`'s `afterCompletion(STATUS_COMMITTED)` callback. This is NOT a CDI event fire — `@ObservesAsync ChannelActivityEvent` will not trigger. `MessageService` must also fire `ChannelActivityEvent` as a CDI async event (via `Event<ChannelActivityEvent>.fireAsync()`) in the same `afterCompletion` callback. The broadcaster call is preserved for its existing consumers (SSE, WebSocket, `pg_notify`); the CDI fire is additive. This is step 5 in the implementation sequence.
+
+**API evolution — add `tenancyId` to `ChannelActivityEvent`:** The event currently carries `(UUID channelId, String channelName, Long messageId)`. The bridge's `toCloudEvent()` must set the `tenancyid` CloudEvent extension — `RasEngine.onCloudEvent()` unconditionally skips events without it (logs "CloudEvent without tenancyid extension — skipping" and returns). Add `String tenancyId` to the record. At the fire site in `MessageService.dispatch()`, `Channel.tenancyId()` is in scope.
+
+**CloudEvent `tenancyid` resolution in `toCloudEvent()`:**
+
+| Event type | `tenancyid` source |
+|---|---|
+| `CommitmentStateChangedEvent` | `event.commitment().tenancyId()` |
+| `ChannelActivityEvent` | `event.tenancyId()` (after API evolution above) |
+
 **Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. `CommitmentState` has no `CANCELLED` value — cancellation is not modelled in qhorus's commitment lifecycle at all. The issue's reference is aspirational. If cancellation semantics are needed in future, they would require adding `CANCELLED` to `CommitmentState` and wiring a corresponding state transition — a separate concern from this spec.
 
 **Event ordering:** CDI `@ObservesAsync` does not guarantee delivery order. Two rapid commitment state changes on the same channel could arrive at RAS out of order. This is acceptable because each commitment lifecycle event is self-contained — `CommitmentStateChangedEvent` carries the full `Commitment` object with `previousState`, so RAS can reconstruct the transition without depending on arrival order. Situation templates must be designed to tolerate out-of-order delivery: use the event's embedded state rather than inferring state from event sequence. The pre-built situations (`ack-timeout`, `decline-pattern`, etc.) use `CommitmentState` values from the event payload, not arrival order, for detection logic.
@@ -642,7 +653,7 @@ Recommended implementation order within a single branch:
 2. **ChannelProtocol SPI change** + update all 4 built-in protocols to return `List<DispatchAdvisory>`
 3. **Delete TaggedAdvisory** + update enforcement gate to use `DispatchAdvisory` directly + severity-aware logic
 4. **DispatchResult/EnforcementBlockedException/EnforcementBlockedEvent** evolution to `List<DispatchAdvisory>`
-5. **Wire up `CommitmentStateChangedEvent`** in `CommitmentService` for all state transitions (prerequisite for RAS adapter) + create `ChannelPolicyChangedEvent` in `api/event/` (fired from `ChannelService.update()` when protocols change)
+5. **Wire up CDI event prerequisites** — fire `CommitmentStateChangedEvent` from `CommitmentService` on all state transitions + fire `ChannelActivityEvent` as CDI async event alongside `broadcaster.broadcast()` in `MessageService` + add `tenancyId` to `ChannelActivityEvent` record + create `ChannelPolicyChangedEvent` in `api/event/` (fired from `ChannelService.update()` when protocols change)
 6. **ProtocolEvaluationEvent** CDI event
 7. **Update all tests** for the above
 8. **Channel policy YAML format** — `ChannelPolicyCompiler` for `dispatch_rules:` only
