@@ -10,3 +10,29 @@
 **Sources:** ChannelSemantic enum, ChannelGateway.fanOut(), notification-bridge existing pattern, ChannelBackend SPI
 **Exploration:** deep-analysis (revised from quick after user challenged the initial notification-only approach)
 **Status:** captured
+
+## D2: Auto-membership mechanism
+
+**Choice:** Capability-driven auto-join — when an agent registers capabilities via `InstanceService.register()`, qhorus auto-creates broadcast channels for each capability tag (convention: `broadcast:<capability>`) and auto-joins the agent as a member
+**Alternatives:**
+- Explicit subscription — agents manually subscribe to broadcast topics independently of capabilities; more control but more ceremony
+- Interest declaration at registration — separate "interests" list from capabilities; finer-grained but adds registration complexity
+**Rationale:** The simplest model: capabilities already declare "what I can do." If you can do X, you should hear about X. The channel naming convention `broadcast:<capability>` makes channels discoverable. Agent deregistration removes membership automatically.
+**Trade-offs:** No way to opt out of hearing about a capability you have. If this becomes a problem, the interest-based model can be layered on later without breaking the auto-join default.
+**Depends on:** D1 (BROADCAST channels)
+**Sources:** InstanceService.register(), CapabilityEntity, ChannelMembershipService.join()
+**Exploration:** quick
+**Status:** captured
+
+## D3: Allowed message types on BROADCAST channels
+
+**Choice:** STATUS and EVENT only — deny COMMAND, QUERY, PROPOSE, DONE, FAILURE, DECLINE, RESPONSE, HANDOFF by default
+**Alternatives:**
+- All non-commitment types — more permissive but blurs the broadcast/conversation boundary
+- Unrestricted — maximum flexibility but undermines the fire-and-forget premise
+**Rationale:** BROADCAST = observe, channels = converse. Commitment-creating types (COMMAND, QUERY, PROPOSE) and their resolution types create obligations that conflict with fire-and-forget semantics. STATUS (content-bearing observation) and EVENT (content-free signal) are the natural speech acts for coordination hints.
+**Trade-offs:** Strict. If someone needs request/reply on a broadcast topic, they must create a separate channel. This is intentional — broadcast and conversation are different coordination patterns.
+**Depends on:** D1 (BROADCAST semantic)
+**Sources:** MessageType 10-type taxonomy (ADR-0005), event-content-free-signal-type protocol
+**Exploration:** quick
+**Status:** captured
