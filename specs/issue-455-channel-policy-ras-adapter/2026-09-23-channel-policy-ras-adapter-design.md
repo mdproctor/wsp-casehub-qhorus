@@ -12,34 +12,34 @@ The `ChannelProtocol` SPI returns `List<String>` — flat violation descriptions
 
 Three-layer evolution:
 
-1. **Structured protocol output** — `ProtocolViolation` replaces `List<String>` as the SPI return type, carrying severity, structured evidence, human-readable message, and suggested action.
+1. **Structured protocol output** — `DispatchAdvisory` replaces `List<String>` as the SPI return type, carrying severity, structured evidence, human-readable message, and suggested action. A single type used across the entire pipeline: SPI return, internal carrier, and API output.
 
 2. **Channel policy definition model** — YAML format that compiles into both dispatch-time `ChannelProtocol` implementations (synchronous, Layer 1) and RAS `SituationDefinition` registrations (temporal, Layer 2). Hybrid storage: base policies in YAML files at startup, per-channel DB overrides for thresholds.
 
-3. **RAS adapter module** — `ras/qhorus/` module that bridges qhorus message CloudEvents to RAS situation detection. Extracts commitment lifecycle from message types. Selective forwarding: only RAS-active channels, only relevant event types.
+3. **RAS adapter module** — `ras/qhorus/` module that bridges qhorus CDI commitment lifecycle events to RAS situation detection. Observes `CommitmentStateChangedEvent`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, and `ChannelActivityEvent`. Selective forwarding: only RAS-active channels.
 
 ---
 
 ## Layer 1: Structured Protocol Output
 
-### ProtocolViolation (api/spi/)
+### DispatchAdvisory (api/spi/)
 
-New record in `io.casehub.qhorus.api.spi`:
+New record in `io.casehub.qhorus.api.spi` — the single structured type for all advisory/violation output in the dispatch pipeline:
 
 ```java
-public record ProtocolViolation(
-        String protocolName,
+public record DispatchAdvisory(
+        String source,
         Severity severity,
         String message,
         Map<String, Object> evidence,
         SuggestedAction suggestedAction) {
 
-    public ProtocolViolation {
-        Objects.requireNonNull(protocolName);
+    public DispatchAdvisory {
+        Objects.requireNonNull(source);
         Objects.requireNonNull(severity);
         Objects.requireNonNull(message);
         evidence = evidence != null ? Map.copyOf(evidence) : Map.of();
-        suggestedAction = suggestedAction != null ? suggestedAction : SuggestedAction.WARN;
+        suggestedAction = suggestedAction != null ? suggestedAction : SuggestedAction.LOG;
     }
 }
 ```
@@ -72,25 +72,25 @@ CRITICAL violations override ADVISORY-mode channels — analogous to a circuit b
 
 ```java
 public enum SuggestedAction {
-    BLOCK,      // reject the message
-    WARN,       // allow but surface as advisory
-    ESCALATE,   // allow but fire CDI event for external handling
-    REROUTE     // suggest redirection (metadata for RAS, not dispatch-time)
+    LOG,         // record for telemetry only — the common default
+    ESCALATE,    // fire CDI event for external handling (human review, alerts)
+    INVESTIGATE, // flag for deeper analysis (dashboards, RAS situation triggers)
+    REROUTE      // suggest message redirection (metadata for RAS situation responses)
 }
 ```
 
-`suggestedAction` is advisory metadata — the enforcement gate uses `severity` for decisions, not `suggestedAction`. The action informs RAS situation responses and is recorded in enforcement event telemetry for operational analysis.
+`suggestedAction` is downstream metadata for RAS situation responses, dashboards, and telemetry — the enforcement gate uses `severity` for decisions, not `suggestedAction`. The vocabulary reflects operational responses, not enforcement actions. Enforcement is controlled exclusively by `Severity × EnforcementMode`.
 
 ### ChannelProtocol SPI change
 
 ```java
 public interface ChannelProtocol {
     String protocolName();
-    List<ProtocolViolation> evaluate(ProtocolContext context);
+    List<DispatchAdvisory> evaluate(ProtocolContext context);
 }
 ```
 
-**Breaking change** — return type changes from `List<String>` to `List<ProtocolViolation>`. All four built-in protocols updated. Pre-release: no backward compat needed.
+**Breaking change** — return type changes from `List<String>` to `List<DispatchAdvisory>`. All four built-in protocols updated. Pre-release: no backward compat needed.
 
 ### Built-in protocol updates
 
@@ -98,71 +98,72 @@ Each protocol gains structured evidence:
 
 **REQUEST_RESPONSE:**
 ```java
-new ProtocolViolation("REQUEST_RESPONSE", Severity.WARNING,
+new DispatchAdvisory("REQUEST_RESPONSE", Severity.WARNING,
     "3 unanswered QUERYs in channel 'ops' — consider waiting for responses",
     Map.of("openQueryCount", 3, "threshold", maxOpenQueries, "channelName", ctx.channelName()),
-    SuggestedAction.WARN)
+    SuggestedAction.LOG)
 ```
 
 **TASK_COMPLETION:**
 ```java
-new ProtocolViolation("TASK_COMPLETION", Severity.WARNING,
+new DispatchAdvisory("TASK_COMPLETION", Severity.WARNING,
     "2 open COMMANDs in channel 'ops' — consider resolving existing tasks",
     Map.of("openCommandCount", 2, "threshold", maxOpenCommands, "senderIsObligor", true),
-    SuggestedAction.WARN)
+    SuggestedAction.LOG)
 ```
 
 **ROUND_ROBIN:**
 ```java
-new ProtocolViolation("ROUND_ROBIN", Severity.ADVISORY,
+new DispatchAdvisory("ROUND_ROBIN", Severity.ADVISORY,
     "expected 'agent-b' to speak next, got 'agent-a'",
     Map.of("expectedSender", "agent-b", "actualSender", "agent-a"),
-    SuggestedAction.WARN)
+    SuggestedAction.LOG)
 ```
 
 **CONTRIBUTION_REQUIRED:**
 ```java
-new ProtocolViolation("CONTRIBUTION_REQUIRED", Severity.WARNING,
+new DispatchAdvisory("CONTRIBUTION_REQUIRED", Severity.WARNING,
     "agent-a has sent 3 consecutive messages without contributions from: agent-b",
     Map.of("consecutiveCount", 3, "sender", "agent-a", "missingSenders", List.of("agent-b")),
-    SuggestedAction.WARN)
+    SuggestedAction.LOG)
 ```
 
-### TaggedAdvisory evolution (runtime-core, internal)
+### TaggedAdvisory removal (runtime-core)
+
+`TaggedAdvisory` is deleted. `DispatchAdvisory` replaces it as the single advisory type throughout the pipeline:
+
+- Protocol evaluation returns `List<DispatchAdvisory>` directly — no mapping needed
+- Non-protocol sources construct `DispatchAdvisory` with appropriate defaults:
 
 ```java
-record TaggedAdvisory(
-        String source,
-        String message,
-        Severity severity,
-        Map<String, Object> evidence,
-        SuggestedAction suggestedAction) {
+// TYPE_POLICY — hard-enforced for COMMAND/QUERY
+new DispatchAdvisory("TYPE_POLICY", Severity.CRITICAL, message, Map.of(), SuggestedAction.LOG)
 
-    // backward-compat factory for non-protocol sources
-    static TaggedAdvisory of(String source, String message) {
-        return new TaggedAdvisory(source, message, Severity.WARNING, Map.of(), SuggestedAction.WARN);
-    }
-
-    // factory from ProtocolViolation
-    static TaggedAdvisory fromViolation(ProtocolViolation v) {
-        return new TaggedAdvisory(v.protocolName(), v.message(), v.severity(), v.evidence(), v.suggestedAction());
-    }
-}
+// CORRELATION_INTEGRITY — informational
+new DispatchAdvisory("CORRELATION_INTEGRITY", Severity.ADVISORY, message, Map.of(), SuggestedAction.LOG)
 ```
 
-Non-protocol advisory sources get default severity:
-- `TYPE_POLICY` — `Severity.CRITICAL` (these are already hard-enforced for COMMAND/QUERY)
-- `CORRELATION_INTEGRITY` — `Severity.ADVISORY` (informational checks)
+This eliminates the `TaggedAdvisory.fromViolation()` mapping, the `ProtocolAdvisory.from(TaggedAdvisory)` conversion, and three types' worth of lockstep evolution.
 
 ### Enforcement gate evolution
 
-`enforceIfRequired()` gains severity-aware logic:
+`enforceIfRequired()` gains severity-aware logic. The existing structural safety guards are preserved — these prevent enforcement from blocking messages that must always flow:
 
 ```java
-static void enforceIfRequired(Channel ch, List<TaggedAdvisory> taggedAdvisories, ...) {
-    // ADVISORY mode: only block if any CRITICAL severity present
-    // BLOCKING mode: block all non-ADVISORY severities (existing behavior for WARNING+CRITICAL)
-    // QUARANTINE mode: quarantine for WARNING+CRITICAL (existing behavior)
+static void enforceIfRequired(Channel ch, List<TaggedAdvisory> taggedAdvisories,
+                              MessageType type, String sender, ...) {
+    // --- Structural guards (unchanged from current implementation) ---
+    // System events are never subject to enforcement
+    if (type == MessageType.EVENT) { return; }
+    // System senders (e.g. "system:enforcement") are never blocked
+    if (sender.contains(":")) { return; }
+    // Resolution types (DONE, FAILURE, DECLINE, RESPONSE) must always flow —
+    // blocking them would prevent commitment resolution
+    if (RESOLUTION_TYPES.contains(type)) { return; }
+    if (taggedAdvisories.isEmpty()) { return; }
+
+    // --- Severity-aware enforcement (new) ---
+    List<TaggedAdvisory> enforceable;
 
     if (ch.enforcementMode() == null || ch.enforcementMode() == EnforcementMode.ADVISORY) {
         // In ADVISORY mode, only CRITICAL can upgrade to blocking
@@ -171,7 +172,7 @@ static void enforceIfRequired(Channel ch, List<TaggedAdvisory> taggedAdvisories,
                 .filter(ta -> !ch.enforcementExclusions().contains(ta.source()))
                 .toList();
         if (critical.isEmpty()) return;
-        // CRITICAL override path — treat as BLOCKING
+        // CRITICAL override path — treat as BLOCKING with severityUpgrade flag
         enforceable = critical;
     } else {
         // BLOCKING/QUARANTINE mode — filter out ADVISORY severity
@@ -205,22 +206,59 @@ public record ProtocolAdvisory(
 
 `DispatchResult` gains `List<ProtocolAdvisory> advisories` replacing `List<String>`. Evidence included — callers (dashboards, HIL review) need structured data for display. **Breaking change** — pre-release, acceptable.
 
+**Conversion:** `ProtocolAdvisory` is constructed from `TaggedAdvisory` at the API boundary (when building `DispatchResult`):
+
+```java
+static ProtocolAdvisory from(TaggedAdvisory ta) {
+    return new ProtocolAdvisory(ta.source(), ta.severity(), ta.message(),
+                                ta.evidence(), ta.suggestedAction());
+}
+```
+
+The two types serve different layers: `TaggedAdvisory` is the internal runtime-core type that collects advisories from all sources (protocols, correlation checks, type policy). `ProtocolAdvisory` is the API-facing record in `DispatchResult`. Identical fields, different architectural boundaries — the conversion is the seam between internal evaluation and external reporting.
+
 ### EnforcementBlockedException evolution
 
 Gains severity and structured violations:
 
 ```java
 public class EnforcementBlockedException extends IllegalStateException {
-    private final EnforcementMode mode;
+    private final EnforcementMode mode;             // channel's configured mode
     private final List<String> violationSources;
     private final List<ProtocolAdvisory> violations; // was List<String>
-    private final boolean severityUpgrade; // true when CRITICAL overrode ADVISORY mode
+    private final boolean severityUpgrade;           // true when CRITICAL overrode ADVISORY mode
+
+    /** The enforcement behavior actually applied — BLOCKING for severity upgrades. */
+    public EnforcementMode effectiveMode() {
+        return severityUpgrade ? EnforcementMode.BLOCKING : mode;
+    }
 }
 ```
 
+`mode()` returns the channel's configured enforcement mode (unchanged contract). `effectiveMode()` returns the enforcement behavior that was actually applied — for CRITICAL-in-ADVISORY, this is `BLOCKING` even though `mode()` returns `ADVISORY`. Callers that need the actual enforcement behavior (REST error mapping, dashboards, telemetry) should use `effectiveMode()`. `severityUpgrade` remains available for callers that need to distinguish "configured BLOCKING" from "CRITICAL override."
+
+### EnforcementBlockedEvent evolution
+
+Evolves in parallel with the exception — structured violations replace flat strings, and `severityUpgrade` flag propagates to CDI observers:
+
+```java
+public record EnforcementBlockedEvent(
+        UUID channelId,
+        String channelName,
+        EnforcementMode mode,
+        String blockedSender,
+        MessageType blockedType,
+        List<ProtocolAdvisory> violations,   // was List<String>
+        List<String> violationSources,
+        boolean severityUpgrade) {           // new — CRITICAL overrode ADVISORY mode
+}
+```
+
+`EnforcementExecutor.execute()` updated to construct the event from structured `TaggedAdvisory` data using `ProtocolAdvisory.from()`. Downstream CDI observers gain access to severity, evidence, and suggested action.
+
 ### CDI event for RAS observation
 
-New event fired after protocol evaluation, before enforcement:
+New event fired after protocol evaluation and enforcement:
 
 ```java
 // in api/spi/
@@ -228,10 +266,25 @@ public record ProtocolEvaluationEvent(
         UUID channelId,
         String channelName,
         String tenancyId,
-        List<ProtocolViolation> violations) {}
+        List<ProtocolViolation> violations,
+        EnforcementOutcome enforcementOutcome) {
+
+    public enum EnforcementOutcome {
+        ALLOWED,    // message dispatched successfully
+        BLOCKED,    // enforcement blocked the message
+        QUARANTINED // enforcement quarantined the channel
+    }
+}
 ```
 
-Fired from `MessageService.dispatch()` after protocol evaluation completes (even if violations are empty — RAS may care about "no violations detected" as a signal). The RAS adapter observes this for situation correlation.
+Fired from `MessageService.dispatch()` after the enforcement gate, **only when violations are non-empty**:
+
+- **Success path** (after enforcement passes or in ADVISORY mode): fired with `EnforcementOutcome.ALLOWED`
+- **Enforcement catch block** (before rethrowing `EnforcementBlockedException`): fired with `BLOCKED` or `QUARANTINED` depending on effective mode
+
+This ensures RAS situations can distinguish "violations observed, message dispatched" from "violations observed, message blocked." Situations counting violation patterns (e.g., "3 TASK_COMPLETION violations in 10 minutes → escalate") should filter by `enforcementOutcome` to avoid inflating counts with properly-handled blocks.
+
+Firing on every dispatch (empty violations) creates continuous event volume where >99% would carry empty lists — no concrete situation template needs the absence-of-violations signal. Absence detection (e.g. channel health scoring) should observe `ChannelActivityEvent` instead, which already fires on every dispatch.
 
 ---
 
@@ -309,6 +362,26 @@ protocols: ["policy:strict-operations", "REQUEST_RESPONSE"]
 
 Both YAML-compiled policies and built-in Java protocols coexist in the `ProtocolRegistry`. A channel can mix them.
 
+### Condition evaluation
+
+Dispatch rules use two distinct condition mechanisms:
+
+1. **`when:` — structural match.** Field-level equality checks against the dispatch context. `type: COMMAND` matches `dispatch.type() == MessageType.COMMAND`. `target: null` matches `dispatch.target() == null`. These are compiled to direct field-access predicates at startup — no expression engine needed.
+
+2. **`condition:` — MVEL expression.** Free-form boolean expressions evaluated against the dispatch context after `${var}` substitution. Uses the platform's `MvelExpressionEvaluator` (`io.casehub.platform.api.expression.MvelExpressionEvaluator`), consistent with RAS `expression-rules` ganglions. Example: `condition: "open_queries >= ${max_open_queries}"` → after substitution: `"open_queries >= 3"` → evaluated by MVEL against a `Map<String, Object>` built from `ProtocolContext`.
+
+The `ChannelPolicyCompiler` pre-compiles `condition:` expressions at startup using `MvelExpressionEvaluator`. At evaluation time, the compiled expression receives the `ProtocolContext` data as a Map.
+
+**Error handling:**
+
+- **Unknown variable reference.** `${unknown_var}` in YAML → compilation-time error. The compiler validates all variable references against the union of YAML `defaults:` keys and known built-in context variables (`sender`, `channel_name`, `open_queries`, `open_commands`, `open_commitments_for_obligor`). Unknown variables fail startup with a clear error identifying the policy, rule, and variable name. This is a static check — no runtime surprises.
+
+- **Expression compilation failure.** Malformed MVEL in `condition:` → compilation-time error at startup. The `MvelExpressionEvaluator` validates syntax at compile time.
+
+- **Evaluation-time type mismatch.** If a DB override sets `max_open_queries` to a non-numeric string (e.g., `"unlimited"`), the substituted expression `open_queries >= unlimited` fails at evaluation time. Behavior: treat the evaluation failure as a violation (fail-closed) and log a warning with the policy name, rule name, raw expression, and exception message. Fail-closed is safer — a misconfigured threshold should surface as a visible problem, not silently disable the rule.
+
+- **Evaluation-time exception.** Any uncaught exception from MVEL evaluation is caught at the `ChannelProtocol.evaluate()` boundary. The exception is logged, and a `ProtocolViolation` with `Severity.WARNING` is emitted: `"Policy rule '<rule-name>' evaluation failed: <exception message>"`. The violation propagates through the normal advisory pipeline — it does not crash the dispatch.
+
 ### Variable resolution
 
 Variables in dispatch rules (`${var}`) resolve from three sources, in precedence order:
@@ -330,6 +403,10 @@ Per-channel threshold overrides via a new `Channel.policyOverrides` field (nulla
 **Key format:** `<param>` for dispatch-rule defaults within the active policy, `<situation-ref>.<param>` for situation parameter overrides. Keys are scoped to the policies active on that channel — an override for a policy not in the channel's `protocols` list has no effect.
 
 **Merge semantics:** Individual key override, not whole-map replacement. Setting a key overrides that specific default; unset keys retain the YAML default. `set_policy_overrides` merges into the existing map. Null value on a key removes the override (reverts to YAML default).
+
+**Lifecycle:** `policyOverrides` is post-creation only — not part of `ChannelCreateRequest`. Rationale: channels are created with policy bindings (`protocols` list), then thresholds are tuned via overrides. This separates channel creation from policy tuning.
+
+**Propagation chain:** Adding `policyOverrides` to `Channel` requires mechanical updates across the stack: the `Channel` record (canonical constructor + `Builder.policyOverrides()` method + `toBuilder()`), `ChannelEntity` JPA mapping (`@Column` + JSON converter), and `ChannelStore` SPI. These are implementation details that follow the established pattern for adding nullable fields — the same pattern used for `routingTrustThreshold`, `redistributionCapacityThreshold`, etc.
 
 ### Storage: Flyway migration
 
@@ -367,8 +444,7 @@ ras/
       ├── src/main/java/io/casehub/ras/qhorus/
       │   ├── QhorusEventBridge.java
       │   ├── QhorusChannelFilter.java
-      │   ├── QhorusSituationProvider.java
-      │   └── CommitmentStateMapper.java
+      │   └── QhorusSituationProvider.java
       └── src/test/
 ```
 
@@ -376,7 +452,7 @@ ras/
 
 ### QhorusEventBridge
 
-Observes qhorus CloudEvents and routes to RAS:
+Observes qhorus CDI commitment lifecycle events and converts to RAS CloudEvents. Aligned with casehub-ras#66 — the bridge consumes commitment-level domain events, not raw message CloudEvents.
 
 ```java
 @ApplicationScoped
@@ -385,18 +461,33 @@ public class QhorusEventBridge {
     @Inject QhorusChannelFilter channelFilter;
     @Inject Event<CloudEvent> rasEventBus;
 
-    void onQhorusMessage(@ObservesAsync CloudEvent event) {
-        if (!event.getType().startsWith("io.casehub.qhorus.message.")) return;
-        UUID channelId = extractChannelId(event);
-        if (!channelFilter.isRasActive(channelId)) return;
-        if (!channelFilter.isRelevantType(channelId, event.getType())) return;
+    void onCommitmentStateChanged(@ObservesAsync CommitmentStateChangedEvent event) {
+        if (!channelFilter.isRasActive(event.channelId())) return;
+        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.state-changed"));
+    }
 
-        // Re-emit as a RAS-consumable CloudEvent
-        // (may enrich with commitment state, derived fields)
-        rasEventBus.fireAsync(event);
+    void onCommitmentDeclined(@ObservesAsync CommitmentDeclinedEvent event) {
+        if (!channelFilter.isRasActive(event.channelId())) return;
+        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.declined"));
+    }
+
+    void onCommitmentExpired(@ObservesAsync CommitmentExpiredEvent event) {
+        if (!channelFilter.isRasActive(event.channelId())) return;
+        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.expired"));
+    }
+
+    void onChannelActivity(@ObservesAsync ChannelActivityEvent event) {
+        if (!channelFilter.isRasActive(event.channelId())) return;
+        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.channel.activity"));
     }
 }
 ```
+
+**Input events:** `CommitmentStateChangedEvent`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, `ChannelActivityEvent`. All are existing qhorus CDI events in `casehub-qhorus-api`.
+
+**Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. Cancellation is currently modelled as a state transition within `CommitmentStateChangedEvent` (state → CANCELLED). No separate event type is needed.
+
+**Event ordering:** CDI `@ObservesAsync` does not guarantee delivery order. Two rapid commitment state changes on the same channel could arrive at RAS out of order. This is acceptable because each commitment lifecycle event is self-contained — `CommitmentStateChangedEvent` carries the full `Commitment` object with `previousState`, so RAS can reconstruct the transition without depending on arrival order. Situation templates must be designed to tolerate out-of-order delivery: use the event's embedded state rather than inferring state from event sequence. The pre-built situations (`ack-timeout`, `decline-pattern`, etc.) use `CommitmentState` values from the event payload, not arrival order, for detection logic.
 
 ### QhorusChannelFilter
 
@@ -428,31 +519,17 @@ public class QhorusChannelFilter {
 }
 ```
 
-### CommitmentStateMapper
+**Lifecycle management:**
 
-Pure function: maps message type to commitment state transition.
+1. **Startup initialization.** `QhorusChannelFilter` observes `@Initialized(ApplicationScoped.class)` and scans all `Channel` entities whose `protocols` list references situation-containing policies. For each, it calls `register(channelId, eventTypes)` where `eventTypes` is derived from the situations' `SituationDefinition.eventTypes()`. The `ChannelPolicyCompiler` drives this — it already knows which policies have `situations:` blocks and which channels bind those policies.
 
-```java
-public class CommitmentStateMapper {
+2. **Runtime policy changes.** When a channel's `protocols` list is updated (via REST API `PUT /api/channels/{id}` or `ChannelService.update()`), a `ChannelPolicyChangedEvent` CDI event is fired. `QhorusChannelFilter` observes this and re-evaluates whether the channel is RAS-active:
+   - If the new protocols include situation-containing policies → `register()` with updated event types
+   - If the new protocols no longer include any situation-containing policies → `deregister()`
 
-    public enum CommitmentTransition {
-        OPENED, ACKNOWLEDGED, FULFILLED, DECLINED, FAILED, DELEGATED, EXPIRED
-    }
+3. **Situation registration/deregistration.** When `QhorusSituationProvider` runtime-registers or deregisters a situation (via `SituationRegistrar.register()`/`deregister()`), the filter is updated to reflect the changed event type mappings. The provider calls `channelFilter.register()`/`deregister()` as part of the registration lifecycle.
 
-    public static Optional<CommitmentTransition> fromMessageType(MessageType type) {
-        return switch (type) {
-            case COMMAND, QUERY, PROPOSE -> Optional.of(CommitmentTransition.OPENED);
-            case STATUS -> Optional.of(CommitmentTransition.ACKNOWLEDGED);
-            case DONE -> Optional.of(CommitmentTransition.FULFILLED);
-            case RESPONSE -> Optional.of(CommitmentTransition.FULFILLED); // for non-PROPOSE
-            case DECLINE -> Optional.of(CommitmentTransition.DECLINED);
-            case FAILURE -> Optional.of(CommitmentTransition.FAILED);
-            case HANDOFF -> Optional.of(CommitmentTransition.DELEGATED);
-            case EVENT -> Optional.empty();
-        };
-    }
-}
-```
+4. **DB override changes.** `set_policy_overrides` changes threshold parameters, not which situations exist. The filter does not need updating for override changes — overrides affect situation behavior, not event routing.
 
 ### QhorusSituationProvider
 
@@ -468,6 +545,7 @@ public class QhorusSituationProvider implements SituationDefinitionProvider {
             ackTimeout(),
             obligationPressure(),
             declinePattern(),
+            correctionUncertainty(),
             channelSilence()
         );
     }
@@ -489,6 +567,7 @@ Pre-built situation templates (configurable via policy parameters):
 | `ack-timeout` | COMMAND pending > window with no STATUS/DONE | ExpressionRules |
 | `obligation-pressure` | Agent has N+ open commitments, new COMMAND arriving | ExpressionRules |
 | `decline-pattern` | N consecutive DECLINEs from same obligor | Threshold (ChainMode) |
+| `correction-uncertainty` | Correction then retraction on same message, repeated | Sequence (ChainMode) |
 | `channel-silence` | Activity drops to zero after FAILURE | Rate (ChainMode) |
 
 ### ProtocolEvaluationEvent observation
@@ -524,9 +603,9 @@ This enables RAS situations that correlate protocol violations with temporal pat
 - Override application tests (base + channel overrides → effective config)
 
 **Layer 3 (RAS adapter):**
-- CDI-free unit tests for CommitmentStateMapper (pure function)
 - CDI-free unit tests for QhorusChannelFilter
-- `@QuarkusTest` integration tests for end-to-end bridge (mock RAS event bus)
+- CDI-free unit tests for CloudEvent conversion (each CDI event type → CloudEvent)
+- `@QuarkusTest` integration tests for end-to-end bridge (mock RAS event bus, verify CDI event → CloudEvent flow)
 
 ### Migration path
 
@@ -559,6 +638,8 @@ casehub-ras-api
 casehub-ras/qhorus (new adapter module)
   └── depends on: casehub-qhorus-api, casehub-ras-api
   └── provides: QhorusEventBridge, QhorusSituationProvider, QhorusChannelFilter
+  └── observes: CommitmentStateChangedEvent, CommitmentDeclinedEvent, CommitmentExpiredEvent,
+                ChannelActivityEvent, ProtocolEvaluationEvent
 ```
 
 ---
