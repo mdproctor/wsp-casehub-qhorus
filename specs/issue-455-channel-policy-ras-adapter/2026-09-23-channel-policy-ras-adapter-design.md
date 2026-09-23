@@ -362,7 +362,7 @@ The `ChannelPolicyCompiler` pre-compiles `condition:` expressions at startup usi
 
 - **Evaluation-time type mismatch.** If a DB override sets `max_open_queries` to a non-numeric string (e.g., `"unlimited"`), the substituted expression `open_queries >= unlimited` fails at evaluation time. Behavior: treat the evaluation failure as a violation (fail-closed) and log a warning with the policy name, rule name, raw expression, and exception message. Fail-closed is safer — a misconfigured threshold should surface as a visible problem, not silently disable the rule.
 
-- **Evaluation-time exception.** Any uncaught exception from MVEL evaluation is caught at the `ChannelProtocol.evaluate()` boundary. The exception is logged, and a `ProtocolViolation` with `Severity.WARNING` is emitted: `"Policy rule '<rule-name>' evaluation failed: <exception message>"`. The violation propagates through the normal advisory pipeline — it does not crash the dispatch.
+- **Evaluation-time exception.** Any uncaught exception from MVEL evaluation is caught at the `ChannelProtocol.evaluate()` boundary. The exception is logged, and a `DispatchAdvisory` with `Severity.WARNING` is emitted: `"Policy rule '<rule-name>' evaluation failed: <exception message>"`. The violation propagates through the normal advisory pipeline — it does not crash the dispatch.
 
 ### Variable resolution
 
