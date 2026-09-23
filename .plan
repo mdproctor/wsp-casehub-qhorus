@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-455-channel-policy-ras-adapter
-state: scaffolded
+state: active
 project-sha: slot-creation
 date: 2026-09-23
 issue-repo: casehubio/qhorus
@@ -13,3 +13,15 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#455 — Issue #455 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: Create DispatchAdvisory Severity SuggestedAction
+    - [ ] Task 2: Update ChannelProtocol SPI + protocols
+  - [ ] Batch 2: Pipeline
+    - [ ] Task 3: Delete TaggedAdvisory + severity-aware enforcement
+    - [ ] Task 4: Evolve DispatchResult + Exception + Event
+  - [ ] Batch 3: CDI Events
+    - [ ] Task 5: Create ProtocolEvaluationEvent
+    - [ ] Task 6: Wire CommitmentStateChangedEvent
+    - [ ] Task 7: Fire ChannelActivityEvent as CDI
+  - [ ] Batch 4: Policy Overrides
+    - [ ] Task 8: V55 migration + policyOverrides
