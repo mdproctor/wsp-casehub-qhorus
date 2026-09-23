@@ -194,10 +194,16 @@ public record ProtocolAdvisory(
         String source,
         Severity severity,
         String message,
-        SuggestedAction suggestedAction) {}
+        Map<String, Object> evidence,
+        SuggestedAction suggestedAction) {
+
+    public ProtocolAdvisory {
+        evidence = evidence != null ? Map.copyOf(evidence) : Map.of();
+    }
+}
 ```
 
-`DispatchResult` gains `List<ProtocolAdvisory> advisories` replacing `List<String>`. **Breaking change** — pre-release, acceptable.
+`DispatchResult` gains `List<ProtocolAdvisory> advisories` replacing `List<String>`. Evidence included — callers (dashboards, HIL review) need structured data for display. **Breaking change** — pre-release, acceptable.
 
 ### EnforcementBlockedException evolution
 
@@ -303,6 +309,16 @@ protocols: ["policy:strict-operations", "REQUEST_RESPONSE"]
 
 Both YAML-compiled policies and built-in Java protocols coexist in the `ProtocolRegistry`. A channel can mix them.
 
+### Variable resolution
+
+Variables in dispatch rules (`${var}`) resolve from three sources, in precedence order:
+
+1. **Per-channel DB overrides** (highest) — `Channel.policyOverrides` map
+2. **YAML defaults** — `defaults:` block in the dispatch rule
+3. **Built-in context** — runtime values injected by the protocol engine: `${sender}`, `${channel_name}`, `${open_queries}`, `${open_commands}`, `${open_commitments_for_obligor}`
+
+Context variables are computed from `ProtocolContext` at evaluation time. YAML defaults are set at compilation time. DB overrides are checked at evaluation time — the compiled protocol reads the channel's override map for parameter values, falling back to the YAML default.
+
 ### DB overrides
 
 Per-channel threshold overrides via a new `Channel.policyOverrides` field (nullable `Map<String, String>`, JSON in DB):
@@ -311,7 +327,9 @@ Per-channel threshold overrides via a new `Channel.policyOverrides` field (nulla
 {"max_open_queries": "5", "ack-timeout.window": "10m"}
 ```
 
-Override keys use dot-notation: `<policy-name>.<param>` for situations, `<param>` for dispatch-rule defaults. Overrides are applied at evaluation time, not at compilation time — the compiled protocol checks the channel's override map for parameter values.
+**Key format:** `<param>` for dispatch-rule defaults within the active policy, `<situation-ref>.<param>` for situation parameter overrides. Keys are scoped to the policies active on that channel — an override for a policy not in the channel's `protocols` list has no effect.
+
+**Merge semantics:** Individual key override, not whole-map replacement. Setting a key overrides that specific default; unset keys retain the YAML default. `set_policy_overrides` merges into the existing map. Null value on a key removes the override (reverts to YAML default).
 
 ### Storage: Flyway migration
 
