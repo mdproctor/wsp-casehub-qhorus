@@ -150,72 +150,49 @@ This eliminates the `TaggedAdvisory.fromViolation()` mapping, the `ProtocolAdvis
 `enforceIfRequired()` gains severity-aware logic. The existing structural safety guards are preserved — these prevent enforcement from blocking messages that must always flow:
 
 ```java
-static void enforceIfRequired(Channel ch, List<TaggedAdvisory> taggedAdvisories,
+static void enforceIfRequired(Channel ch, List<DispatchAdvisory> advisories,
                               MessageType type, String sender, ...) {
     // --- Structural guards (unchanged from current implementation) ---
-    // System events are never subject to enforcement
     if (type == MessageType.EVENT) { return; }
-    // System senders (e.g. "system:enforcement") are never blocked
     if (sender.contains(":")) { return; }
-    // Resolution types (DONE, FAILURE, DECLINE, RESPONSE) must always flow —
-    // blocking them would prevent commitment resolution
     if (RESOLUTION_TYPES.contains(type)) { return; }
-    if (taggedAdvisories.isEmpty()) { return; }
+    if (advisories.isEmpty()) { return; }
 
     // --- Severity-aware enforcement (new) ---
-    List<TaggedAdvisory> enforceable;
+    List<DispatchAdvisory> enforceable;
 
     if (ch.enforcementMode() == null || ch.enforcementMode() == EnforcementMode.ADVISORY) {
         // In ADVISORY mode, only CRITICAL can upgrade to blocking
-        List<TaggedAdvisory> critical = taggedAdvisories.stream()
-                .filter(ta -> ta.severity() == Severity.CRITICAL)
-                .filter(ta -> !ch.enforcementExclusions().contains(ta.source()))
+        enforceable = advisories.stream()
+                .filter(a -> a.severity() == Severity.CRITICAL)
+                .filter(a -> !ch.enforcementExclusions().contains(a.source()))
                 .toList();
-        if (critical.isEmpty()) return;
-        // CRITICAL override path — treat as BLOCKING with severityUpgrade flag
-        enforceable = critical;
+        if (enforceable.isEmpty()) return;
+        // CRITICAL override path — severityUpgrade = true
     } else {
         // BLOCKING/QUARANTINE mode — filter out ADVISORY severity
-        enforceable = taggedAdvisories.stream()
-                .filter(ta -> ta.severity() != Severity.ADVISORY)
-                .filter(ta -> !ch.enforcementExclusions().contains(ta.source()))
+        enforceable = advisories.stream()
+                .filter(a -> a.severity() != Severity.ADVISORY)
+                .filter(a -> !ch.enforcementExclusions().contains(a.source()))
                 .toList();
         if (enforceable.isEmpty()) return;
     }
-    // ... existing enforcement execution
+    // ... existing enforcement execution with DispatchAdvisory directly
 }
 ```
 
 ### DispatchResult evolution
 
-`DispatchResult.advisories` evolves from `List<String>` to structured output:
+`DispatchResult.advisories` evolves from `List<String>` to `List<DispatchAdvisory>`. The same `DispatchAdvisory` type used throughout the pipeline — no separate API-facing type, no conversion layer. **Breaking change** — pre-release, acceptable.
 
 ```java
-public record ProtocolAdvisory(
-        String source,
-        Severity severity,
-        String message,
-        Map<String, Object> evidence,
-        SuggestedAction suggestedAction) {
-
-    public ProtocolAdvisory {
-        evidence = evidence != null ? Map.copyOf(evidence) : Map.of();
-    }
-}
+public record DispatchResult(
+        ...
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<DispatchAdvisory> advisories
+) {}
 ```
 
-`DispatchResult` gains `List<ProtocolAdvisory> advisories` replacing `List<String>`. Evidence included — callers (dashboards, HIL review) need structured data for display. **Breaking change** — pre-release, acceptable.
-
-**Conversion:** `ProtocolAdvisory` is constructed from `TaggedAdvisory` at the API boundary (when building `DispatchResult`):
-
-```java
-static ProtocolAdvisory from(TaggedAdvisory ta) {
-    return new ProtocolAdvisory(ta.source(), ta.severity(), ta.message(),
-                                ta.evidence(), ta.suggestedAction());
-}
-```
-
-The two types serve different layers: `TaggedAdvisory` is the internal runtime-core type that collects advisories from all sources (protocols, correlation checks, type policy). `ProtocolAdvisory` is the API-facing record in `DispatchResult`. Identical fields, different architectural boundaries — the conversion is the seam between internal evaluation and external reporting.
+Evidence included — callers (dashboards, HIL review) need structured data for display.
 
 ### EnforcementBlockedException evolution
 
@@ -225,7 +202,7 @@ Gains severity and structured violations:
 public class EnforcementBlockedException extends IllegalStateException {
     private final EnforcementMode mode;             // channel's configured mode
     private final List<String> violationSources;
-    private final List<ProtocolAdvisory> violations; // was List<String>
+    private final List<DispatchAdvisory> violations; // was List<String>
     private final boolean severityUpgrade;           // true when CRITICAL overrode ADVISORY mode
 
     /** The enforcement behavior actually applied — BLOCKING for severity upgrades. */
@@ -248,13 +225,13 @@ public record EnforcementBlockedEvent(
         EnforcementMode mode,
         String blockedSender,
         MessageType blockedType,
-        List<ProtocolAdvisory> violations,   // was List<String>
+        List<DispatchAdvisory> violations,   // was List<String>
         List<String> violationSources,
         boolean severityUpgrade) {           // new — CRITICAL overrode ADVISORY mode
 }
 ```
 
-`EnforcementExecutor.execute()` updated to construct the event from structured `TaggedAdvisory` data using `ProtocolAdvisory.from()`. Downstream CDI observers gain access to severity, evidence, and suggested action.
+`EnforcementExecutor.execute()` updated to construct the event directly from `DispatchAdvisory` data — no mapping needed. Downstream CDI observers gain access to severity, evidence, and suggested action.
 
 ### CDI event for RAS observation
 
@@ -266,7 +243,7 @@ public record ProtocolEvaluationEvent(
         UUID channelId,
         String channelName,
         String tenancyId,
-        List<ProtocolViolation> violations,
+        List<DispatchAdvisory> violations,
         EnforcementOutcome enforcementOutcome) {
 
     public enum EnforcementOutcome {
@@ -346,11 +323,17 @@ situations:
 
 ### Policy compilation
 
-At startup, the `ChannelPolicyCompiler` processes YAML files and produces:
+The YAML file contains two independent sections compiled by different modules — each module reads only the sections it owns:
 
-1. **ChannelProtocol beans** — each `dispatch_rules` block compiles into a `ChannelProtocol` implementation registered in `ProtocolRegistry`. The protocol name is `policy:<policy-name>` (e.g., `policy:strict-operations`).
+**In qhorus runtime — `ChannelPolicyCompiler`:**
 
-2. **SituationDefinition registrations** — each `situations` entry (both `ref:` and inline) compiles into a `SituationRegistration` passed to the RAS adapter's `SituationDefinitionProvider`.
+At startup, the `ChannelPolicyCompiler` processes the `dispatch_rules:` section of each YAML policy file and produces `ChannelProtocol` beans registered in `ProtocolRegistry`. The protocol name is `policy:<policy-name>` (e.g., `policy:strict-operations`). The compiler ignores the `situations:` section — it has no knowledge of RAS types.
+
+**In `ras/qhorus/` adapter — `SituationPolicyCompiler`:**
+
+At startup, the `SituationPolicyCompiler` processes the `situations:` section of the same YAML policy files and compiles each entry (both `ref:` and inline) into `SituationRegistration` + `GanglionDescriptor` objects registered via `SituationRegistrar`. This compiler lives in the RAS adapter module, which depends on both `casehub-qhorus-api` and `casehub-ras-api`.
+
+This split keeps the dependency direction clean: qhorus produces dispatch-time protocols, the RAS adapter produces situation definitions. Neither module depends on the other. Both read the same YAML files — the single policy file is the shared contract, not a shared compilation pipeline.
 
 ### Policy → Channel binding
 
@@ -444,7 +427,8 @@ ras/
       ├── src/main/java/io/casehub/ras/qhorus/
       │   ├── QhorusEventBridge.java
       │   ├── QhorusChannelFilter.java
-      │   └── QhorusSituationProvider.java
+      │   ├── QhorusSituationProvider.java
+      │   └── SituationPolicyCompiler.java
       └── src/test/
 ```
 
@@ -485,7 +469,9 @@ public class QhorusEventBridge {
 
 **Input events:** `CommitmentStateChangedEvent`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, `ChannelActivityEvent`. All are existing qhorus CDI events in `casehub-qhorus-api`.
 
-**Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. Cancellation is currently modelled as a state transition within `CommitmentStateChangedEvent` (state → CANCELLED). No separate event type is needed.
+**Prerequisite — wire up `CommitmentStateChangedEvent`:** This event is defined in `api/gateway/` but **not fired** by `CommitmentService` in production code (confirmed via `ide_find_references` — zero construction sites in runtime/runtime-core). Before the RAS adapter can observe commitment state changes, `CommitmentService` must fire `CommitmentStateChangedEvent` on all state transitions: `open()`, `acknowledge()`, `fulfill()`, `fail()`, `delegate()`. `CommitmentDeclinedEvent` and `CommitmentExpiredEvent` are already fired from `decline()` and `expire()` respectively. This wiring is step 5 in the implementation sequence.
+
+**Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. Cancellation is modelled as a state transition within `CommitmentStateChangedEvent` (state → CANCELLED). No separate event type is needed.
 
 **Event ordering:** CDI `@ObservesAsync` does not guarantee delivery order. Two rapid commitment state changes on the same channel could arrive at RAS out of order. This is acceptable because each commitment lifecycle event is self-contained — `CommitmentStateChangedEvent` carries the full `Commitment` object with `previousState`, so RAS can reconstruct the transition without depending on arrival order. Situation templates must be designed to tolerate out-of-order delivery: use the event's embedded state rather than inferring state from event sequence. The pre-built situations (`ack-timeout`, `decline-pattern`, etc.) use `CommitmentState` values from the event payload, not arrival order, for detection logic.
 
@@ -521,7 +507,7 @@ public class QhorusChannelFilter {
 
 **Lifecycle management:**
 
-1. **Startup initialization.** `QhorusChannelFilter` observes `@Initialized(ApplicationScoped.class)` and scans all `Channel` entities whose `protocols` list references situation-containing policies. For each, it calls `register(channelId, eventTypes)` where `eventTypes` is derived from the situations' `SituationDefinition.eventTypes()`. The `ChannelPolicyCompiler` drives this — it already knows which policies have `situations:` blocks and which channels bind those policies.
+1. **Startup initialization.** `QhorusChannelFilter` observes `@Initialized(ApplicationScoped.class)` and scans all `Channel` entities whose `protocols` list references situation-containing policies. For each, it calls `register(channelId, eventTypes)` where `eventTypes` is derived from the situations' `SituationDefinition.eventTypes()`. The `SituationPolicyCompiler` drives this — it knows which policies have `situations:` blocks and which channels bind those policies.
 
 2. **Runtime policy changes.** When a channel's `protocols` list is updated (via REST API `PUT /api/channels/{id}` or `ChannelService.update()`), a `ChannelPolicyChangedEvent` CDI event is fired. `QhorusChannelFilter` observes this and re-evaluates whether the channel is RAS-active:
    - If the new protocols include situation-containing policies → `register()` with updated event types
@@ -593,13 +579,13 @@ This enables RAS situations that correlate protocol violations with temporal pat
 
 **Layer 1 (structured output):**
 - CDI-free unit tests for all 4 protocol implementations with structured assertions on evidence maps
-- CDI-free unit tests for `enforceIfRequired()` with severity × mode matrix
-- `@QuarkusTest` integration tests for full dispatch pipeline with ProtocolViolation flow
-- `TaggedAdvisory` mapping tests
+- CDI-free unit tests for `enforceIfRequired()` with severity × mode matrix (all 9 cells of Severity × EnforcementMode)
+- `@QuarkusTest` integration tests for full dispatch pipeline with `DispatchAdvisory` flow
 
 **Layer 2 (policy model):**
 - YAML parsing unit tests for policy format
-- Compilation unit tests (YAML → ChannelProtocol, YAML → SituationDefinition)
+- Compilation unit tests — `ChannelPolicyCompiler`: YAML `dispatch_rules:` → `ChannelProtocol`
+- Compilation unit tests — `SituationPolicyCompiler`: YAML `situations:` → `SituationRegistration` (in `ras/qhorus/` test scope)
 - Override application tests (base + channel overrides → effective config)
 
 **Layer 3 (RAS adapter):**
@@ -611,10 +597,12 @@ This enables RAS situations that correlate protocol violations with temporal pat
 
 All changes are breaking (pre-release). No backward compat shims needed.
 
-1. `ChannelProtocol.evaluate()` return type: `List<String>` → `List<ProtocolViolation>`
-2. `DispatchResult.advisories`: `List<String>` → `List<ProtocolAdvisory>`
-3. `EnforcementBlockedException.violations`: `List<String>` → `List<ProtocolAdvisory>`
-4. All callers of the above updated in the same commit
+1. `ChannelProtocol.evaluate()` return type: `List<String>` → `List<DispatchAdvisory>`
+2. `DispatchResult.advisories`: `List<String>` → `List<DispatchAdvisory>`
+3. `EnforcementBlockedException.violations`: `List<String>` → `List<DispatchAdvisory>`
+4. `EnforcementBlockedEvent.violations`: `List<String>` → `List<DispatchAdvisory>`
+5. `TaggedAdvisory` deleted — all usages replaced with `DispatchAdvisory`
+6. All callers of the above updated in the same commit
 
 ### Flyway migrations
 
@@ -624,20 +612,21 @@ All changes are breaking (pre-release). No backward compat shims needed.
 
 ```
 casehub-qhorus-api
-  └── ProtocolViolation, Severity, SuggestedAction, ProtocolEvaluationEvent
+  └── DispatchAdvisory, Severity, SuggestedAction, ProtocolEvaluationEvent
 
 casehub-qhorus (runtime-core)
-  └── TaggedAdvisory (evolved), enforcement gate (severity-aware)
+  └── enforcement gate (severity-aware), DispatchAdvisory used directly (no TaggedAdvisory)
 
 casehub-qhorus (runtime)
-  └── ChannelPolicyCompiler, YAML loading
+  └── ChannelPolicyCompiler (dispatch_rules → ChannelProtocol only), YAML loading
 
 casehub-ras-api
   └── SituationDefinition, GanglionDescriptor (unchanged)
 
 casehub-ras/qhorus (new adapter module)
   └── depends on: casehub-qhorus-api, casehub-ras-api
-  └── provides: QhorusEventBridge, QhorusSituationProvider, QhorusChannelFilter
+  └── provides: QhorusEventBridge, QhorusSituationProvider, QhorusChannelFilter,
+                SituationPolicyCompiler (situations → SituationRegistration)
   └── observes: CommitmentStateChangedEvent, CommitmentDeclinedEvent, CommitmentExpiredEvent,
                 ChannelActivityEvent, ProtocolEvaluationEvent
 ```
@@ -648,17 +637,18 @@ casehub-ras/qhorus (new adapter module)
 
 Recommended implementation order within a single branch:
 
-1. **ProtocolViolation, Severity, SuggestedAction** in `api/spi/` — the foundation types
-2. **ChannelProtocol SPI change** + update all 4 built-in protocols
-3. **TaggedAdvisory evolution** + enforcement gate severity logic
-4. **DispatchResult/EnforcementBlockedException** evolution
-5. **ProtocolEvaluationEvent** CDI event
-6. **Update all tests** for the above
-7. **Channel policy YAML format** — parser + compiler
-8. **V55 migration** + policy overrides on Channel
-9. **RAS adapter module** (in casehub-ras repo, separate branch)
+1. **DispatchAdvisory, Severity, SuggestedAction** in `api/spi/` — the foundation types
+2. **ChannelProtocol SPI change** + update all 4 built-in protocols to return `List<DispatchAdvisory>`
+3. **Delete TaggedAdvisory** + update enforcement gate to use `DispatchAdvisory` directly + severity-aware logic
+4. **DispatchResult/EnforcementBlockedException/EnforcementBlockedEvent** evolution to `List<DispatchAdvisory>`
+5. **Wire up `CommitmentStateChangedEvent`** in `CommitmentService` for all state transitions (prerequisite for RAS adapter)
+6. **ProtocolEvaluationEvent** CDI event
+7. **Update all tests** for the above
+8. **Channel policy YAML format** — `ChannelPolicyCompiler` for `dispatch_rules:` only
+9. **V55 migration** + policy overrides on Channel
+10. **RAS adapter module** (in casehub-ras repo, separate branch) — `SituationPolicyCompiler` for `situations:`, event bridge, channel filter
 
-Steps 1-6 are the core SPI evolution (Layer 1). Steps 7-8 are the policy model (Layer 2). Step 9 is the RAS bridge (Layer 3).
+Steps 1-7 are the core SPI evolution (Layer 1). Steps 8-9 are the policy model (Layer 2). Step 10 is the RAS bridge (Layer 3).
 
 ---
 
