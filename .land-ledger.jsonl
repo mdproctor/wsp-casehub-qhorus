@@ -1,1 +1,2 @@
 {"event":"land","repo":"qhorus","branch":"issue-451-mcpdomain-migration","base_branch":"main","landed_sha":"3b6ae2c65fcd471cb206a4400a2a041848d85e92","push_target":"upstream","mirrored":true,"stamped":true,"timestamp":"2026-09-21T02:05:55.481969+00:00"}
+{"event":"promote","branch":"issue-438-snapshot-cdi-constructor","files":[],"timestamp":"2026-09-23T03:25:43.598450+00:00"}
