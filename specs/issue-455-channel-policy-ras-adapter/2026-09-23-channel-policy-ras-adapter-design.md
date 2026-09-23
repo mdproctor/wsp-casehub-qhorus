@@ -16,7 +16,7 @@ Three-layer evolution:
 
 2. **Channel policy definition model** — YAML format that compiles into both dispatch-time `ChannelProtocol` implementations (synchronous, Layer 1) and RAS `SituationDefinition` registrations (temporal, Layer 2). Hybrid storage: base policies in YAML files at startup, per-channel DB overrides for thresholds.
 
-3. **RAS adapter module** — `ras/qhorus/` module that bridges qhorus CDI commitment lifecycle events to RAS situation detection. Observes `CommitmentStateChangedEvent`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, and `ChannelActivityEvent`. Selective forwarding: only RAS-active channels.
+3. **RAS adapter module** — `ras/qhorus/` module that bridges qhorus CDI commitment lifecycle events to RAS situation detection. Observes `CommitmentStateChangedEvent` (all commitment transitions) and `ChannelActivityEvent` (channel activity). Selective forwarding: only RAS-active channels.
 
 ---
 
@@ -281,7 +281,6 @@ dispatch_rules:
       type: COMMAND
       target: null
     severity: critical
-    action: block
     message: "COMMAND dispatched without target"
     evidence:
       sender: "${sender}"
@@ -291,7 +290,7 @@ dispatch_rules:
       type: QUERY
     condition: "open_queries >= ${max_open_queries}"
     severity: warning
-    action: warn
+    suggested_action: escalate    # optional — defaults to log
     message: "${open_queries} unanswered QUERYs — consider waiting"
     evidence:
       openQueryCount: "${open_queries}"
@@ -450,16 +449,6 @@ public class QhorusEventBridge {
         rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.state-changed"));
     }
 
-    void onCommitmentDeclined(@ObservesAsync CommitmentDeclinedEvent event) {
-        if (!channelFilter.isRasActive(event.channelId())) return;
-        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.declined"));
-    }
-
-    void onCommitmentExpired(@ObservesAsync CommitmentExpiredEvent event) {
-        if (!channelFilter.isRasActive(event.channelId())) return;
-        rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.commitment.expired"));
-    }
-
     void onChannelActivity(@ObservesAsync ChannelActivityEvent event) {
         if (!channelFilter.isRasActive(event.channelId())) return;
         rasEventBus.fireAsync(toCloudEvent(event, "io.casehub.qhorus.channel.activity"));
@@ -467,11 +456,24 @@ public class QhorusEventBridge {
 }
 ```
 
-**Input events:** `CommitmentStateChangedEvent`, `CommitmentDeclinedEvent`, `CommitmentExpiredEvent`, `ChannelActivityEvent`. All are existing qhorus CDI events in `casehub-qhorus-api`.
+**Input events:** The bridge observes exactly two event types:
+- `CommitmentStateChangedEvent` — fires for ALL commitment state transitions (OPEN, ACKNOWLEDGED, FULFILLED, DECLINED, FAILED, DELEGATED, EXPIRED). A single CloudEvent type (`io.casehub.qhorus.commitment.state-changed`) carrying the full `Commitment` object with `previousState` gives RAS everything it needs to detect any commitment pattern.
+- `ChannelActivityEvent` — channel-level activity signal for rate/silence detection.
 
-**Prerequisite — wire up `CommitmentStateChangedEvent`:** This event is defined in `api/gateway/` but **not fired** by `CommitmentService` in production code (confirmed via `ide_find_references` — zero construction sites in runtime/runtime-core). Before the RAS adapter can observe commitment state changes, `CommitmentService` must fire `CommitmentStateChangedEvent` on all state transitions: `open()`, `acknowledge()`, `fulfill()`, `fail()`, `delegate()`. `CommitmentDeclinedEvent` and `CommitmentExpiredEvent` are already fired from `decline()` and `expire()` respectively. This wiring is step 5 in the implementation sequence.
+The bridge does NOT observe `CommitmentDeclinedEvent` or `CommitmentExpiredEvent` separately. Those dedicated events continue to fire for their existing consumers (e.g. `CommitmentEventNotifier`) but would produce duplicate CloudEvents if the bridge also observed them. `CommitmentStateChangedEvent` already covers DECLINED and EXPIRED transitions.
 
-**Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. Cancellation is modelled as a state transition within `CommitmentStateChangedEvent` (state → CANCELLED). No separate event type is needed.
+**Prerequisite — wire up `CommitmentStateChangedEvent`:** This event is defined in `api/gateway/` but **not fired** by `CommitmentService` in production code (confirmed via `ide_find_references` — zero construction sites in runtime/runtime-core). `CommitmentService` must be updated to fire `CommitmentStateChangedEvent` on ALL state transitions:
+- `open()` → state=OPEN, previousState=null
+- `acknowledge()` → state=ACKNOWLEDGED, previousState=OPEN
+- `fulfill()` → state=FULFILLED, previousState=(OPEN or ACKNOWLEDGED)
+- `decline()` → state=DECLINED, previousState=(OPEN or ACKNOWLEDGED) — fires alongside existing `CommitmentDeclinedEvent`
+- `fail()` → state=FAILED, previousState=(OPEN or ACKNOWLEDGED)
+- `delegate()` → state=DELEGATED, previousState=(OPEN or ACKNOWLEDGED)
+- `expireOverdue()` / `expireByChannel()` → state=EXPIRED — fires alongside existing `CommitmentExpiredEvent`
+
+`CommitmentDeclinedEvent` and `CommitmentExpiredEvent` are preserved as-is (existing consumers depend on them). `CommitmentStateChangedEvent` is additive — it fires in addition to the dedicated events, not as a replacement. This is step 5 in the implementation sequence.
+
+**Note:** `CommitmentCancelledEvent` (referenced in casehub-ras#66) does not exist in the qhorus codebase. `CommitmentState` has no `CANCELLED` value — cancellation is not modelled in qhorus's commitment lifecycle at all. The issue's reference is aspirational. If cancellation semantics are needed in future, they would require adding `CANCELLED` to `CommitmentState` and wiring a corresponding state transition — a separate concern from this spec.
 
 **Event ordering:** CDI `@ObservesAsync` does not guarantee delivery order. Two rapid commitment state changes on the same channel could arrive at RAS out of order. This is acceptable because each commitment lifecycle event is self-contained — `CommitmentStateChangedEvent` carries the full `Commitment` object with `previousState`, so RAS can reconstruct the transition without depending on arrival order. Situation templates must be designed to tolerate out-of-order delivery: use the event's embedded state rather than inferring state from event sequence. The pre-built situations (`ack-timeout`, `decline-pattern`, etc.) use `CommitmentState` values from the event payload, not arrival order, for detection logic.
 
@@ -509,7 +511,7 @@ public class QhorusChannelFilter {
 
 1. **Startup initialization.** `QhorusChannelFilter` observes `@Initialized(ApplicationScoped.class)` and scans all `Channel` entities whose `protocols` list references situation-containing policies. For each, it calls `register(channelId, eventTypes)` where `eventTypes` is derived from the situations' `SituationDefinition.eventTypes()`. The `SituationPolicyCompiler` drives this — it knows which policies have `situations:` blocks and which channels bind those policies.
 
-2. **Runtime policy changes.** When a channel's `protocols` list is updated (via REST API `PUT /api/channels/{id}` or `ChannelService.update()`), a `ChannelPolicyChangedEvent` CDI event is fired. `QhorusChannelFilter` observes this and re-evaluates whether the channel is RAS-active:
+2. **Runtime policy changes.** When a channel's `protocols` list is updated (via REST API `PUT /api/channels/{id}` or `ChannelService.update()`), a new `ChannelPolicyChangedEvent` CDI event is fired. This event does not exist today and must be created as part of this work — it is distinct from `ChannelMutationEvent` (which covers UI-observable mutations: reactions, topics, members, spaces). Protocol changes are internal configuration, not UI mutations. `QhorusChannelFilter` observes `ChannelPolicyChangedEvent` and re-evaluates whether the channel is RAS-active:
    - If the new protocols include situation-containing policies → `register()` with updated event types
    - If the new protocols no longer include any situation-containing policies → `deregister()`
 
@@ -627,8 +629,7 @@ casehub-ras/qhorus (new adapter module)
   └── depends on: casehub-qhorus-api, casehub-ras-api
   └── provides: QhorusEventBridge, QhorusSituationProvider, QhorusChannelFilter,
                 SituationPolicyCompiler (situations → SituationRegistration)
-  └── observes: CommitmentStateChangedEvent, CommitmentDeclinedEvent, CommitmentExpiredEvent,
-                ChannelActivityEvent, ProtocolEvaluationEvent
+  └── observes: CommitmentStateChangedEvent, ChannelActivityEvent, ProtocolEvaluationEvent
 ```
 
 ---
@@ -641,7 +642,7 @@ Recommended implementation order within a single branch:
 2. **ChannelProtocol SPI change** + update all 4 built-in protocols to return `List<DispatchAdvisory>`
 3. **Delete TaggedAdvisory** + update enforcement gate to use `DispatchAdvisory` directly + severity-aware logic
 4. **DispatchResult/EnforcementBlockedException/EnforcementBlockedEvent** evolution to `List<DispatchAdvisory>`
-5. **Wire up `CommitmentStateChangedEvent`** in `CommitmentService` for all state transitions (prerequisite for RAS adapter)
+5. **Wire up `CommitmentStateChangedEvent`** in `CommitmentService` for all state transitions (prerequisite for RAS adapter) + create `ChannelPolicyChangedEvent` in `api/event/` (fired from `ChannelService.update()` when protocols change)
 6. **ProtocolEvaluationEvent** CDI event
 7. **Update all tests** for the above
 8. **Channel policy YAML format** — `ChannelPolicyCompiler` for `dispatch_rules:` only
