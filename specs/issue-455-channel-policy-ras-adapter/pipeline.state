@@ -1,0 +1,14 @@
+format_version: 1
+state: PLANNING
+entered: 2026-09-23T12:35:00Z
+decision_count: 8
+dimensions_completed: 3
+dimensions_total: 3
+ordered: false
+dimensions_done: coherence,structure,robustness
+current_dimension:
+workspace_structure: /Users/mdproctor/reviews/casehub-slots/channel-policy-ras-adapter-structure-20260923-115534
+workspace_coherence: /Users/mdproctor/reviews/casehub-slots/channel-policy-ras-adapter-coherence-20260923-115532
+workspace_robustness: /Users/mdproctor/reviews/casehub-slots/channel-policy-ras-adapter-robustness-20260923-115536
+workspace_crosscutting:
+workspace_decision:
