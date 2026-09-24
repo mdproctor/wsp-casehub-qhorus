@@ -43,7 +43,9 @@ When an agent registers capabilities via `InstanceService.register()`, the syste
 2. For each **added** capability: `findOrCreateByName("broadcast:<tag>")` + `membershipService.join(channelId, instanceId, MemberRole.PARTICIPANT)`
 3. For each **removed** capability: `membershipService.leave(channelId, instanceId)`
 
-**Hook point:** A new `@ApplicationScoped` bean `BroadcastMembershipManager` observes instance registration. It does NOT live inside `InstanceService` (which is in `runtime-core/` and should not depend on channel/membership services). Instead:
+**Opt-out:** There is no mechanism to have a capability but opt out of its broadcast channel. If this becomes a problem, an interest-based model (separate "interests" list at registration) can be layered on without breaking the auto-join default.
+
+**Hook point:** A new `@ApplicationScoped` bean `BroadcastMembershipManager` in `runtime-core/` (same package as `ChannelService` and `ChannelMembershipService`) observes instance registration. It does NOT live inside `InstanceService` — separation of concerns. Instead:
 
 ```
 InstanceService.register()
@@ -134,6 +136,7 @@ public class NotificationChannelBackend implements AgentChannelBackend {
 ```java
 public record QhorusBroadcastEvent(
     String tenancyId,
+    String recipientId,
     String capabilityTag,
     UUID channelId,
     String channelName,
@@ -148,7 +151,7 @@ public record QhorusBroadcastEvent(
 }
 ```
 
-**Subscription bootstrap:** `QhorusSubscriptionBootstrap` gains a startup hook that creates a SYSTEM-scope subscription for `io.casehub.qhorus.broadcast.*` (wildcard event type) targeting each member by their actor ID. Alternatively, subscriptions can be created lazily per capability tag when the broadcast channel is first created.
+**Subscription bootstrap:** Subscriptions are created lazily — when `NotificationChannelBackend` first registers for a broadcast channel, it creates a SYSTEM-scope subscription for `io.casehub.qhorus.broadcast.<capabilityTag>` with `TargetType.EVENT_FIELD` targeting the `recipientId` field. On `post()`, the backend creates one `QhorusBroadcastEvent` per channel member with `recipientId` set to the member's actor ID. This follows the existing `QhorusObligationEvent` pattern (one event per target actor, field-based routing).
 
 ### What the notification backend does NOT do
 
