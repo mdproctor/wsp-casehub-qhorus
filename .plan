@@ -13,15 +13,7 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#455 — Issue #455 ← active
-  - [x] Batch 1: Foundation
-    - [x] Task 1: Create DispatchAdvisory Severity SuggestedAction
-    - [x] Task 2: Update ChannelProtocol SPI + protocols
-  - [x] Batch 2: Pipeline
-    - [x] Task 3: Delete TaggedAdvisory + severity-aware enforcement
-    - [x] Task 4: Evolve DispatchResult + Exception + Event
-  - [ ] Batch 3: CDI Events
-    - [ ] Task 5: Create ProtocolEvaluationEvent
-    - [ ] Task 6: Wire CommitmentStateChangedEvent
-    - [ ] Task 7: Fire ChannelActivityEvent as CDI
-  - [ ] Batch 4: Policy Overrides
-    - [ ] Task 8: V55 migration + policyOverrides
+  - [ ] Batch 1: Batch 3
+    - [ ] Task 1: CDI Events:Task 5: Create ProtocolEvaluationEvent [done]
+    - [ ] Task 2: CDI Events:Task 6: Wire CommitmentStateChangedEvent [done]
+    - [ ] Task 3: CDI Events:Task 7: Fire ChannelActivityEvent as CDI [done]
