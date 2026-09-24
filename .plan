@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-442-topic-broadcast-swarm
-state: scaffolded
+state: active
 project-sha: f573204908e9fc597767fbdb73f41fe90f4e10e2
 date: 2026-09-23
 issue-repo: casehubio/qhorus
@@ -13,9 +13,9 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#442 — Issue #442 ← active
-  - [ ] Batch 1: Foundation
-    - [ ] Task 1: ChannelSemantic.BROADCAST + CDI events
-    - [ ] Task 2: BroadcastMembershipManager
-    - [ ] Task 3: MessageDispatcher.broadcast()
-  - [ ] Batch 2: Notification
-    - [ ] Task 4: NotificationChannelBackend + QhorusBroadcastEvent
+  - [x] Batch 1: Foundation
+    - [x] Task 1: ChannelSemantic.BROADCAST + CDI events
+    - [x] Task 2: BroadcastMembershipManager
+    - [x] Task 3: MessageDispatcher.broadcast()
+  - [x] Batch 2: Notification
+    - [x] Task 4: NotificationChannelBackend + QhorusBroadcastEvent
