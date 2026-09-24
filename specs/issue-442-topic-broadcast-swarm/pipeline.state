@@ -1,7 +1,7 @@
 format_version: 1
-state: CLARIFYING_QUESTIONS
-entered: 2026-09-23T12:15:00Z
-decision_count: 1
+state: DECISION_CAPTURE
+entered: 2026-09-24T00:10:00Z
+decision_count: 6
 dimensions_completed: 0
 dimensions_total: 0
 ordered: false

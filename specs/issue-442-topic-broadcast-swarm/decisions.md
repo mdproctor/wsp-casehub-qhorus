@@ -36,3 +36,39 @@
 **Sources:** MessageType 10-type taxonomy (ADR-0005), event-content-free-signal-type protocol
 **Exploration:** quick
 **Status:** captured
+
+## D4: Broadcast channel lifecycle
+
+**Choice:** Keep channel when empty, mark zero members. No auto-delete.
+**Alternatives:**
+- Auto-delete after grace period — cleaner but loses channel-level config and risks thrashing during agent restarts
+- Never auto-delete — same as chosen, but without the explicit "mark empty" signal
+**Rationale:** The channel slug, ledger history, and any customized config (rate limits, enforcement) have value. Agents restart frequently — auto-delete would cause channel thrashing. An agent re-registering a capability simply re-joins the existing channel.
+**Trade-offs:** Broadcast channels accumulate over time. Acceptable — they're lightweight (no active backends when empty) and can be manually cleaned up via `delete_channel`.
+**Depends on:** D1 (BROADCAST semantic), D2 (auto-membership)
+**Sources:** ChannelMembershipService, InstanceService.register()
+**Exploration:** quick
+**Status:** captured
+
+## D5: P2P ephemeral channels — scope
+
+**Choice:** Out of scope for #442. File as a separate follow-up issue.
+**Alternatives:**
+- Include in #442 — both are "lightweight channel convenience" but they're different coordination patterns
+**Rationale:** P2P ephemeral channels are a distinct pattern (1:1 temporary, auto-close) from broadcast (1:N persistent, auto-membership). #442 is well-scoped with BROADCAST + auto-membership + notification backend. P2P can build on the same infrastructure later.
+**Trade-offs:** The issue description asked for both. The follow-up issue should reference #442 and the hive mind epic.
+**Sources:** Issue #442 body
+**Exploration:** quick
+**Status:** captured
+
+## D6: NotificationChannelBackend module placement
+
+**Choice:** Merge into the existing `notification-bridge/` module
+**Alternatives:**
+- New `notification-channel-backend/` module — clean separation but redundant with notification-bridge
+**Rationale:** Both are "qhorus → platform notifications" bridges. notification-bridge currently has a MessageObserver (commitment events) and a SubscriptionBootstrap. Adding a ChannelBackend (broadcast delivery) to the same module keeps the single-dependency story clean. One module, one concern: "deliver qhorus events to the platform notification system."
+**Trade-offs:** The module grows from pure CDI-free unit tests to needing ChannelBackend test infrastructure. Manageable — RecordingChannelBackend is available in casehub-qhorus-testing.
+**Depends on:** D1 (BROADCAST semantic)
+**Sources:** notification-bridge/ module structure, ChannelBackend SPI
+**Exploration:** quick
+**Status:** captured
