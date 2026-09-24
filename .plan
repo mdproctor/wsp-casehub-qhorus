@@ -13,3 +13,9 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/qhorus#442 — Issue #442 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: ChannelSemantic.BROADCAST + CDI events
+    - [ ] Task 2: BroadcastMembershipManager
+    - [ ] Task 3: MessageDispatcher.broadcast()
+  - [ ] Batch 2: Notification
+    - [ ] Task 4: NotificationChannelBackend + QhorusBroadcastEvent
