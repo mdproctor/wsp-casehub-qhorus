@@ -1,0 +1,15 @@
+# Work Plan — issue-456-arc42stories-migration
+
+## State
+branch: issue-456-arc42stories-migration
+state: scaffolded
+project-sha: 3f3f7ee8c8ceaff5e9675b01cd7efd14de2b3ec1
+date: 2026-09-25
+issue-repo: casehubio/qhorus
+covers: 456
+design-repo: project
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#456 — Issue #456 ← active
