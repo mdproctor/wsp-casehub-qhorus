@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-442-topic-broadcast-swarm
-state: active
+state: closing:promoted
 project-sha: f573204908e9fc597767fbdb73f41fe90f4e10e2
 date: 2026-09-23
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#442 — Issue #442 ← active
   - [x] Batch 1: Foundation
