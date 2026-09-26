@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-456-arc42stories-migration
-state: active
+state: closing:promoted
 project-sha: 3f3f7ee8c8ceaff5e9675b01cd7efd14de2b3ec1
 date: 2026-09-25
 issue-repo: casehubio/qhorus
@@ -11,18 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: none
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/qhorus#456 — Issue #456 ← active
-  - [x] Batch 1: Structural
-    - [x] Task 1: Write §1-§8
-  - [x] Batch 2: Chapters
-    - [x] Task 2: J1 Core Mesh (C1-C14)
-    - [x] Task 3: J2 Normative Governance (C15-C20)
-    - [x] Task 4: J3 Gateway & Transport (C21-C27)
-    - [x] Task 5: J4 Channel Intelligence (C28-C37)
-    - [x] Task 6: J5 Operational Safety (C38-C44)
-    - [x] Task 7: J6 Trust Compliance & Routing (C45-C55)
-  - [x] Batch 3: Assembly
-    - [x] Task 8: Chapter index + matrix
-  - [x] Batch 4: Cleanup
-    - [x] Task 9: Delete DESIGN.md + update refs
+- [x] casehubio/qhorus#456 — Issue #456
