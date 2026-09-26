@@ -13,3 +13,16 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#456 — Issue #456 ← active
+  - [ ] Batch 1: Structural
+    - [ ] Task 1: Write §1-§8
+  - [ ] Batch 2: Chapters
+    - [ ] Task 2: J1 Core Mesh (C1-C14)
+    - [ ] Task 3: J2 Normative Governance (C15-C20)
+    - [ ] Task 4: J3 Gateway & Transport (C21-C27)
+    - [ ] Task 5: J4 Channel Intelligence (C28-C37)
+    - [ ] Task 6: J5 Operational Safety (C38-C44)
+    - [ ] Task 7: J6 Trust Compliance & Routing (C45-C55)
+  - [ ] Batch 3: Assembly
+    - [ ] Task 8: Chapter index + matrix
+  - [ ] Batch 4: Cleanup
+    - [ ] Task 9: Delete DESIGN.md + update refs
