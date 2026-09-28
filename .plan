@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-459-fix-preexisting-test-failures
-state: scaffolded
+state: active
 project-sha: c9b64d2c
 date: 2026-09-29
 issue-repo: casehubio/qhorus
