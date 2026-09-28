@@ -1,0 +1,15 @@
+# Work Plan — issue-458-runtime-core-extraction
+
+## State
+branch: issue-458-runtime-core-extraction
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 458
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#458 — Issue #458 ← active
