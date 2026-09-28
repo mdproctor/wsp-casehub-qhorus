@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-458-runtime-core-extraction
-state: closing:review
+state: closing:verified
 project-sha: 
 date: 
 issue-repo: casehubio/qhorus
@@ -10,7 +10,7 @@ covers: 458
 design-repo: 
 design-section-hashes: 
 flyway-next-v: 
-
 evidence-era: true
+
 ## Queue
-- [ ] casehubio/qhorus#458 — Issue #458 ← active
+- [x] casehubio/qhorus#458 — Issue #458
