@@ -1,39 +1,22 @@
-# Session Handover — 2026-10-13
+# HANDOFF — casehub-qhorus
 
-## What happened
+## Last Session (2026-09-29)
 
-Completed #489 (RegistryBackedInstanceManager) — landed as `4c997ed9` on main. Then started #464 (YAML channel config) — design spec and implementation plan written, no code yet.
+Triaged parent#515 items. Closed parent#480 (Pattern 2 migration already done — all 7 SPI interfaces have @McpDomain + @PlatformQuery/@PlatformMutation). Added qhorus-rest-spring to reactor (parent#495) — generator plugin now published, 8 Spring MVC controllers generated and compiling.
 
-### #489 — RegistryBackedInstanceManager (done)
+**Branch:** `issue-495-rest-spring-reactor` — 1 commit (pom.xml module addition)
 
-Thin CDI adapter implementing `InstanceManager` by delegating to platform `RegistryService` SPI.
-- `@ApplicationScoped @Alternative @Priority(100) @IfBuildProperty(casehub.qhorus.instance.registry-backed=true)`
-- Fires `InstanceRegisteredEvent` (capability diff) and `InstanceDeregisteredEvent`
-- `QhorusConfig.Instance.registryBacked()` registered for SmallRye validation
-- `@Inject` on 3-arg CDI constructor (required: multiple constructors)
-- `quarkus.index-dependency` for `casehub-platform-registry-inmem` (no Jandex in jar)
-- 16 unit + 5 integration tests. 2104 full suite, 0 regressions.
+**Pre-existing issues found:**
+- Stale ledger-api in slot's .m2 — LedgerMerkleFrontierRepository missing. Fixed by installing ledger API to slot's local repo (`-Dmaven.repo.local=...`)
+- Test compilation errors in compliance-report from stale ComplianceReport/LedgerDecisionRecord record signatures (upstream ledger changes). Not #495 scope.
+- runtime-spring remains excluded from reactor — 3 compile errors in generated auto-config (A2ACore$TransactionRunner missing, MessageLedgerEntryRepository not in core, QhorusTracingConfigSpring→DeliveryConfig type mismatch). Needs core extraction work.
 
-### #464 — YAML channel config (in progress — design complete, implementation not started)
+## Immediate Next Step
 
-- **Design spec:** `specs/issue-464-yaml-channel-config/2026-10-13-yaml-channel-config-design.md`
-- **Plan:** `plans/2026-10-13-yaml-channel-config.md`
-- **Decisions:** `specs/issue-464-yaml-channel-config/decisions.md` (4 decisions)
+Close branch issue-495-rest-spring-reactor via work-end. Then file an issue for the runtime-spring compile errors.
 
-Design: SmallRye `@ConfigMapping` with `Map<String, ChannelConfig>` under `casehub.qhorus.channels`. Full field surface (everything except `preAssignedId`). `ChannelConfigBootstrap` on `@Observes StartupEvent` — `findOrCreate()` + drift detection (WARN, no auto-correct). Space resolved by name.
+## References
 
-Plan: 2 batches, 4 tasks — config interface, bootstrap bean, drift detection, integration test.
-
-## To resume
-
-```
-work continue
-```
-
-Execute the plan at `plans/2026-10-13-yaml-channel-config.md` with `executing-plans`.
-
-## State
-
-- **Project repo:** clean, on `issue-464-yaml-channel-config` (no commits on branch — same as main)
-- **Workspace:** 3 unpushed commits (spec, plan, .plan tasks)
-- **IntelliJ:** needs reopening
+- parent#515 — Spring deployment completion epic
+- parent#480 — Pattern 2 migration (closed — already done)
+- parent#495 — Spring REST controllers (closed — rest-spring in reactor)
