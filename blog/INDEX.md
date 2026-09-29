@@ -92,3 +92,4 @@
 | [2026-09-20-mdp01-from-113-tools-to-six-domains.md](2026-09-20-mdp01-from-113-tools-to-six-domains.md) | 2026-09-20 | Migrating 113 @Tool methods from QhorusMcpTools to @McpDomain interfaces — pattern, complications, and what remains |
 | [2026-09-23-mdp01-the-bug-that-wasnt-there.md](2026-09-23-mdp01-the-bug-that-wasnt-there.md) | 2026-09-23 | SNAPSHOT build fix — reported CDI constructor errors led to a graphql module boundary violation and 37 orphaned tests |
 | [2026-09-26-mdp01-archaeology-as-architecture.md](2026-09-26-mdp01-archaeology-as-architecture.md) | 2026-09-26 | Retrospective ARC42STORIES migration — deriving 8 layers, 6 journeys, 55 chapters from 777 commits |
+| [2026-09-29-mdp01-the-import-that-broke-everything.md](2026-09-29-mdp01-the-import-that-broke-everything.md) | 2026-09-29 | Cross-repo import migration after ledger jpa-common extraction — seven ledger commits, twenty-nine qhorus files, zero logic changes |
