@@ -67,6 +67,11 @@ The bridge depends on `casehub-qhorus-api` + `casehub-platform-agent-api` — it
 
 **Async delivery:** `postTracked()` returns `PostResult.ALL_DELIVERED` immediately after accepting the message into the bridge's internal queue. Agent invocation runs asynchronously on a virtual thread (`Thread.ofVirtual().start()`). This prevents blocking the `DeliveryBatchExecutor`'s `@Transactional` `deliverBatch()` loop — LLM invocations take seconds to minutes, which would hold the JTA transaction open past the timeout (default 300s), exhaust executor threads, and starve other AT_LEAST_ONCE backends.
 
+**Concurrency control:** Each binding has a `Semaphore(binding.maxConcurrency())` that gates agent invocation:
+- **Persistent sessions:** `maxConcurrency = 1` (enforced, not configurable). `AgentSession` maintains conversation state — concurrent `query()` calls would interleave turns and corrupt the conversation history. Messages queue in FIFO order and are dispatched sequentially as the semaphore permit becomes available.
+- **Ephemeral invocations:** `maxConcurrency` configurable per binding (default 3). Each `AgentBackend.invoke()` call is stateless, so bounded concurrency is safe. The default of 3 balances throughput with LLM provider rate limits.
+- When the semaphore is full, messages remain in the bridge's internal queue. The virtual thread blocks on `semaphore.acquire()`, not on the delivery pump. This provides natural backpressure without affecting the `DeliveryBatchExecutor`.
+
 The AT_LEAST_ONCE guarantee applies to delivery TO the bridge, not processing BY the agent. Once the bridge acknowledges, the delivery pump advances its cursor. If the agent invocation fails, the bridge posts FAILURE (per §Failure Handling). If the application crashes mid-invocation, the in-flight invocation is lost — this is a known limitation of ephemeral bindings (the cursor was advanced but the agent hadn't completed). On restart, bindings are recreated and the pump continues from the advanced cursor.
 
 Agent dispatch: `AgentSession.query(content)` for persistent sessions, `AgentBackend.invoke(config)` for ephemeral (selected via `Instance<AgentBackend>` matching `binding.backendKey()` to `backend.key()`).
@@ -74,7 +79,7 @@ Agent dispatch: `AgentSession.query(content)` for persistent sessions, `AgentBac
 **Loop prevention:**
 - **Direct guard:** Set of managed agent instanceIds. If `message.sender()` matches a managed agent, return immediately. Same pattern as `A2AOutboundBackend.isExternalAgent()`. This prevents the primary loop vector: an agent's own RESPONSE triggering re-invocation of itself.
 
-**Indirect loop limitation:** Indirect loops (A → X → B → Y → A via MCP tool-dispatched COMMANDs) are not caught by the direct guard. A cross-bridge loop detection mechanism requires propagating invocation context through `MessageDispatcher.dispatch()` — a cross-cutting infrastructure change that affects the core message dispatch path. This is deferred to a separate design (see casehubio/qhorus#466). Indirect loops are only possible when agents have MCP server access, which is restricted to governance-critical agents per §MCP Server Exposure. For v1, the direct guard plus MCP access control provides sufficient protection.
+**Indirect loop limitation:** Indirect loops (A → X → B → Y → A via MCP tool-dispatched COMMANDs) are not caught by the direct guard. A cross-bridge loop detection mechanism requires propagating invocation context through `MessageDispatcher.dispatch()` — a cross-cutting infrastructure change that affects the core message dispatch path. This is deferred to a separate design (see casehubio/qhorus#468). Indirect loops are only possible when agents have MCP server access, which is restricted to governance-critical agents per §MCP Server Exposure. For v1, the direct guard plus MCP access control provides sufficient protection.
 
 ### Outbound Speech-Act Mapping
 
@@ -115,6 +120,7 @@ public record AgentChannelBinding(
     String agentBriefing,       // agent-specific instructions — component of the assembled systemPrompt
     List<String> mcpServers,    // which MCP servers the agent gets
     boolean persistent,         // persistent session or ephemeral
+    int maxConcurrency,         // max concurrent invocations (enforced=1 for persistent, default 3 ephemeral)
     int contextWindowSize,      // max recent messages for volatile context (default 20)
     Map<String, String> metadata,
     String tenancyId
@@ -123,8 +129,16 @@ public record AgentChannelBinding(
 
 **Lifecycle SPI** — the bridge exposes binding operations as a stable contract:
 - `createBinding(AgentChannelBinding)` — registers the agent, opens session if persistent, registers ChannelBackend
-- `updateBinding(UUID bindingId, ...)` — update agentBriefing, mcpServers, etc. (session restart if agentBriefing changes)
+- `updateBinding(UUID bindingId, ...)` — field changes trigger different levels of lifecycle action (see below)
 - `destroyBinding(UUID bindingId)` — close session, deregister backend, deregister instance
+
+**Update trigger categories:**
+
+| Field(s) | Action | Rationale |
+|-----------|--------|-----------|
+| `agentBriefing`, `mcpServers` | Session restart (close + reopen with new `AgentSessionInit`) | These are set at session open time — `AgentSessionInit.systemPrompt()` and `AgentSessionInit.mcpServers()` |
+| `backendKey`, `persistent`, `channelId` | Full rebind (destroy + recreate) | Switches `AgentBackend`, session model, or channel — incompatible with the existing session |
+| `contextWindowSize`, `maxConcurrency`, `metadata` | Hot update (no restart) | Affects per-turn query assembly or bridge-level config, not the agent session |
 
 Fleet YAML `FleetNodeHandler` (future, #247) will be a consumer of this SPI.
 
