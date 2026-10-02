@@ -53,3 +53,4 @@ promote_plan_next=done
 cleanup_pass=done
 delete_progress=done
 report_render=done
+wip_commit_project=done
