@@ -7,7 +7,7 @@
 
 ## Problem
 
-The qhorus-mesh relay currently supports only MCP clients (Claude Code sessions calling `mesh_register`, `mesh_send_message`). Server-side agents created via the platform's `AgentProvider` SPI — Claude (direct SDK), OpenAI, Gemini, Codex, langchain4j backends — cannot participate in mesh channels. Additionally, the mesh tools use the `@Tool` annotation pattern instead of the platform's `@McpDomain` pattern, which generates REST + GraphQL + MCP endpoints from a single interface.
+The qhorus-mesh relay currently supports only MCP clients (Claude Code sessions calling `mesh_register`, `mesh_send_message`). Server-side agents created via the platform's `AgentProvider` SPI — Claude (direct SDK), OpenAI, Gemini, Codex, langchain4j backends — cannot participate in mesh channels. Additionally, the mesh tools use the `@Tool` annotation pattern instead of the platform's `@McpDomain` pattern, which generates REST + MCP endpoints from a single interface.
 
 ## Solution
 
@@ -29,17 +29,10 @@ Two deliverables:
 │  │  • posts RESPONSE back      │                   │
 │  │  • sender-based loop guard  │                   │
 │  └──────────────────────────────┘                   │
-│                                                      │
-│  MessageObserver (LOCAL)                             │
-│  ┌──────────────────────────────┐                   │
-│  │ AgentInitiatedObserver       │                   │
-│  │  • agent sends STATUS/EVENT  │                   │
-│  │  • proactive alerts          │──► dispatch()     │
-│  └──────────────────────────────┘                   │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│ AgentProvider (casehub-platform)                     │
+│ AgentBackend (casehub-platform-agent-api)             │
 │  ┌──────────┐ ┌──────────┐ ┌───────────┐           │
 │  │ Claude   │ │ OpenAI   │ │langchain4j│           │
 │  │ (direct) │ │ (direct) │ │(ChatModel)│           │
@@ -61,15 +54,15 @@ The bridge depends on `casehub-qhorus-api` + `casehub-platform-agent-api` — it
 
 ### AgentProviderBackend
 
-`AgentChannelBackend` implementation with `AT_LEAST_ONCE` delivery guarantee. Registered per channel when an agent binding is created.
+`ChannelBackend` implementation with `AT_LEAST_ONCE` delivery guarantee. Registered per channel when an agent binding is created. Implements `ChannelBackend` (base interface — not `AgentChannelBackend`, which is the injection point for `QhorusChannelBackend` in `ChannelGateway`). Returns `ActorType.AGENT` from `actorType()`. Same pattern as `A2AOutboundBackend`.
 
 **Inbound message filter (postTracked):**
-- COMMAND, QUERY, PROPOSE → trigger `AgentSession.query(content)` or `AgentProvider.invoke(config)`
+- COMMAND, QUERY, PROPOSE → trigger `AgentSession.query(content)` (persistent) or `AgentBackend.invoke(config)` (ephemeral, selected via `Instance<AgentBackend>` matching `binding.backendKey()` to `backend.key()`)
 - All other types (STATUS, RESPONSE, EVENT, DONE, FAILURE, DECLINE, HANDOFF) → skip invocation. For persistent sessions, optionally queued as conversation context for the next agent turn.
 
 **Loop prevention — two layers:**
 1. **Direct guard:** Set of managed agent instanceIds. If `message.sender()` matches a managed agent, return immediately. Same pattern as `A2AOutboundBackend.isExternalAgent()`.
-2. **Indirect guard:** Per-bridge-instance `AtomicInteger` tracking in-flight invocations. If count exceeds `max-depth` (default 3), refuse invocation with WARN log. Catches cross-channel indirect loops. Uses `AtomicInteger` (not ThreadLocal) because AT_LEAST_ONCE delivery runs on the `DeliveryService` pump thread asynchronously.
+2. **Indirect guard (visited-set):** Each message dispatched by the bridge carries a visited-set of agent instanceIds in the `payload` field (JSON-encoded metadata). When the bridge receives a message, it deserialises the visited-set from the payload. If the current agent's instanceId is in the set, the message has already traversed this agent — it's an indirect loop. The bridge refuses invocation and posts a FAILURE with diagnostic content. When the bridge dispatches a RESPONSE, it adds the current agent's instanceId to the visited-set and propagates it in the outbound payload. Max-depth default of 5 (set length cap) provides a backstop against excessively deep causal chains even without cycles.
 
 ### Outbound Speech-Act Mapping
 
@@ -81,8 +74,11 @@ AgentEvent → qhorus MessageType:
 | InvocationComplete | RESPONSE | Carries accumulated text + invocation telemetry |
 | ToolCallComplete | STATUS | Tool invocation visibility for governance |
 | ToolResult | STATUS | Tool result for audit trail |
+| ToolCallDelta | (not posted) | Streaming partial args — full call arrives in ToolCallComplete |
 | ThinkingDelta | (not posted) | Agent-internal reasoning |
 | Failure/timeout | FAILURE | Resolves commitment immediately |
+
+**`InvocationComplete.isError` with buffered text:** When `isError=true` and text has been buffered from prior `TextDelta` events, the bridge discards the buffered text and posts FAILURE. The partial output is included as diagnostic context in the FAILURE message's `payload` field (not as a separate RESPONSE). Rationale: an errored invocation's partial output is unreliable; posting it as a RESPONSE would create a commitment-fulfilling message for content the agent didn't complete successfully.
 
 ### Commitment-Aware Terminal Messages
 
@@ -104,9 +100,10 @@ public record AgentChannelBinding(
     UUID channelId,
     String agentInstanceId,
     String backendKey,          // "claude", "openai", "langchain4j"
-    String systemPrompt,        // stable context for cache
+    String agentBriefing,       // agent-specific instructions — component of the assembled systemPrompt
     List<String> mcpServers,    // which MCP servers the agent gets
     boolean persistent,         // persistent session or ephemeral
+    int contextWindowSize,      // max recent messages for volatile context (default 20)
     Map<String, String> metadata,
     String tenancyId
 ) {}
@@ -114,29 +111,33 @@ public record AgentChannelBinding(
 
 **Lifecycle SPI** — the bridge exposes binding operations as a stable contract:
 - `createBinding(AgentChannelBinding)` — registers the agent, opens session if persistent, registers ChannelBackend
-- `updateBinding(UUID bindingId, ...)` — update systemPrompt, mcpServers, etc. (session restart if systemPrompt changes)
+- `updateBinding(UUID bindingId, ...)` — update agentBriefing, mcpServers, etc. (session restart if agentBriefing changes)
 - `destroyBinding(UUID bindingId)` — close session, deregister backend, deregister instance
 
 Fleet YAML `FleetNodeHandler` (future, #247) will be a consumer of this SPI.
+
+**Binding persistence:** Bindings are ephemeral — held in an in-memory `ConcurrentHashMap<UUID, AgentChannelBinding>` within the bridge. There is no JPA entity or Flyway migration. Consumers (e.g., `FleetNodeHandler`) are responsible for recreating bindings on application startup via the Lifecycle SPI. This is intentional: the bridge is a runtime component, and the source of truth for which agents should be bound to which channels is the consumer's configuration (fleet YAML, programmatic setup), not a database table. Persistent sessions are closed on shutdown and reopened when bindings are recreated at startup.
 
 ### Cache-Aware Prompt Structuring
 
 The bridge separates stable and volatile context:
 
-**Stable (systemPrompt, set at session open, cached by Claude):**
-- Agent briefing (from binding)
+**Stable (systemPrompt, assembled at session open, cached by Claude):**
+- Agent briefing (from `binding.agentBriefing()`)
 - Channel description and governance rules
 - Peer list snapshot (agents in the channel at session open time)
 
 **Volatile (per-turn query prompt):**
 - The message to process (COMMAND/QUERY content)
-- Recent channel activity since last turn (optional context window)
+- Recent channel activity since last turn (bounded context window: last 20 messages or 4000 tokens, whichever is smaller; configurable per binding via `AgentChannelBinding.contextWindowSize`)
 
-**Session restart policy:** On significant peer topology changes (agent join/leave via `InstanceRegisteredEvent`/`InstanceDeregisteredEvent`), the bridge closes and reopens the session with updated systemPrompt. Peer changes are infrequent relative to message frequency.
+**Session restart policy:** The bridge maintains a `channelId → Set<peerInstanceIds>` mapping, populated from `ChannelMembershipService.listMembers()` at session open time. On `InstanceRegisteredEvent` or `InstanceDeregisteredEvent`, the bridge checks whether the event's `instanceId` appears in any channel's peer set. If so, it queries `ChannelMembershipService.listMembers()` for the affected channels, compares the new peer set to the cached one, and restarts only those sessions where the peer set actually changed (join/leave, not identical re-registration). Re-registrations with identical capabilities (see §Significant change filter) are skipped entirely. Peer changes are infrequent relative to message frequency.
+
+**Significant change filter:** `InstanceRegisteredEvent` carries `previousCapabilities` and `currentCapabilities`. The bridge skips the event when `previousCapabilities.equals(currentCapabilities)` — this filters out heartbeat re-registrations. A new instance has `previousCapabilities = []` and always triggers evaluation. A deregistered instance always triggers evaluation.
 
 ### Failure Handling
 
-When `AgentProvider.invoke()` or `AgentSession.query()` fails:
+When `AgentBackend.invoke()` or `AgentSession.query()` fails:
 - Bridge posts FAILURE to the channel with diagnostic content (error type, message)
 - Commitment (if any) resolves immediately via standard attestation flow (FLAGGED/0.6)
 - No automatic retry — retry policy is a higher-level concern for the requester or supervisor agent
@@ -170,7 +171,7 @@ public class MeshMcpTools {
 ### After
 
 ```java
-// api/spi/mesh/MeshApi.java
+// mesh/src/main/java/io/casehub/qhorus/mesh/MeshApi.java
 @McpDomain(value = "qhorus/mesh", app = "qhorus-mesh",
            summary = "Mesh relay — register, discover peers, send messages")
 public interface MeshApi {
@@ -200,6 +201,20 @@ public interface MeshApi {
 }
 ```
 
+### Return Types
+
+```java
+public record MeshRegistration(UUID id, String instanceId, String description) {}
+
+public record MessageResult(Long messageId, String channel, MessageType type) {}
+
+public record ChannelDetail(UUID id, String name, Map<String, String> metadata) {}
+
+public record MessageSummary(Long id, String sender, MessageType type, String content) {}
+
+public record PeerInfo(String instanceId, String description, Map<String, String> metadata) {}
+```
+
 ```java
 // mesh/MeshService.java — implements MeshApi
 @ApplicationScoped
@@ -211,19 +226,23 @@ public class MeshService implements MeshApi {
 }
 ```
 
-The `@McpDomain` generator produces REST, GraphQL, and MCP endpoints from `MeshApi`. No `@Tool` annotations needed.
+The `@McpDomain` generator produces REST and MCP endpoints from `MeshApi`. No `@Tool` annotations needed.
 
 ## Testing
 
 ### Bridge component tests (CDI-free)
 - `AgentProviderBackendTest` — postTracked delivery, loop guard, message type filtering
 - `SpeechActMappingTest` — AgentEvent → MessageType mapping, commitment-aware terminal messages
-- `BindingLifecycleTest` — create/update/destroy binding, session restart on systemPrompt change
+- `BindingLifecycleTest` — create/update/destroy binding, session restart on agentBriefing change
 
 ### Integration tests (@QuarkusTest)
 - `AgentBridgeIntegrationTest` — end-to-end: create binding, send COMMAND to channel, verify agent receives via postTracked, verify RESPONSE dispatched back
-- `LoopGuardIntegrationTest` — verify sender-based and depth-based loop guards
-- `CacheStructureTest` — verify systemPrompt/query separation for persistent sessions
+- `LoopGuardIntegrationTest` — verify sender-based direct guard and visited-set indirect guard
+- `CacheStructureTest` — verify assembled systemPrompt / volatile query separation for persistent sessions
+
+### MeshApi migration tests
+- `MeshServiceTest` — unit test: verify each `MeshApi` method delegates correctly to `InstanceService`, `ChannelService`, `MessageDispatcher` (same behavior as `MeshMcpTools`, different return types)
+- `MeshApiEndpointTest` (@QuarkusTest) — verify `@McpDomain` generates REST endpoints, verify MCP tool registration, verify old `@Tool` endpoints are removed
 
 ### SSE transport test
 - One smoke test connecting an SSE client to the mesh relay, subscribing to a channel, verifying push events arrive when a bridged agent responds
@@ -233,7 +252,7 @@ The `@McpDomain` generator produces REST, GraphQL, and MCP endpoints from `MeshA
 ```
 agent-bridge/
 ├── casehub-qhorus-api          (ChannelBackend, MessageObserver, MessageDispatcher)
-├── casehub-platform-agent-api  (AgentProvider, AgentBackend, AgentSession)
+├── casehub-platform-agent-api  (AgentBackend, AgentSession, AgentSessionInit, AgentSessionConfig)
 └── (test) casehub-qhorus-testing, casehub-qhorus-persistence-memory
 ```
 
@@ -241,12 +260,12 @@ The mesh application (`mesh/pom.xml`) adds `casehub-qhorus-agent-bridge` as a de
 
 ## References
 
-- `api/src/main/java/io/casehub/qhorus/api/gateway/AgentChannelBackend.java` — ChannelBackend SPI
+- `api/src/main/java/io/casehub/qhorus/api/gateway/ChannelBackend.java` — ChannelBackend SPI (base interface for bridge backends)
+- `api/src/main/java/io/casehub/qhorus/api/gateway/AgentChannelBackend.java` — QhorusChannelBackend injection point (NOT for bridge backends)
 - `api/src/main/java/io/casehub/qhorus/api/gateway/MessageObserver.java` — observer contract
 - `a2a-outbound/src/main/java/.../A2AOutboundBackend.java` — AT_LEAST_ONCE bridge pattern, sender-based loop guard
 - `runtime-core/src/main/java/.../message/RoutingBridge.java` — role:X → agent resolution
-- `casehub-platform/agent-api/src/main/java/.../AgentProvider.java` — platform agent SPI
-- `casehub-platform/agent-api/src/main/java/.../AgentBackend.java` — backend routing SPI
+- `casehub-platform/agent-api/src/main/java/.../AgentBackend.java` — per-provider backend interface with `key()` routing
 - `casehub-platform/agent-claude-core/src/main/java/.../ClaudeAgentProvider.java` — Claude direct SDK backend
 - `casehub-platform/agent-langchain4j-core/src/main/java/.../ChatModelAgentProvider.java` — langchain4j catch-all
 - `api/src/main/java/io/casehub/qhorus/api/spi/channels/ChannelsApi.java` — @McpDomain pattern reference
