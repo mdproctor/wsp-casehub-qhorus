@@ -13,3 +13,13 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/qhorus#465 — Issue #465 ← active
+  - [ ] Batch 1: Binding+SpeechAct
+    - [ ] Task 1: AgentChannelBinding+SpeechActMapper
+  - [ ] Batch 2: Backend
+    - [ ] Task 2: AgentProviderBackend
+  - [ ] Batch 3: Lifecycle
+    - [ ] Task 3: AgentBridgeService
+  - [ ] Batch 4: MeshApi
+    - [ ] Task 4: MeshApi+MeshService migration
+  - [ ] Batch 5: Integration
+    - [ ] Task 5: Wire mesh+bridge test
