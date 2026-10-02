@@ -1,0 +1,15 @@
+# Work Plan — issue-465-qhorus-mesh
+
+## State
+branch: issue-465-qhorus-mesh
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 465
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#465 — Issue #465 ← active
