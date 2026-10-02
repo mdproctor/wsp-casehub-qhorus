@@ -39,17 +39,18 @@
 
 ## D4: Bridge mechanism
 
-**Choice:** Both — ChannelBackend for channel-to-agent delivery, MessageObserver for agent-initiated messages. Explicit sender-based loop guard.
+**Choice:** Both — ChannelBackend for channel-to-agent delivery, MessageObserver for agent-initiated messages. Two-layer loop guard: sender-based direct guard + per-bridge-instance depth counter for indirect loops.
 **Alternatives:**
 - ChannelBackend only — no agent-initiated messages
 - MessageObserver only — no delivery guarantees, no cursor tracking
-**Rationale:** ChannelBackend (AT_LEAST_ONCE) gives delivery guarantees via the existing delivery pump. MessageObserver enables agents to send proactive status updates, alerts, or initiate conversations. Loop prevention follows the A2AOutboundBackend pattern: the ChannelBackend's post() method checks whether the message sender matches the agent it manages and skips delivery for self-originated messages, preventing the cycle where an agent's RESPONSE is fanned out back to the ChannelBackend that triggered the invocation.
-**Trade-offs:** Two integration points to maintain; sender-based loop guard requires tracking the agent's sender ID within the ChannelBackend
-**Loop guard detail:** The bridge maintains a set of managed agent instanceIds. In post(), if message.sender() matches any managed agent, return immediately (matches A2AOutboundBackend.isExternalAgent() pattern). For cross-channel indirect loops (agent A's observer intercepts a message, posts to channel X, which delivers to agent B, which responds, triggering agent A's observer again), the bridge uses a context-scoped invocation depth counter to break cycles.
-**Sources:** AgentChannelBackend SPI, A2AOutboundBackend (#396) — see resolver.isExternalAgent(message.sender()) guard in post(), MessageObserver dispatch pattern
+**Rationale:** ChannelBackend (AT_LEAST_ONCE) gives delivery guarantees via the existing delivery pump. MessageObserver enables agents to send proactive status updates, alerts, or initiate conversations. Loop prevention uses two complementary mechanisms:
+**Direct loop guard:** The bridge maintains a set of managed agent instanceIds. In postTracked(), if message.sender() matches any managed agent, return immediately (matches A2AOutboundBackend.isExternalAgent() pattern). This prevents the cycle where an agent's RESPONSE is fanned out back to the ChannelBackend that triggered the invocation.
+**Indirect loop guard:** A per-bridge-instance `AtomicInteger` tracks the number of currently in-flight agent invocations across all managed agents. When an invocation starts, the counter increments; when it completes, it decrements. If the counter exceeds a configurable max-depth threshold (default: 3), the bridge refuses to invoke and logs a warning. This catches cross-channel indirect loops (agent A → channel X → agent B → channel Y → agent A) regardless of correlationId, thread, or request scope. The `AtomicInteger` is JVM-wide and thread-safe, which is essential because AT_LEAST_ONCE delivery runs asynchronously on the DeliveryService pump thread (verified: ChannelGateway.fanOut() skips AT_LEAST_ONCE backends; delivery is signaled via DeliverySignalQueue after transaction commit). ThreadLocal and @RequestScoped counters do not propagate across this async boundary.
+**Trade-offs:** Two integration points to maintain; per-bridge AtomicInteger adds a JVM-wide counter but imposes no measurable overhead
+**Sources:** AgentChannelBackend SPI, A2AOutboundBackend (#396) — see resolver.isExternalAgent(message.sender()) guard in post(), ChannelGateway.fanOut() AT_LEAST_ONCE skip path, DeliverySignalQueue async delivery
 **Exploration:** quick
 **Depends on:** D1
-**Status:** revised — R1-03 correctly identified that loop prevention was under-specified. Added explicit sender-based guard and cross-channel depth counter.
+**Status:** revised — R1-03 identified under-specification; R2-04 identified undefined scope for depth counter. Now specifies per-bridge-instance AtomicInteger with async delivery awareness.
 
 ## D5: Cache-aware prompt structuring
 
@@ -88,24 +89,37 @@
 **Exploration:** quick
 **Status:** revised — R1-06 correctly identified that FleetNodeHandler doesn't exist. Inverted the dependency: bridge exposes lifecycle SPI, FleetNodeHandler consumes it.
 
-## D8: Message type mapping and streaming model
+## D8: Message type mapping, streaming model, and inbound filtering
 
-**Choice:** Buffer-then-post model with typed speech-act mapping
+**Choice:** Commitment-aware buffer-then-post model with typed speech-act mapping and explicit inbound message filter
 **Alternatives:**
 - Stream-through (post STATUS for each TextDelta) — high message volume, poor signal-to-noise in the normative ledger
 - Full buffer (single RESPONSE at end, no intermediate STATUS) — no governance visibility into tool use
-**Rationale:** The bridge maps AgentEvent types to qhorus speech acts:
-- Inbound COMMAND/QUERY delivered via ChannelBackend → triggers AgentSession.query(content) or AgentProvider.invoke(config) with message content as the prompt
+- Uniform RESPONSE+DONE for all commitment types — normatively redundant for COMMAND/QUERY (RESPONSE already fulfills; DONE is a silent no-op on a terminal commitment)
+**Rationale:** The bridge maps AgentEvent types to qhorus speech acts with commitment-aware terminal message selection.
+
+**Inbound message filter (ChannelBackend.postTracked):**
+The ChannelBackend receives ALL messages fanned out on the channel. Only obligation-creating types trigger agent invocation:
+- COMMAND, QUERY, PROPOSE → trigger AgentSession.query(content) or AgentProvider.invoke(config)
+- STATUS, RESPONSE, EVENT, DONE, FAILURE, DECLINE, HANDOFF → skip invocation. For persistent sessions, these are optionally queued as conversation context for the next agent turn (appended to the query prompt to give the agent awareness of other participants' activity).
+
+**Outbound speech-act mapping (AgentEvent → qhorus MessageType):**
 - AgentEvent.TextDelta → buffered until InvocationComplete, then posted as a single RESPONSE message
 - AgentEvent.ToolCallComplete → posted as STATUS (tool invocation visibility for governance/oversight)
 - AgentEvent.ToolResult → posted as STATUS (tool result for audit trail)
-- AgentEvent.InvocationComplete → posted as DONE (marks obligation fulfillment; carries token usage in telemetry)
-- Agent invocation failure (exception, timeout) → posted as FAILURE (resolves commitment immediately)
 - AgentEvent.ThinkingDelta → not posted to channels (agent-internal reasoning; not normatively accountable)
-**Trade-offs:** Buffering TextDelta means no real-time visibility of agent text output in the channel. Real-time observation uses the WebSocket observer on the channel's observe/oversight channel — not the normative message stream.
-**Sources:** AgentEvent sealed interface (TextDelta, ThinkingDelta, ToolCallDelta, ToolCallComplete, ToolResult, InvocationComplete), qhorus MessageType taxonomy (ADR-0005), StoredCommitmentAttestationPolicy
-**Exploration:** surfaced by review (R1-09, R1-10)
-**Status:** captured
+- Agent invocation failure (exception, timeout) → posted as FAILURE (resolves commitment immediately)
+
+**Commitment-aware terminal message (replaces uniform RESPONSE+DONE):**
+The terminal message depends on the inbound commitment type:
+- COMMAND/QUERY commitment: RESPONSE only. RESPONSE carries the agent's text output AND fulfills the commitment (verified: MessageService.java RESPONSE case calls commitmentService.fulfill() for non-PROPOSE commitments). InvocationComplete metadata (inputTokens, outputTokens, thinkingTokens, durationMs, totalCostUsd) is carried as dispatch telemetry on the RESPONSE message. No separate DONE — it would find a terminal commitment and be a normative no-op (CommitmentService.fulfill() filters on c.state().isActive()).
+- PROPOSE commitment: RESPONSE (informational — the != MessageType.PROPOSE guard prevents fulfillment) then DONE (fulfills the commitment = accepts the proposal). The dual-message pattern IS correct for PROPOSE because RESPONSE and DONE have distinct normative effects.
+- No commitment (no correlationId): RESPONSE for content. No DONE needed — there is no commitment to fulfill.
+
+**Trade-offs:** Buffering TextDelta means no real-time visibility of agent text output in the channel. Commitment-aware mapping adds a conditional branch in the terminal message logic but eliminates normative noise (redundant DONE entries) and attestation asymmetry from the ledger.
+**Sources:** AgentEvent sealed interface, MessageService.java RESPONSE/DONE commitment handling (lines 481-486), CommitmentService.fulfill() isActive() filter, qhorus MessageType taxonomy (ADR-0005), StoredCommitmentAttestationPolicy
+**Exploration:** surfaced by review (R1-09, R1-10, R2-01, R2-02, R2-03)
+**Status:** revised — R2-01 identified RESPONSE+DONE normative redundancy for COMMAND/QUERY. R2-02 identified missing PROPOSE as inbound type. R2-03 identified missing inbound message filter. Now commitment-aware with explicit filter policy.
 
 ## D9: MCP server exposure to bridged agents
 
