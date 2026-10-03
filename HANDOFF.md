@@ -1,6 +1,16 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-09-29)
+## Last Session (2026-10-03)
+
+Closed #467 (remove @DefaultBean from runtime-core) and epic #466 (Spring completeness). Branch `issue-467-remove-defaultbean-from-core` landed as c716cc5d on main.
+
+**Changes:**
+- Moved 5 @DefaultBean @Produces methods from runtime-core/DefaultBeans.java → runtime/RuntimeBeans.java
+- Deleted runtime-core/DefaultBeans.java
+- Removed quarkus-arc dep from runtime-core POM — module is now framework-neutral
+- Added missing InboundNormaliser @ConditionalOnMissingBean to RuntimeAutoConfiguration (Spring)
+
+## Previous Session (2026-09-29)
 
 Closed parent#480 (Pattern 2 migration already done) and parent#495 (rest-spring added to reactor). Branch `issue-495-rest-spring-reactor` squash-merged to main and pushed.
 
