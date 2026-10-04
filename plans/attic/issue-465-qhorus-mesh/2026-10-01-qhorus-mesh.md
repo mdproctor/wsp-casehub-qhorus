@@ -1167,7 +1167,7 @@ Note: The exact McpClient API depends on `quarkus-mcp-server-test` — if unavai
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -Dtest=MeshMcpToolsTest -pl mesh`
-Expected: FAIL — `MeshMcpTools` class does not exist.
+Expected: FAIL — `MeshService` class does not exist.
 
 - [ ] **Step 3: Implement MeshMcpTools**
 
