@@ -297,3 +297,24 @@ Health and topology endpoints are available at levels 2+. Desired-state reads th
 **Sources:** Session discussion distilling relay purpose
 **Exploration:** quick
 **Status:** captured
+
+## D24: Relay depth modes — shallow and full
+
+**Choice:** Two relay depth modes, same binary, different config.
+
+| Mode | Caches | Serves | Startup | Use case |
+|------|--------|--------|---------|----------|
+| Shallow | Active conversations, pages in history on demand | Real-time multiplexing, local fan-out | Instant | Co-located with LLMs, conversation-pace workloads |
+| Full | Complete conversation history, mirrored from PostgreSQL | Search, analytics, history queries | Background sync, then ready | Read-heavy workloads, reducing DB read pressure |
+
+A new full relay starts as shallow (immediately useful), backfills historical data from PostgreSQL in background batches (channel by channel), receives real-time messages via pg_notify (no gap), and transitions to full once caught up. No cluster pause needed — the relay joins the cluster immediately and upgrades its role transparently.
+
+Writes always go through PostgreSQL regardless of depth. The full relay is a read replica at the application layer — not a write replica. Correctness stays in the DB.
+**Alternatives:**
+- PostgreSQL streaming replication for read replicas — achieves read scaling but lacks application-aware caching (channel-scoped queries, message-type filtering, conversation-aware eviction)
+- All relays full — simpler but wastes resources on relays whose value is real-time multiplexing, not history serving
+**Rationale:** Different operational pressures require different relay profiles. Real-time agent coordination needs low-latency shallow relays. Search and analytics need full-history relays. Same binary means ops provisions one image and configures the role.
+**Depends on:** D18 (topology maturity ladder — level 3+), D23 (relay as conversation multiplexer + cache)
+**Sources:** Session discussion on read scaling and relay caching depth
+**Exploration:** quick
+**Status:** captured
