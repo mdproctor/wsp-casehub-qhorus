@@ -116,3 +116,16 @@
 **Sources:** Ops team feedback
 **Exploration:** quick
 **Status:** captured
+
+## D11: Write model — hybrid hash ring + DB safety net
+
+**Choice:** Hash ring routes writes to the channel owner (single-writer fast path). DB-level pessimistic locks (`SELECT FOR UPDATE`) added to Merkle frontier and LAST_WRITE reads as a correctness safety net for edge cases (ownership transfer, split-brain healing).
+**Alternatives:**
+- Pure single-writer (no DB locks) — works in normal operation but brief overlap during ownership transfer could corrupt Merkle chain
+- Pure any-node-writes (DB serialisation only) — achieves same serialisation via DB locks but at higher latency (lock acquisition round-trip), contention under load, and ongoing audit burden for every new read-modify-write pattern
+**Rationale:** Code trace revealed three hard blockers for multi-node writes: (1) Merkle hash chain — `synchronized save()` protects read-modify-write on frontier, JVM-local only; (2) LAST_WRITE semantic — read-modify-write with version but no DB-level CAS; (3) Correction count — TOCTOU race. Hash ring eliminates contention in normal operation. DB locks catch edge cases. The two are independently verifiable.
+**Trade-offs:** Hash ring adds a proxy hop for non-owner writes (~1ms). DB locks add overhead only when contended (edge cases). Three surgical changes to existing qhorus code: (1) `SELECT FOR UPDATE` on `LedgerMerkleFrontier`, (2) `@Version` on `MessageEntity` for LAST_WRITE, (3) `findByCorrelationIdForUpdate()` for commitment transitions.
+**Depends on:** D5 (consistent hashing), D4 (total order per channel)
+**Sources:** QhorusLedgerEntryRepository.save():90, MessageService.dispatch():371-432, QhorusSequenceAllocator:19-27; Kafka partition leader pattern; PostgreSQL MVCC/row locking docs
+**Exploration:** deep-analysis (code trace + internet research + first-principles verification)
+**Status:** captured
