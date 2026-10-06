@@ -1,0 +1,8 @@
+branch: issue-475-distributed-mesh
+state: active
+queue:
+- issue: casehubio/qhorus#475
+  title: "epic: distributed qhorus mesh \u2014 standalone service with clustering"
+  status: active
+  scale: XL
+  complexity: High
