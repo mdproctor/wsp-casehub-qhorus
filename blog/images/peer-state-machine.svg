@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 300" font-family="system-ui, -apple-system, sans-serif" font-size="12">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#555"/>
+    </marker>
+    <marker id="a-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#D9534F"/>
+    </marker>
+    <marker id="a-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#5CB85C"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="290" y="24" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">Peer Node State Machine</text>
+  <text x="290" y="42" text-anchor="middle" font-size="11" fill="#888">Heartbeat-driven failure detection — 2 misses to DEAD, 1 heartbeat to recover</text>
+
+  <!-- ALIVE state -->
+  <rect x="40" y="100" width="120" height="50" rx="25" fill="#E8F5E9" stroke="#5CB85C" stroke-width="2"/>
+  <text x="100" y="130" text-anchor="middle" font-size="14" font-weight="bold" fill="#3D8B40">ALIVE</text>
+
+  <!-- SUSPECT state -->
+  <rect x="230" y="100" width="120" height="50" rx="25" fill="#FFF3E0" stroke="#FF9800" stroke-width="2"/>
+  <text x="290" y="130" text-anchor="middle" font-size="14" font-weight="bold" fill="#E65100">SUSPECT</text>
+
+  <!-- DEAD state -->
+  <rect x="420" y="100" width="120" height="50" rx="25" fill="#FFEBEE" stroke="#D9534F" stroke-width="2"/>
+  <text x="480" y="130" text-anchor="middle" font-size="14" font-weight="bold" fill="#C62828">DEAD</text>
+
+  <!-- ALIVE → SUSPECT (miss 1) -->
+  <line x1="160" y1="115" x2="225" y2="115" stroke="#FF9800" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="193" y="108" text-anchor="middle" font-size="10" fill="#E65100">1 miss</text>
+
+  <!-- SUSPECT → DEAD (miss 2) -->
+  <line x1="350" y1="115" x2="415" y2="115" stroke="#D9534F" stroke-width="1.5" marker-end="url(#a-red)"/>
+  <text x="383" y="108" text-anchor="middle" font-size="10" fill="#C62828">2nd miss</text>
+
+  <!-- SUSPECT → ALIVE (heartbeat) -->
+  <path d="M 280,150 Q 280,185 200,185 Q 120,185 120,155" fill="none" stroke="#5CB85C" stroke-width="1.5" marker-end="url(#a-green)"/>
+  <text x="200" y="200" text-anchor="middle" font-size="10" fill="#3D8B40">heartbeat ✓</text>
+
+  <!-- DEAD → ALIVE (heartbeat recovery) -->
+  <path d="M 460,150 Q 460,240 290,240 Q 100,240 100,155" fill="none" stroke="#5CB85C" stroke-width="1.5" marker-end="url(#a-green)"/>
+  <text x="290" y="255" text-anchor="middle" font-size="10" fill="#3D8B40">heartbeat ✓  (recovery)</text>
+
+  <!-- DEAD consequences box -->
+  <rect x="390" y="60" width="170" height="30" rx="4" fill="#FFF" stroke="#D9534F" stroke-dasharray="4,3"/>
+  <text x="475" y="79" text-anchor="middle" font-size="10" fill="#C62828">→ ring recalculation</text>
+
+  <!-- Graceful leave shortcut -->
+  <rect x="165" y="60" width="100" height="24" rx="4" fill="#FFF" stroke="#888" stroke-dasharray="4,3"/>
+  <text x="215" y="76" text-anchor="middle" font-size="10" fill="#555">POST /leave</text>
+  <path d="M 265,72 L 420,100" fill="none" stroke="#888" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#a)"/>
+  <text x="355" y="80" font-size="9" fill="#888">immediate</text>
+
+  <!-- Timing notes -->
+  <text x="290" y="290" text-anchor="middle" font-size="11" fill="#888">Default: heartbeat every 3s — DEAD after ~6-10s of missed heartbeats</text>
+</svg>
