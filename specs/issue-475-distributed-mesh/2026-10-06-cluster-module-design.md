@@ -38,6 +38,7 @@ casehub-qhorus-cluster/
     │   ├── HeartbeatResponse.java         — record
     │   ├── WriteRoutingDecorator.java      — @Decorator on MessageDispatcher
     │   ├── ChannelManagerDecorator.java    — @Decorator on ChannelManager
+    │   ├── WriteProxyClient.java             — @ApplicationScoped, wraps InternalMeshClient with dynamic base URL
     │   ├── InternalMeshClient.java         — @RegisterRestClient
     │   ├── InternalDispatchRequest.java   — record (serializable MessageDispatch)
     │   ├── InternalChannelRequest.java    — record (serializable ChannelCreateRequest)
@@ -199,8 +200,12 @@ On `@PreDestroy`:
 ### 5.5 Startup
 
 On `@Observes StartupEvent`:
-1. Parse peer list from config
-2. Build initial ring with all configured peers (optimistic — assume all alive)
+1. Validate config: `enabled=true` with empty `peers` → log WARN and
+   operate in single-node mode (no routing, no heartbeat). Malformed
+   peer addresses (missing port, unparseable host) → `IllegalStateException`
+   at startup. Duplicate node IDs in peer list → `IllegalStateException`.
+2. Parse peer list, build initial ring with all configured peers
+   (optimistic — assume all alive)
 3. HeartbeatService will detect dead peers on first heartbeat cycle (~3s)
 4. During this window, writes to channels owned by dead peers will be
    proxied and fail with connection error — `WriteRoutingDecorator` catches
@@ -343,9 +348,11 @@ programmatic API (`RestClientBuilder.baseUrl()`).
 
 ### 8.3 InternalMeshResource
 
-JAX-RS resource serving internal endpoints. Injects the **real**
-`MessageService` and `ChannelService` directly (not the decorated
-interfaces) to avoid recursive routing:
+JAX-RS resource serving internal endpoints. Injects the concrete
+`MessageService` and `ChannelService` classes directly — CDI decorators
+only wrap injection points typed to the *interface* (`MessageDispatcher`,
+`ChannelManager`), so injecting the concrete class bypasses the decorator
+and prevents recursive routing loops:
 
 ```java
 @Path("/internal")
@@ -485,9 +492,15 @@ convention.)
 
 ### 11.1 ChannelCreateRequest
 
-Gains `Optional<UUID> preAssignedId()` field. When present, `ChannelCreateHelper`
-uses it instead of generating a new UUID. When absent (default), behavior is
-unchanged. This is the only change to the existing qhorus API module (D16).
+Gains `Optional<UUID> preAssignedId()` field via the builder API:
+`ChannelCreateRequest.builder("name").preAssignedId(uuid).build()`. The
+record's canonical constructor adds `preAssignedId` as a new nullable
+parameter (16th position), with a backward-compatible 15-param constructor
+that passes `null` (same pattern as the existing Space addition in D16's
+reference). `ChannelCreateHelper.createInNewTransaction()` uses
+`request.preAssignedId()` when non-null instead of generating a new UUID.
+When absent (default), behavior is unchanged. This is the only change to
+the existing qhorus API module (D16).
 
 ### 11.2 MessageDispatcher
 
