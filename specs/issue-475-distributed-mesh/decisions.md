@@ -205,3 +205,83 @@
 **Sources:** QhorusConfig pattern, existing @IfBuildProperty usage in qhorus
 **Exploration:** quick
 **Status:** captured
+
+---
+
+# Phase 2b — Topology and HA Decisions
+
+## D18: Topology maturity ladder
+
+**Choice:** Four deployment levels, each additive. DB locks (Phase 1) are the correctness constant across all levels. Each level adds operational and performance optimisation without changing the correctness model.
+
+| Level | Topology | What it adds |
+|-------|----------|-------------|
+| 1. Dev | Local server, LLMs direct | Simplest — single JVM, `synchronized` + DB locks |
+| 2. Dedicated server | Separate qhorus server, LLMs connect directly | Operational separation, connection pooling |
+| 3. Relays | Relay per machine or cluster, any-channel read/write | Local fan-out, caching, fewer DB connections, health endpoints |
+| 4. Channel ownership | Dynamic ownership on relays | Uncontended locks, no proxy hops for owner |
+
+No level requires the next. Every level degrades gracefully to the one below it. The relay is optional infrastructure — never a required intermediary for correctness. Channel ownership (level 4) is a performance optimisation that activates only when configured, with fallback-to-local on proxy failure so the HA gap disappears.
+**Alternatives:**
+- Fixed "all nodes must cluster" architecture — forces level 4 complexity on dev/small deployments
+- Relay as mandatory intermediary — creates an availability dependency the system doesn't need
+**Rationale:** The workload is conversation-pace. At that scale, DB locks handle correctness with unmeasurable contention. Relays add operational value (health, topology, local fan-out) without being correctness-critical. Channel ownership earns its complexity only at scale.
+**Trade-offs:** More deployment configurations to test and document. Mitigated by each level being a strict superset of the previous.
+**Sources:** Session discussion re-examining hash ring necessity and HA trade-offs
+**Exploration:** deep-analysis (session dialogue challenging the Phase 2 architecture)
+**Status:** captured
+
+## D19: Desired-state schema per topology level
+
+**Choice:** Each topology level maps to a desired-state resource schema. Ops declares the topology they want; `casehub-desiredstate` provisions and reconciles it. Level transitions are schema changes, not redeployments.
+
+| Level | Schema key | Ops provisions |
+|-------|-----------|----------------|
+| 1. Dev | `mode: embedded` | Nothing — qhorus is a library dependency |
+| 2. Dedicated server | `mode: server` | One qhorus container + PostgreSQL |
+| 3. Relays | `mode: relay`, peer list, placement | N relay containers, shared PostgreSQL, health monitoring |
+| 4. Channel ownership | `mode: relay`, `routing: dynamic` | Same as 3 + ownership heuristic config |
+
+Health and topology endpoints are available at levels 2+. Desired-state reads them for convergence.
+**Alternatives:**
+- Manual ops configuration without desired-state schemas — viable but doesn't integrate with the casehub ops model
+**Rationale:** The ops contract ("build the mesh, ops will wrap it") is best served by declarative schemas that the existing `casehub-desiredstate` reconciliation loop can manage. Each level's schema is configuration, not architecture.
+**Depends on:** D18 (topology maturity ladder), D10 (ops interface contract)
+**Sources:** casehub-desiredstate module, session discussion
+**Exploration:** quick
+**Status:** captured
+
+## D20: Relay fallback-to-local on proxy failure
+
+**Choice:** When `WriteRoutingDecorator` fails to proxy a write to the channel owner (connection error), it executes the write locally using DB locks instead of returning 503. The hash ring is the performance fast path; DB locks are the correctness fallback. The HA gap (6-10s of write failures during ownership transfer) disappears.
+**Alternatives:**
+- Return 503 and let client retry — simpler decorator but creates an availability gap during node failure
+- Primary + secondary ownership — instant failover but creates concurrent-writer complexity that DB locks already solve
+**Rationale:** Phase 1 DB locks were designed for the concurrent-writer edge case. The fallback-to-local path exercises exactly that case. Row-level locks are per-channel — one channel's contention doesn't block another's. At conversation pace, the contention during the fallback window (~6-10s) is unmeasurable.
+**Depends on:** D11 (hybrid write model), D18 (topology ladder — level 4 only)
+**Sources:** Phase 1 SELECT FOR UPDATE implementation, session HA discussion
+**Exploration:** deep-analysis (session dialogue)
+**Status:** captured
+
+## D21: Self-healing relay topology
+
+**Choice:** LLMs are not bound to a specific relay. When a relay dies, connected LLMs reconnect to any available relay and continue immediately. At level 3 (any-channel relays), no ownership transfer or coordination is needed — the new relay serves the channel directly. At level 4 (channel ownership), the new relay writes locally with DB lock fallback until the ring recalculates. If all relays die, LLMs degrade to direct PostgreSQL writes (level 2). When relays recover, LLMs reconnect and resume relay-mediated communication. No state to rebuild — PostgreSQL holds everything.
+**Alternatives:**
+- Sticky relay assignment (LLM bound to a specific relay) — simpler client config but creates a single point of failure per LLM
+**Rationale:** The relay is optional infrastructure. Making relay selection dynamic means the topology self-balances under failure and recovery without operator intervention. Desired-state only needs to ensure enough relays are running — LLMs find them.
+**Depends on:** D18 (topology maturity ladder), D20 (fallback-to-local)
+**Sources:** Session discussion on HA and self-healing
+**Exploration:** quick
+**Status:** captured
+
+## D22: Relay as connection multiplexer
+
+**Choice:** Relays multiplex LLM connections to PostgreSQL. Without relays, N LLMs each maintain their own connection pool (5-10 connections each), hitting PostgreSQL's `max_connections` limit at scale. With a local relay per machine, all LLMs share one relay's pool (~20-30 connections). Relays also batch pg_notify subscriptions (one LISTEN per channel per relay, not per LLM) and cache recent messages for local fan-out without DB round-trips.
+**Alternatives:**
+- PgBouncer as infrastructure — achieves connection pooling but doesn't get the pg_notify batching or message caching benefits
+- Increase PostgreSQL max_connections — scales to a point but degrades performance (each connection consumes ~10MB of shared memory)
+**Rationale:** Connection multiplexing is a natural consequence of the relay architecture, not an add-on. It provides the same value as PgBouncer (connection pooling) plus application-level optimisations (LISTEN batching, message cache) that a generic connection pooler cannot offer.
+**Depends on:** D18 (topology maturity ladder — level 3+)
+**Sources:** PostgreSQL max_connections documentation, PgBouncer comparison, session discussion
+**Exploration:** quick
+**Status:** captured
