@@ -129,3 +129,79 @@
 **Sources:** QhorusLedgerEntryRepository.save():90, MessageService.dispatch():371-432, QhorusSequenceAllocator:19-27; Kafka partition leader pattern; PostgreSQL MVCC/row locking docs
 **Exploration:** deep-analysis (code trace + internet research + first-principles verification)
 **Status:** captured
+
+---
+
+# Phase 2 — Cluster Module Implementation Decisions
+
+## D12: Write routing interception point
+
+**Choice:** CDI decorator on `MessageDispatcher` and `ChannelManager`. All callers (REST, MCP, A2A) get routing transparently — single interception point, no adapter changes needed. The decorator checks channel ownership via `ClusterManager.owner(channelId)` before delegating to the real service.
+**Alternatives:**
+- JAX-RS filter on write endpoints — catches HTTP but MCP tools bypass JAX-RS (direct CDI calls), creating two interception points
+- Explicit routing in each protocol adapter — most control but every adapter must be modified and future adapters could forget to route
+**Rationale:** CDI decorator is the standard Quarkus interception mechanism. It sits at the service layer boundary, catching all callers regardless of protocol. Single place to maintain, impossible to bypass accidentally.
+**Trade-offs:** Decorator adds one method call per dispatch even for local writes (isLocal check). Negligible overhead — a hash lookup and string comparison.
+**Depends on:** D5 (consistent hashing), D11 (hybrid write model)
+**Sources:** Quarkus CDI decorator documentation, existing MessageDispatcher interface in api/message/
+**Exploration:** quick
+**Status:** captured
+
+## D13: Internal node-to-node transport
+
+**Choice:** Quarkus REST Client with type-safe JAX-RS interface. The owning node exposes `/internal/dispatch` and `/internal/channel` endpoints. Serialization via Jackson (consistent with existing REST). Quarkus generates the client at build time.
+**Alternatives:**
+- Plain Java HttpClient — no build-time generation, more boilerplate, harder to evolve the internal API
+- gRPC with protobuf — lower latency but adds protobuf dependency, .proto files, separate port; overkill for conversation-pace throughput
+**Rationale:** Quarkus REST Client is idiomatic, type-safe, and consistent with the existing stack. The internal API surface is small (dispatch, channel create, heartbeat) so the client interface is trivial. Build-time generation eliminates boilerplate.
+**Trade-offs:** JSON serialization overhead vs gRPC binary (~0.1ms per message at expected payload sizes). Acceptable.
+**Depends on:** D12 (decorator proxies to remote node via this client)
+**Sources:** Quarkus REST Client documentation, InternalMeshClient interface design
+**Exploration:** quick
+**Status:** captured
+
+## D14: Module structure
+
+**Choice:** Plain library module (`casehub-qhorus-cluster`), not a Quarkus extension. Standard Maven module with runtime CDI beans, activated by classpath presence + config gate. No deployment module needed — no build-time processing (`@BuildStep`), no native image registration.
+**Alternatives:**
+- Quarkus extension (runtime + deployment) — follows core qhorus pattern, deployment module can validate config at build time, but adds a deployment module with boilerplate that isn't needed for this module's concerns
+**Rationale:** The cluster module's behavior is purely runtime — hash ring computation, heartbeat polling, proxy forwarding. No build-time code generation or native image configuration needed. Follows the pattern of `connector-backend`, `slack-channel`, and other optional modules.
+**Trade-offs:** No build-time config validation — misconfigured peer lists detected at startup, not build time. Acceptable since cluster config comes from environment variables at deployment time.
+**Sources:** Existing optional modules: connector-backend/, slack-channel/, a2a-outbound/
+**Exploration:** quick
+**Status:** captured
+
+## D15: Routing scope
+
+**Choice:** Route all channel mutations (dispatch + create + delete + pause/resume + config changes) to the channel owner. Instance registration, data service, and other global operations remain unrouted (any node serves them).
+**Alternatives:**
+- Route MessageDispatcher.dispatch() only — simpler decorator, but channel config mutations during ring transitions could cause brief inconsistencies (one node modifying allowedWriters while another dispatches)
+**Rationale:** Channel ownership means owning ALL writes to that channel. Creating a channel on one node but dispatching to it on another creates a window where the channel exists in the DB but the owning node hasn't initialized its gateway registry for it. Routing creation to the eventual owner eliminates this.
+**Trade-offs:** Two decorators to maintain (MessageDispatcher + ChannelManager) instead of one. The ChannelManager decorator is thin — same pattern, same proxy client.
+**Depends on:** D5 (consistent hashing), D12 (decorator approach)
+**Sources:** ChannelCreateHelper.java (creation + gateway init coupling), ChannelGateway.initChannel()
+**Exploration:** quick
+**Status:** captured
+
+## D16: Channel creation routing key
+
+**Choice:** Pre-generate UUID on the routing node, route by it. The decorator generates a UUID before routing, passes it to the owning node, which uses it as the channel ID. The channel lands on the right node from birth.
+**Alternatives:**
+- Route by channel name hash — the channel name is the stable routing key, but name-based routing diverges from ID-based routing for messages, creating two different hash ring lookups and potential owner mismatch
+**Rationale:** All post-creation routing uses channelId (UUID). If creation routes by a different key (name), the channel could be created on node A but owned by node B for all future writes. Pre-generating the UUID ensures the channel is created on its permanent owner.
+**Trade-offs:** Requires `ChannelCreateRequest` to accept an optional pre-assigned ID. Minor API surface change.
+**Depends on:** D15 (routing scope includes creation), D5 (consistent hashing on channelId)
+**Sources:** ChannelCreateRequest.java, ChannelCreateHelper.java
+**Exploration:** quick
+**Status:** captured
+
+## D17: Cluster activation mechanism
+
+**Choice:** Config-gated CDI beans. `casehub.qhorus.cluster.enabled=true` activates clustering. When absent or false, all cluster beans are disabled via `@IfBuildProperty` — the decorator, heartbeat, health endpoints don't exist. Zero overhead in single-node mode.
+**Alternatives:**
+- Classpath presence only — adding the jar activates clustering; simpler but the decorator always wraps dispatch even in single-node mode, adding a code path that's never needed
+**Rationale:** The mesh app always includes the cluster module on its classpath, but not every deployment needs clustering (dev, small teams). Config gate ensures zero overhead when clustering isn't needed — no decorator, no heartbeat scheduler, no health endpoints.
+**Trade-offs:** Build-time property (`@IfBuildProperty`) means clustering can't be toggled at runtime — requires restart. Acceptable since cluster membership is a deployment-time decision.
+**Sources:** QhorusConfig pattern, existing @IfBuildProperty usage in qhorus
+**Exploration:** quick
+**Status:** captured
