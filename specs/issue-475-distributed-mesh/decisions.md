@@ -285,3 +285,15 @@ Health and topology endpoints are available at levels 2+. Desired-state reads th
 **Sources:** PostgreSQL max_connections documentation, PgBouncer comparison, session discussion
 **Exploration:** quick
 **Status:** captured
+
+## D23: Relay purpose statement
+
+**Choice:** The relay is a **conversation multiplexer** — not a router, not a correctness layer. Its role is to batch and compress multiplexed conversations between agents and the shared PostgreSQL. Many LLM-to-channel conversations are compressed into fewer DB connections, fewer LISTEN subscriptions, and local fan-out for co-located agents. Correctness lives in PostgreSQL (DB locks). Channel ownership (level 4) is an optional write-path optimisation, not the relay's defining function.
+**Alternatives:**
+- "Distributed application layer" — the original framing; accurate but doesn't capture the relay's specific value
+- "Write router" — describes level 4 only, misses the multiplexing value that justifies levels 2-3
+**Rationale:** A clear purpose statement prevents scope creep. Every relay feature should pass the test: "does this improve conversation multiplexing?" If not, it belongs elsewhere.
+**Depends on:** D18 (topology maturity ladder), D22 (connection multiplexing)
+**Sources:** Session discussion distilling relay purpose
+**Exploration:** quick
+**Status:** captured
