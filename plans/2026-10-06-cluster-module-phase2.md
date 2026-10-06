@@ -383,7 +383,6 @@ membership change, heartbeat miss detection — all unit tested.
 
 **Files:**
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/PeerState.java`
-- Create: `cluster/src/main/java/io/casehub/qhorus/cluster/ClusterConfig.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/ClusterManager.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/ClusterMembershipEvent.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/QuorumViolationException.java`
@@ -541,6 +540,24 @@ class ClusterManagerTest {
     void quorumDisabledWhenSingleNode() {
         var mgr = managerWithPeers("node-1", "node-1");
         assertThat(mgr.canServeWrites()).isTrue();
+    }
+
+    @Test
+    void shutdownSendsLeaveToAllAlivePeers() {
+        var mgr = managerWithPeers("node-1", "node-1", "node-2", "node-3");
+        List<String> leaveSent = new ArrayList<>();
+        mgr.shutdown(node -> leaveSent.add(node.nodeId()));
+        assertThat(leaveSent).containsExactlyInAnyOrder("node-2", "node-3");
+    }
+
+    @Test
+    void shutdownSkipsDeadPeers() {
+        var mgr = managerWithPeers("node-1", "node-1", "node-2", "node-3");
+        mgr.recordMiss("node-2");
+        mgr.recordMiss("node-2");
+        List<String> leaveSent = new ArrayList<>();
+        mgr.shutdown(node -> leaveSent.add(node.nodeId()));
+        assertThat(leaveSent).containsExactly("node-3");
     }
 
     @Test
@@ -723,6 +740,16 @@ public class ClusterManager {
     public int expectedSize() { return configuredPeers.size(); }
     public Map<String, PeerState> peerStates() { return Map.copyOf(peerStates); }
 
+    public void shutdown(java.util.function.Consumer<NodeInfo> leaveSender) {
+        for (var entry : peerStates.entrySet()) {
+            if (entry.getValue().state() != NodeState.DEAD) {
+                try {
+                    leaveSender.accept(entry.getValue().nodeInfo());
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
     public List<ClusterMembershipEvent> drainEvents() {
         List<ClusterMembershipEvent> events = new ArrayList<>();
         ClusterMembershipEvent e;
@@ -885,6 +912,8 @@ import java.util.function.Function;
 
 public class HeartbeatService {
 
+    private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(HeartbeatService.class);
+
     private final ClusterManager clusterManager;
     private final Function<NodeInfo, HeartbeatResponse> heartbeatCaller;
 
@@ -895,14 +924,20 @@ public class HeartbeatService {
     }
 
     public void tick() {
+        String localRingHash = clusterManager.ringHash();
         for (var entry : clusterManager.peerStates().entrySet()) {
             PeerState ps = entry.getValue();
             if (ps.state() == NodeState.DEAD) {
                 continue;
             }
             try {
-                heartbeatCaller.apply(ps.nodeInfo());
+                HeartbeatResponse resp = heartbeatCaller.apply(ps.nodeInfo());
                 clusterManager.recordHeartbeat(entry.getKey());
+                if (resp != null && resp.ringHash() != null
+                        && !resp.ringHash().equals(localRingHash)) {
+                    LOG.warnf("Ring disagreement with %s — local=%s remote=%s",
+                            entry.getKey(), localRingHash, resp.ringHash());
+                }
             } catch (Exception e) {
                 clusterManager.recordMiss(entry.getKey());
             }
@@ -1218,9 +1253,26 @@ public class ChannelManagerDecorator implements ChannelManager {
         UUID channelId = request.preAssignedId() != null
                 ? request.preAssignedId() : UUID.randomUUID();
         var withId = ChannelCreateRequest.builder(request.name())
-                .preAssignedId(channelId).build();
-        // Copy all fields from original request — simplified for the plan;
-        // actual implementation will use a copy-with method
+                .description(request.description())
+                .semantic(request.semantic())
+                .barrierContributors(request.barrierContributors())
+                .allowedWriters(request.allowedWriters())
+                .adminInstances(request.adminInstances())
+                .rateLimitPerChannel(request.rateLimitPerChannel())
+                .rateLimitPerInstance(request.rateLimitPerInstance())
+                .allowedTypes(request.allowedTypes())
+                .deniedTypes(request.deniedTypes())
+                .spaceId(request.spaceId())
+                .reviewerInstances(request.reviewerInstances())
+                .protocols(request.protocols())
+                .protocolParticipants(request.protocolParticipants())
+                .trackDelivery(request.trackDelivery())
+                .enforcementMode(request.enforcementMode())
+                .enforcementExclusions(request.enforcementExclusions())
+                .routingTrustThreshold(request.routingTrustThreshold())
+                .metadata(request.metadata())
+                .preAssignedId(channelId)
+                .build();
         NodeInfo owner = clusterManager.owner(channelId);
         if (clusterManager.isLocal(owner)) {
             return delegate.create(withId);
@@ -1263,23 +1315,29 @@ public class ChannelManagerDecorator implements ChannelManager {
         return proxyClient.resumeChannel(owner, channelId);
     }
 
-    // Remaining ChannelManager methods delegate directly — config mutations
-    // on existing channels route by channelId (same pattern as pause/resume)
+    // All config mutations route by channelId (D15: route ALL channel mutations)
+    private Channel routeChannelMutation(UUID channelId, java.util.function.Function<UUID, Channel> localAction) {
+        NodeInfo owner = clusterManager.owner(channelId);
+        if (clusterManager.isLocal(owner)) {
+            return localAction.apply(channelId);
+        }
+        throw new UnsupportedOperationException("Remote config mutation proxy not yet wired");
+    }
 
-    @Override public Channel setTypeConstraints(UUID id, Set<MessageType> a, Set<MessageType> d) { return delegate.setTypeConstraints(id, a, d); }
-    @Override public Channel setRateLimits(UUID id, Integer pc, Integer pi) { return delegate.setRateLimits(id, pc, pi); }
-    @Override public Channel setAllowedWriters(UUID id, List<String> w) { return delegate.setAllowedWriters(id, w); }
-    @Override public Channel setAdminInstances(UUID id, List<String> a) { return delegate.setAdminInstances(id, a); }
-    @Override public Channel setReviewerInstances(UUID id, List<String> r) { return delegate.setReviewerInstances(id, r); }
-    @Override public Channel setProtocols(UUID id, List<String> p) { return delegate.setProtocols(id, p); }
-    @Override public Channel setProtocolParticipants(UUID id, List<String> p) { return delegate.setProtocolParticipants(id, p); }
-    @Override public Channel setEnforcementMode(UUID id, EnforcementMode m) { return delegate.setEnforcementMode(id, m); }
-    @Override public Channel setEnforcementExclusions(UUID id, List<String> e) { return delegate.setEnforcementExclusions(id, e); }
-    @Override public Channel setRoutingTrustThreshold(UUID id, Double t) { return delegate.setRoutingTrustThreshold(id, t); }
-    @Override public Channel setRedistributionCapacityThreshold(UUID id, Double t) { return delegate.setRedistributionCapacityThreshold(id, t); }
-    @Override public Channel setRoutingCapacityThreshold(UUID id, Double t) { return delegate.setRoutingCapacityThreshold(id, t); }
-    @Override public Channel setPolicyOverrides(UUID id, Map<String, String> o) { return delegate.setPolicyOverrides(id, o); }
-    @Override public void setTrackDelivery(UUID id, Boolean t) { delegate.setTrackDelivery(id, t); }
+    @Override public Channel setTypeConstraints(UUID id, Set<MessageType> a, Set<MessageType> d) { return routeChannelMutation(id, i -> delegate.setTypeConstraints(i, a, d)); }
+    @Override public Channel setRateLimits(UUID id, Integer pc, Integer pi) { return routeChannelMutation(id, i -> delegate.setRateLimits(i, pc, pi)); }
+    @Override public Channel setAllowedWriters(UUID id, List<String> w) { return routeChannelMutation(id, i -> delegate.setAllowedWriters(i, w)); }
+    @Override public Channel setAdminInstances(UUID id, List<String> a) { return routeChannelMutation(id, i -> delegate.setAdminInstances(i, a)); }
+    @Override public Channel setReviewerInstances(UUID id, List<String> r) { return routeChannelMutation(id, i -> delegate.setReviewerInstances(i, r)); }
+    @Override public Channel setProtocols(UUID id, List<String> p) { return routeChannelMutation(id, i -> delegate.setProtocols(i, p)); }
+    @Override public Channel setProtocolParticipants(UUID id, List<String> p) { return routeChannelMutation(id, i -> delegate.setProtocolParticipants(i, p)); }
+    @Override public Channel setEnforcementMode(UUID id, EnforcementMode m) { return routeChannelMutation(id, i -> delegate.setEnforcementMode(i, m)); }
+    @Override public Channel setEnforcementExclusions(UUID id, List<String> e) { return routeChannelMutation(id, i -> delegate.setEnforcementExclusions(i, e)); }
+    @Override public Channel setRoutingTrustThreshold(UUID id, Double t) { return routeChannelMutation(id, i -> delegate.setRoutingTrustThreshold(i, t)); }
+    @Override public Channel setRedistributionCapacityThreshold(UUID id, Double t) { return routeChannelMutation(id, i -> delegate.setRedistributionCapacityThreshold(i, t)); }
+    @Override public Channel setRoutingCapacityThreshold(UUID id, Double t) { return routeChannelMutation(id, i -> delegate.setRoutingCapacityThreshold(i, t)); }
+    @Override public Channel setPolicyOverrides(UUID id, Map<String, String> o) { return routeChannelMutation(id, i -> delegate.setPolicyOverrides(i, o)); }
+    @Override public void setTrackDelivery(UUID id, Boolean t) { routeChannelMutation(id, i -> { delegate.setTrackDelivery(i, t); return null; }); }
     @Override public void updateLastActivity(UUID id, String t) { delegate.updateLastActivity(id, t); }
 }
 ```
@@ -1381,6 +1439,8 @@ Full module is feature-complete.
 
 **Files:**
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/InternalDispatchRequest.java`
+- Create: `cluster/src/main/java/io/casehub/qhorus/cluster/InternalChannelRequest.java`
+- Create: `cluster/src/main/java/io/casehub/qhorus/cluster/InternalMeshClient.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/InternalMeshResource.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/LeaveRequest.java`
 - Create: `cluster/src/main/java/io/casehub/qhorus/cluster/ClusterHealthResource.java`
@@ -1507,6 +1567,94 @@ Create `cluster/src/main/java/io/casehub/qhorus/cluster/LeaveRequest.java`:
 package io.casehub.qhorus.cluster;
 
 public record LeaveRequest(String nodeId) {}
+```
+
+Create `cluster/src/main/java/io/casehub/qhorus/cluster/InternalChannelRequest.java`:
+
+```java
+package io.casehub.qhorus.cluster;
+
+import io.casehub.qhorus.api.channel.ChannelCreateRequest;
+import io.casehub.qhorus.api.channel.ChannelSemantic;
+import io.casehub.qhorus.api.message.MessageType;
+
+import java.util.*;
+
+public record InternalChannelRequest(
+        String name, String description, String semantic,
+        List<String> barrierContributors, List<String> allowedWriters,
+        List<String> adminInstances, Integer rateLimitPerChannel,
+        Integer rateLimitPerInstance, Set<String> allowedTypes,
+        Set<String> deniedTypes, UUID spaceId, UUID preAssignedId) {
+
+    public static InternalChannelRequest from(ChannelCreateRequest req) {
+        return new InternalChannelRequest(
+                req.name(), req.description(),
+                req.semantic() != null ? req.semantic().name() : null,
+                req.barrierContributors(), req.allowedWriters(),
+                req.adminInstances(), req.rateLimitPerChannel(),
+                req.rateLimitPerInstance(),
+                req.allowedTypes() != null ? MessageType.serializeTypes(req.allowedTypes()).transform(s -> Set.of(s.split(","))) : null,
+                req.deniedTypes() != null ? MessageType.serializeTypes(req.deniedTypes()).transform(s -> Set.of(s.split(","))) : null,
+                req.spaceId(), req.preAssignedId());
+    }
+
+    public ChannelCreateRequest toChannelCreateRequest() {
+        return ChannelCreateRequest.builder(name)
+                .description(description)
+                .semantic(semantic != null ? ChannelSemantic.valueOf(semantic) : null)
+                .barrierContributors(barrierContributors)
+                .allowedWriters(allowedWriters)
+                .adminInstances(adminInstances)
+                .rateLimitPerChannel(rateLimitPerChannel)
+                .rateLimitPerInstance(rateLimitPerInstance)
+                .spaceId(spaceId)
+                .preAssignedId(preAssignedId)
+                .build();
+    }
+}
+```
+
+Create `cluster/src/main/java/io/casehub/qhorus/cluster/InternalMeshClient.java`:
+
+```java
+package io.casehub.qhorus.cluster;
+
+import io.casehub.qhorus.api.channel.Channel;
+import io.casehub.qhorus.api.message.DispatchResult;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
+
+import java.util.UUID;
+
+@Path("/internal")
+@RegisterRestClient(configKey = "internal-mesh")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public interface InternalMeshClient {
+
+    @POST @Path("/dispatch")
+    DispatchResult dispatch(InternalDispatchRequest request);
+
+    @POST @Path("/channel")
+    Channel createChannel(InternalChannelRequest request);
+
+    @POST @Path("/channel/{id}/delete")
+    long deleteChannel(@PathParam("id") UUID channelId, @QueryParam("force") boolean force);
+
+    @POST @Path("/channel/{id}/pause")
+    Channel pauseChannel(@PathParam("id") UUID channelId);
+
+    @POST @Path("/channel/{id}/resume")
+    Channel resumeChannel(@PathParam("id") UUID channelId);
+
+    @GET @Path("/heartbeat")
+    HeartbeatResponse heartbeat();
+
+    @POST @Path("/leave")
+    void leave(LeaveRequest request);
+}
 ```
 
 Create `cluster/src/main/java/io/casehub/qhorus/cluster/ClusterHealthResponse.java`:
