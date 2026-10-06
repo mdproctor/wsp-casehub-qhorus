@@ -60,12 +60,12 @@
 
 ## D6: Replication strategy
 
-**Choice:** Messages partitioned (live on owning node's PostgreSQL). Channel metadata, instance registry, and commitment state replicated to all nodes.
+**Choice:** All data in shared PostgreSQL. Writes partitioned by channel ownership (hash ring determines the single writer). All nodes can read all data — channel metadata, instance registry, and commitment state are globally visible without custom replication.
 **Alternatives:**
-- Everything partitioned — lightest replication but discovery/routing requires cross-node queries
-- Everything replicated — strongest consistency but write amplification scales linearly with cluster size
-**Rationale:** Metadata is small and changes infrequently (channel creation, agent registration). Messages are large and append-only. Replicating metadata lets any node route and answer discovery without cross-node hops.
-**Trade-offs:** Metadata replication adds a background sync protocol. Stale metadata during network partitions could route to the wrong node (client retries handle this).
+- Per-node databases with custom replication — stronger data locality but requires state transfer protocol and creates consistency headaches
+- Everything replicated via application-level sync — unnecessary when all nodes share one database
+**Rationale:** Shared PostgreSQL eliminates the need for a custom replication protocol entirely. "Partitioned" means write-ownership (which node does the INSERT), not data locality. Every node reads from the same tables. This is a distributed application layer over a shared database, not a distributed database.
+**Trade-offs:** Single PostgreSQL is a bottleneck at extreme scale. Mitigated by PostgreSQL read replicas for read-heavy workloads, and by the fact that agent messaging is conversation-pace, not streaming-pace.
 **Sources:** postgres-broadcaster module (existing cross-node primitive)
 **Exploration:** quick
 **Status:** captured
