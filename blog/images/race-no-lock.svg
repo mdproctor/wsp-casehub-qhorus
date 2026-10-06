@@ -1,0 +1,38 @@
+<svg viewBox="0 0 620 340" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;font-size:13px">
+  <text x="310" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Without SELECT FOR UPDATE — last writer corrupts</text>
+
+  <line x1="100" y1="45" x2="100" y2="320" stroke="#999" stroke-dasharray="4,4"/>
+  <line x1="310" y1="45" x2="310" y2="320" stroke="#999" stroke-dasharray="4,4"/>
+  <line x1="520" y1="45" x2="520" y2="320" stroke="#999" stroke-dasharray="4,4"/>
+
+  <rect x="50" y="30" width="100" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="100" y="47" text-anchor="middle" fill="#333">Node A</text>
+  <rect x="265" y="30" width="90" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="310" y="47" text-anchor="middle" fill="#333">DB Row</text>
+  <rect x="470" y="30" width="100" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="520" y="47" text-anchor="middle" fill="#333">Node B</text>
+
+  <line x1="100" y1="80" x2="310" y2="80" stroke="#4477aa" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="205" y="74" text-anchor="middle" fill="#4477aa" font-size="11">SELECT frontier</text>
+  <line x1="310" y1="90" x2="100" y2="90" stroke="#4477aa" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr)"/>
+  <text x="205" y="106" text-anchor="middle" fill="#4477aa" font-size="11">version = N</text>
+
+  <line x1="520" y1="120" x2="310" y2="120" stroke="#aa4444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="415" y="114" text-anchor="middle" fill="#aa4444" font-size="11">SELECT frontier</text>
+  <line x1="310" y1="130" x2="520" y2="130" stroke="#aa4444" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr)"/>
+  <text x="415" y="146" text-anchor="middle" fill="#aa4444" font-size="11">version = N</text>
+
+  <text x="100" y="175" text-anchor="middle" fill="#333" font-size="11">append(entry₁)</text>
+  <text x="520" y="175" text-anchor="middle" fill="#333" font-size="11">append(entry₂)</text>
+
+  <line x1="100" y1="200" x2="310" y2="200" stroke="#4477aa" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="205" y="194" text-anchor="middle" fill="#4477aa" font-size="11">REPLACE frontier</text>
+
+  <line x1="520" y1="240" x2="310" y2="240" stroke="#aa4444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="415" y="234" text-anchor="middle" fill="#aa4444" font-size="11">REPLACE frontier</text>
+
+  <rect x="230" y="260" width="160" height="28" rx="4" fill="#ffdddd" stroke="#aa4444"/>
+  <text x="310" y="279" text-anchor="middle" fill="#aa4444" font-weight="bold" font-size="12">entry₁ hash lost</text>
+
+  <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1"/></marker></defs>
+</svg>
