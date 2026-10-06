@@ -1,68 +1,37 @@
-# HANDOFF — casehub-qhorus
+# Session Handover — 2026-10-06
 
-## Last Session
+## What happened
 
-Completed Batch 3 of qhorus-mesh (#465) and designed the AgentProvider bridge. Session covered implementation (mesh module scaffold + MCP tools), architecture correction (shim dropped — Claude Code connects via SSE directly), and full brainstorming cycle for the agent integration layer.
+Landed #443/#444 (correction/retraction modeling + message-scoped erasure) via `land-443-444` branch — 16 commits fast-forward merged to main. Fixed compilation errors from ledger package reorganisation, migrated erasure tests from deleted `QhorusMcpTools` to `QhorusTestHelper`, registered `correct_message`/`retract_message`/`erase_message_content` via `@McpDomain` on `MessagingApi`.
 
-**Implementation completed (on branch `issue-465-qhorus-mesh`):**
-- Fixed build break (28-arg backward-compat Channel constructor for compliance-report)
-- Scaffolded `mesh/` module — standalone Quarkus app, H2 file, MCP HTTP+SSE, health check
-- Implemented 7 MCP tools in `MeshMcpTools` (register, deregister, send, check, create, list, discover)
-- Added `InstanceService.register()` overload with metadata parameter
-- Updated CLAUDE.md with mesh module in project structure
+Fixed CDI `LedgerEntryRepository` ambiguity caused by upstream `casehub-ledger` SNAPSHOT removing `@Alternative` from JPA implementations. Added `quarkus.arc.exclude-types` across 13 module `application.properties` files. Full build green — 3154 tests, 0 failures.
 
-**Design completed (on workspace branch `issue-465-qhorus-mesh`):**
-- Dropped the connection shim (Task 8) — relay exposes SSE directly, no bridge needed
-- Brainstormed AgentProvider bridge — 11 decisions, standard review (3 rounds each for decisions + spec)
-- Wrote implementation plan: 5 batches, 5 tasks
+Designed distributed qhorus mesh (#475) — standalone service with clustering. 11 design decisions captured. Code trace revealed 3 subsystems that break under multi-node writes (Merkle chain, LAST_WRITE, corrections). Adopted hybrid hash-ring + DB-lock model.
 
-## Resume Instructions
+## Key decisions
 
-Branch is paused. Run `work resume` to restore it. Both repos will switch from main to `issue-465-qhorus-mesh`. The .plan and all specs/plans are on that branch.
+- Hybrid write model: hash ring routes writes to channel owner (performance), DB-level locks as safety net for edge cases (correctness)
+- Shared PostgreSQL, not distributed database — write-ownership partitioning only
+- Multi-protocol transport: REST+SSE, MCP-over-SSE, A2A, WebSocket — all facades over one service layer
+- OIDC auth primary, API key fallback
+- Non-Java SDKs deferred — REST/GraphQL is the universal client interface
 
-## Remaining Work
+## Next action
 
-All work is on branch `issue-465-qhorus-mesh`, issue casehubio/qhorus#465.
-
-### From original mesh plan (`plans/2026-10-01-qhorus-mesh.md`)
-
-| Task | Status | Description |
-|------|--------|-------------|
-| Task 1: Channel.metadata | Done | V56 migration, record field, entity round-trip |
-| Task 2: ChannelQuery.byMetadata | Done | JPA + InMemory filtering |
-| Task 3: ChannelCreateRequest.metadata + REST | Done | setMetadata merge semantics, REST endpoint |
-| Task 4: Instance.metadata | Done | V57 migration, record field, entity round-trip |
-| Task 5: InstanceQuery.byMetadata | Done | JPA + InMemory filtering |
-| Task 6: Maven module scaffold | Done | mesh/ module, H2, MCP, health check |
-| Task 7: Core MCP tools | Done | 7 tools: register, deregister, send, check, create, list, discover |
-| Task 8: Connection shim | Dropped | Relay exposes SSE directly — no shim needed |
-
-### From AgentProvider bridge plan (`plans/2026-10-02-agent-provider-bridge.md`)
-
-| Batch | Task | Status | Description |
-|-------|------|--------|-------------|
-| 1 | AgentChannelBinding + SpeechActMapper | TODO | Binding record with builder; AgentEvent → MessageType mapping |
-| 2 | AgentProviderBackend | TODO | ChannelBackend (AT_LEAST_ONCE), sender loop guard, target routing, virtual thread async delivery, semaphore concurrency control |
-| 3 | AgentBridgeService | TODO | Lifecycle SPI — create/destroy/list bindings, AgentBackend key resolution, persistent session management |
-| 4 | MeshApi migration | TODO | Migrate MeshMcpTools @Tool → MeshApi @McpDomain + MeshService impl |
-| 5 | Integration test | TODO | Wire agent-bridge into mesh, COMMAND → agent → RESPONSE end-to-end |
-
-### Key design decisions
-
-- Bridge is `agent-bridge/` module at repo root (not in `mesh/` — mesh is an app, bridge is a library)
-- ChannelBackend (AT_LEAST_ONCE) for delivery, virtual thread async invocation
-- Sender-based loop guard only (indirect loops deferred to #468)
-- MeshMcpTools migrates to @McpDomain pattern (MeshApi + MeshService)
-- `casehub-platform` already has AgentProvider SPI with 7 backends (claude, openai, gemini, gemini-cli, codex, langchain4j, ollama) — bridge connects those to channels
-- Cache-aware prompt structuring: stable context in systemPrompt (cached), per-message content in query()
-- Commitment-aware terminal messages: RESPONSE fulfills COMMAND/QUERY, RESPONSE+DONE for PROPOSE
-- Binding persistence is ephemeral (ConcurrentHashMap, no JPA) — consumers recreate on startup
+Execute Phase 1 plan — 3 surgical runtime changes: `SELECT FOR UPDATE` on Merkle frontier, `@Version` on `MessageEntity`, `findByCorrelationIdForUpdate` for commitments.
 
 ## References
 
-- `specs/qhorus-mesh-agent-provider/2026-10-02-agent-provider-bridge-design.md` — full design spec (11 decisions, 3 review rounds)
-- `specs/qhorus-mesh-agent-provider/decisions.md` — 11 design decisions with rationale
-- `plans/2026-10-02-agent-provider-bridge.md` — implementation plan (5 batches, 5 tasks)
-- `specs/qhorus-mesh/2026-10-01-qhorus-mesh-design.md` — original mesh design
-- `plans/2026-10-01-qhorus-mesh.md` — original mesh implementation plan (Tasks 1-7 done, Task 8 dropped)
-- claudony #246/#247 — fleet deployment (future consumer of bridge)
+| Artifact | Path |
+|----------|------|
+| Design spec | `specs/issue-475-distributed-mesh/2026-10-06-distributed-mesh-design.md` |
+| Decisions | `specs/issue-475-distributed-mesh/decisions.md` |
+| Phase 1 plan | `plans/2026-10-06-distributed-mesh-phase1-runtime-safety-net.md` |
+| Diary entry | `blog/2026-10-06-mdp01-the-lock-that-doesnt-lock.md` |
+| Epic issue | casehubio/qhorus#475 |
+
+## Project state
+
+- **Project branch:** `main` — 18 commits ahead of `origin/main` (unpushed)
+- **Workspace branch:** `issue-475-distributed-mesh`
+- Build: green (`mvn clean test` — all modules pass)
