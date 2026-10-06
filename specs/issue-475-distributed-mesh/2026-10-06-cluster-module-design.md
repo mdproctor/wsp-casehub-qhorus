@@ -1,8 +1,16 @@
+# ⛔ SUPERSEDED — Do not use
+
+> **This spec is superseded by [`2026-10-06-distributed-mesh-consolidated.md`](2026-10-06-distributed-mesh-consolidated.md).**
+> Retained for git history only. The cluster module implementation details are
+> accurate for what was built, but the architectural framing changed (D18-D24).
+
+---
+
 # Cluster Module Design — casehub-qhorus-cluster
 
 **Issue:** casehubio/qhorus#475 (Phase 2)
 **Date:** 2026-10-06
-**Status:** Draft
+**Status:** Superseded
 **Depends on:** Phase 1 runtime safety net (merged), overall distributed mesh design spec
 
 ## 1. Scope

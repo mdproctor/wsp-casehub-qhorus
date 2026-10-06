@@ -1,8 +1,16 @@
+# ⛔ SUPERSEDED — Do not use
+
+> **This spec is superseded by [`2026-10-06-distributed-mesh-consolidated.md`](2026-10-06-distributed-mesh-consolidated.md).**
+> Retained for git history only. The consolidated spec reframes the architecture
+> around the topology maturity ladder and relay-as-multiplexer model (D18-D24).
+
+---
+
 # Distributed Qhorus Mesh — Design Specification
 
 **Issue:** casehubio/qhorus#475
 **Date:** 2026-10-06
-**Status:** Draft
+**Status:** Superseded
 
 ## 1. Problem Statement
 
