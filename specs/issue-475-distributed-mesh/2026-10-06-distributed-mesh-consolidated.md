@@ -164,7 +164,7 @@ dispatch(channelId):
   5. If proxy fails → delegate to local MessageService (DB locks catch it)
 ```
 
-At Levels 1-3, no routing decorator exists. Writes go directly to the service layer. DB locks handle everything.
+At Levels 1-2, no routing decorator exists — writes go directly to the service layer. At Level 3, decorators exist but pass through directly (`routing=none` — no ownership check, no proxy). At Level 4, decorators actively route writes to the channel owner. DB locks handle correctness at every level.
 
 ## 5. Relay Depth Modes
 
@@ -200,6 +200,8 @@ Mirrors complete conversation history from PostgreSQL. Serves search, analytics,
 6. No cluster pause. No network disruption. Rest of cluster unaware.
 ```
 
+**Sync status:** The relay's health endpoint reports `depth_status: syncing` during background sync, `depth_status: ready` once complete. Search queries during sync return a `X-Qhorus-Sync-Status: partial` response header so clients know results may be incomplete. Relays in `syncing` state are excluded from desired-state's search-relay pool until they reach `ready`.
+
 **Ops scaling knob:** Need more search throughput? Spin up full relays. Need more real-time multiplexing? Spin up shallow relays. Same image, different `CASEHUB_QHORUS_RELAY_DEPTH` value.
 
 ## 6. Connection Multiplexing
@@ -221,7 +223,8 @@ The architecture self-heals at every level because the relay is never a correctn
 | Failure | What happens | Recovery |
 |---------|-------------|----------|
 | Relay dies, others available | Agents reconnect to a different relay, continue immediately | Automatic — any relay serves any channel |
-| All relays die | Agents fall back to direct PostgreSQL writes (Level 2) | Automatic — DB locks handle correctness |
+| All relays die (embedded agents) | Agents with embedded qhorus fall back to direct PostgreSQL writes | Automatic — DB locks handle correctness |
+| All relays die (REST-only agents) | Agents retry relay connections until a relay recovers | Automatic — no direct DB fallback for HTTP-only clients |
 | Relay recovers | Agents reconnect, relay resumes multiplexing | Automatic — no state to rebuild |
 | Network partition (Level 4) | Minority partition rejects writes (quorum); majority continues | Automatic — fallback-to-local for proxied writes |
 | PostgreSQL down | Everything stops — PostgreSQL is the single source of truth | Manual — restore database, all relays and agents resume |
@@ -236,10 +239,10 @@ Agent relay discovery can be:
 Each topology level maps to a desired-state resource schema. Ops declares the topology; `casehub-desiredstate` provisions and reconciles it.
 
 ```yaml
-# Level 1: Dev — no resource needed, qhorus is embedded
+# Level 1: Dev — no resource needed, qhorus is embedded as a library dependency
 
-# Level 2: Dedicated server
-kind: QhorusServer
+# Level 2: Dedicated server — relay.enabled not set (default false)
+kind: QhorusMesh
 spec:
   replicas: 1
   datasource:
@@ -247,40 +250,51 @@ spec:
     port: 5432
     database: qhorus
 
-# Level 3: Relays
-kind: QhorusRelay
+# Level 3: Relays — relay.enabled=true, relay.routing=none (default)
+kind: QhorusMesh
 spec:
   replicas: 3
   placement: per-cluster        # or per-machine
-  depth: shallow
+  relay:
+    enabled: true
+    depth: shallow
+    peers: auto                 # desired-state populates from replica addresses
   datasource:
     host: db.internal
     port: 5432
     database: qhorus
 
-# Level 4: Relays with ownership
-kind: QhorusRelay
+# Level 4: Relays with ownership — relay.routing=dynamic
+kind: QhorusMesh
 spec:
   replicas: 3
   placement: per-cluster
-  depth: shallow
-  routing: dynamic
+  relay:
+    enabled: true
+    depth: shallow
+    routing: dynamic
+    peers: auto
   datasource:
     host: db.internal
     port: 5432
     database: qhorus
 
 # Full-depth relay for search offloading
-kind: QhorusRelay
+kind: QhorusMesh
 spec:
   replicas: 1
   placement: per-cluster
-  depth: full
+  relay:
+    enabled: true
+    depth: full
+    peers: auto
   datasource:
     host: db.internal
     port: 5432
     database: qhorus
 ```
+
+The `spec.relay.*` fields map directly to `casehub.qhorus.relay.*` config properties — no translation layer between desired-state and runtime config.
 
 Level transitions are schema changes — update `routing` or `depth`, desired-state reconciles. No redeployment, no data migration.
 
@@ -299,14 +313,14 @@ At Level 1 (embedded), agents call the service layer directly via CDI. No HTTP e
 
 ## 10. Health and Topology Endpoints
 
-Available at Levels 2+ when the relay is a standalone process.
+Available when the relay is a standalone process.
 
-| Endpoint | Returns |
-|----------|---------|
-| `GET /health/live` | Process running |
-| `GET /health/ready` | Database connected, serving requests (503 if minority partition at Level 4) |
-| `GET /health/cluster` | Relay status, cluster size, ring hash, peer states |
-| `GET /admin/topology` | Full node list with status, addresses, last heartbeat |
+| Endpoint | Level | Returns |
+|----------|-------|---------|
+| `GET /health/live` | 2+ | Process running |
+| `GET /health/ready` | 2+ | Database connected, serving requests (503 if minority partition at Level 4) |
+| `GET /health/cluster` | 3+ | Relay status, cluster size, ring hash, peer states, depth_status |
+| `GET /admin/topology` | 3+ | Full node list with status, addresses, last heartbeat |
 
 Desired-state reads these for convergence checks.
 
@@ -326,11 +340,11 @@ Three `SELECT FOR UPDATE` changes to `casehub-qhorus` runtime. Committed on `iss
 - `WriteProxyClient` — proxy stub (HTTP wiring in Phase 4)
 - `InternalMeshResource` — `/internal/dispatch`, `/internal/heartbeat`, `/internal/leave`
 - `ClusterHealthResource` — `/health/cluster`, `/admin/topology`
-- `ClusterConfig` + `ClusterProducer` — `@IfBuildProperty` gated CDI wiring
+- `RelayConfig` + `RelayProducer` — `@IfBuildProperty` gated CDI wiring
 
-39 unit tests. Full project build green.
+41 unit tests. Full project build green.
 
-**Needs update:** Rename config prefix from `casehub.qhorus.cluster` to `casehub.qhorus.relay` (aligns with the relay framing). Add fallback-to-local in `WriteRoutingDecorator` (D20).
+Config prefix is `casehub.qhorus.relay` (aligned with the relay framing). Two-gate activation: `relay.enabled` for Level 3 infrastructure, `relay.routing` for Level 4 routing. `WriteRoutingDecorator` includes fallback-to-local on proxy failure (D20).
 
 ### Phase 3: REST API gaps (next)
 
