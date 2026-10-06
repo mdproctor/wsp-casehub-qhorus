@@ -392,7 +392,7 @@ membership change, heartbeat miss detection — all unit tested.
 - Consumes: `ConsistentHashRing`, `NodeInfo`, `NodeState` (from Task 1)
 - Produces:
   - `PeerState(NodeInfo nodeInfo, NodeState state, java.time.Instant lastHeartbeat, int missCount)` — record
-  - `ClusterConfig` — `@ConfigMapping(prefix = "casehub.qhorus.cluster")`
+  - `RelayConfig` — `@ConfigMapping(prefix = "casehub.qhorus.cluster")`
   - `ClusterManager.owner(UUID channelId) → NodeInfo`
   - `ClusterManager.isLocal(NodeInfo) → boolean`
   - `ClusterManager.canServeWrites() → boolean`
@@ -1813,8 +1813,8 @@ by setting `casehub.qhorus.cluster.enabled=true`.
 **Interfaces:**
 - Consumes: all types from Tasks 1-6
 - Produces:
-  - `ClusterConfig` — `@ConfigMapping`
-  - `ClusterProducer` — CDI producer for `ClusterManager`, `HeartbeatService`, `WriteRoutingDecorator`, `ChannelManagerDecorator`, `WriteProxyClient`
+  - `RelayConfig` — `@ConfigMapping`
+  - `RelayProducer` — CDI producer for `ClusterManager`, `HeartbeatService`, `WriteRoutingDecorator`, `ChannelManagerDecorator`, `WriteProxyClient`
 
 - [ ] **Step 1: Create ClusterConfig**
 
