@@ -414,7 +414,7 @@ public List<MessageResponse> listMessages(String channelRef, Long afterId,
     if (afterId != null) qb.afterId(afterId);
     if (limit != null) qb.limit(limit); else qb.limit(50);
     if (topic != null && !topic.isBlank()) qb.topic(topic);
-    if (type != null && !type.isBlank()) qb.excludeType(MessageType.valueOf(type.toUpperCase()));
+    if (type != null && !type.isBlank()) qb.excludeTypes(java.util.Set.of(MessageType.valueOf(type.toUpperCase())));
     return messageStore.scan(qb.build()).stream()
             .map(MessageResponse::from)
             .toList();
@@ -696,6 +696,26 @@ All config via environment variables.
 
 Refs #475"
 ```
+
+---
+
+---
+
+## Deferred
+
+**SSE events endpoint** (`GET /api/channels/{id}/events`) — real-time push over
+Server-Sent Events for Level 2 agents that can't use WebSocket. Architecturally
+significant: needs connection management, MessageObserver integration, catch-up
+via `Last-Event-ID`. Follows the same pattern as `websocket-observer` (which
+does this over WebSocket). Should be a separate optional module
+(`sse-observer/`) consistent with the existing observer module pattern
+(kafka-observer, websocket-observer, webhook-observer). Deferred to a separate
+task — Level 2 agents can use polling (`GET /api/channels/{id}/messages?afterId=`)
+as an interim solution.
+
+**Spec §11 stale entry** — lists `POST /api/channels/{id}/messages` as a REST
+gap, but this endpoint already exists in `ChannelResource.java:198`. The spec
+should be updated to remove this from the gap table.
 
 ---
 
