@@ -2,23 +2,27 @@
 
 ## What happened
 
-Landed #443/#444 (correction/retraction modeling + message-scoped erasure) via `land-443-444` branch — 16 commits fast-forward merged to main. Fixed compilation errors from ledger package reorganisation, migrated erasure tests from deleted `QhorusMcpTools` to `QhorusTestHelper`, registered `correct_message`/`retract_message`/`erase_message_content` via `@McpDomain` on `MessagingApi`.
+Implemented Phase 1 runtime safety net for distributed mesh (#475) — 3 surgical changes adding DB-level locks to subsystems that break under concurrent multi-node writes:
 
-Fixed CDI `LedgerEntryRepository` ambiguity caused by upstream `casehub-ledger` SNAPSHOT removing `@Alternative` from JPA implementations. Added `quarkus.arc.exclude-types` across 13 module `application.properties` files. Full build green — 3154 tests, 0 failures.
+1. **Merkle Frontier Locking** — `QhorusLedgerMerkleFrontierRepository.findBySubjectIdForUpdate()` with `SELECT FOR UPDATE`; wired into `QhorusLedgerEntryRepository.save()` to prevent concurrent frontier corruption.
 
-Designed distributed qhorus mesh (#475) — standalone service with clustering. 11 design decisions captured. Code trace revealed 3 subsystems that break under multi-node writes (Merkle chain, LAST_WRITE, corrections). Adopted hybrid hash-ring + DB-lock model.
+2. **LAST_WRITE Pessimistic Locking** — `MessageReader.findLastMessageForUpdate()` with `SELECT FOR UPDATE`; wired into `MessageService.dispatch()` LAST_WRITE path to prevent lost updates during ownership transfer.
+
+3. **Commitment Pessimistic Locking** — `CommitmentReader.findByCorrelationIdForUpdate()` with `SELECT FOR UPDATE`; wired into all 6 `CommitmentService` state-transition methods (acknowledge/fulfill/decline/fail/delegate/extendDeadline) to prevent double-fulfillment.
+
+Design note: the original plan called for `@Version` (optimistic locking) on Batch 2, but `em.merge()` with `@Version` doesn't work with the detached-entity-from-domain-record pattern used by `JpaMessageStore.put()` — Hibernate throws `StaleObjectStateException` even without concurrency. Switched to pessimistic locking (consistent with Batches 1 and 3).
+
+Full project build green — all modules compile, 2073+ runtime tests pass.
 
 ## Key decisions
 
-- Hybrid write model: hash ring routes writes to channel owner (performance), DB-level locks as safety net for edge cases (correctness)
-- Shared PostgreSQL, not distributed database — write-ownership partitioning only
-- Multi-protocol transport: REST+SSE, MCP-over-SSE, A2A, WebSocket — all facades over one service layer
-- OIDC auth primary, API key fallback
-- Non-Java SDKs deferred — REST/GraphQL is the universal client interface
+- All three subsystems use pessimistic locking (`SELECT FOR UPDATE`) for consistency
+- Existing `synchronized` keywords kept — they protect the single-JVM fast path; `FOR UPDATE` is the multi-node safety net
+- New interface methods use `default` delegation to non-locking versions for backward compatibility (InMemory stores get locking for free via delegation)
 
 ## Next action
 
-Execute Phase 1 plan — 3 surgical runtime changes: `SELECT FOR UPDATE` on Merkle frontier, `@Version` on `MessageEntity`, `findByCorrelationIdForUpdate` for commitments.
+Phase 1 complete. Next: Phase 2 planning — standalone mesh service, channel partitioning, transport facades.
 
 ## References
 
@@ -32,6 +36,6 @@ Execute Phase 1 plan — 3 surgical runtime changes: `SELECT FOR UPDATE` on Merk
 
 ## Project state
 
-- **Project branch:** `main` — 18 commits ahead of `origin/main` (unpushed)
+- **Project branch:** `issue-475-distributed-mesh` — 3 commits (Phase 1 implementation)
 - **Workspace branch:** `issue-475-distributed-mesh`
-- Build: green (`mvn clean test` — all modules pass)
+- Build: green (`mvn clean install` — all modules pass)
