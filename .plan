@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-475-distributed-mesh
-state: closing:review
+state: closing:verified
 Current: none
 date: 
 current: casehubio/qhorus#484
