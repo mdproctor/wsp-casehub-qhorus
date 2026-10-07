@@ -169,8 +169,9 @@ The relay serves as an application-level read replica.
 class FullSyncService {
 
     @Inject CacheConfig config;
-    @Inject MessageStore delegate;  // JPA store, not the cache decorator
+    @Inject @Named("jpa") MessageStore jpaStore;  // bypass cache decorator
     @Inject ChannelStore channelStore;
+    @Inject CachingMessageStore cachingStore;      // to populate buffers
 
     enum SyncStatus { SYNCING, READY }
 
@@ -187,10 +188,10 @@ class FullSyncService {
         for (Channel ch : channels) {
             Long cursor = cursors.getOrDefault(ch.id(), 0L);
             MessageQuery q = MessageQuery.poll(ch.id(), cursor, config.fullSyncBatchSize());
-            List<Message> batch = delegate.scan(q);
+            List<Message> batch = jpaStore.scan(q);  // read from DB directly
 
             if (!batch.isEmpty()) {
-                batch.forEach(msg -> cacheDecorator.addToBuffer(ch.id(), msg));
+                batch.forEach(msg -> cachingStore.addToBuffer(ch.id(), msg));
                 cursors.put(ch.id(), batch.getLast().id());
                 allDone = false;
                 return;  // one batch per tick — don't monopolise the thread
