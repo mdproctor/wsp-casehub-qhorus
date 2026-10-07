@@ -378,7 +378,7 @@ Note: the original design proposed piggybacking on `deliverRemote()`'s `messageS
 **Depends on:** D27 (post-commit for local), D26 (ring buffer)
 **Sources:** MessageObserver.java (api/gateway/), MessageObserverDispatcher, ChannelGateway.deliverRemote(), CrossTenantMessageStore (decision review R1-02)
 **Exploration:** quick
-**Status:** revised (decision review R1-02, R1-12)
+**Status:** revised (decision review R1-02, R1-12). Implementation gap: `CachePopulationObserver` constructs incomplete Message from event fields; JPA load not yet applied (Phase A audit #484 scope)
 
 ## D29: Cache miss behaviour — range check then fall-through
 
