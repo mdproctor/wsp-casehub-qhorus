@@ -528,3 +528,104 @@ Process:
 **Sources:** Consolidated spec §2 Level 4 (ownership drift), risk register (oscillation)
 **Exploration:** quick
 **Status:** captured
+
+---
+
+# Phase 8: Audit and E2E Testing Decisions (#484)
+
+## D39: Overall structure — three-phase pipeline
+
+**Choice:** Three sequential phases: A (code audit + fixes), B (integration tests), C (Podman e2e). Each phase validates the prior.
+**Alternatives:**
+- E2E first, audit as you go — gaps cause container startup failures, wastes effort debugging infra not behavior
+- Monolithic single phase — no clean cut points, harder to resume across sessions
+**Rationale:** Dependency chain is real: wiring gaps must be fixed before integration tests can verify composition, and composition must work before multi-node e2e tests make sense.
+**Trade-offs:** More phases = more planning overhead. Mitigated by each phase being independently valuable.
+**Sources:** Cluster module code read (7 gaps), cache module code read (4 gaps)
+**Exploration:** quick
+**Status:** captured
+
+## D40: InternalMeshResource gating
+
+**Choice:** `@IfBuildProperty(name = "casehub.qhorus.relay.enabled", stringValue = "true")` on the class
+**Alternatives:**
+- Runtime guard per method — resource exists but returns 503. CDI injection of cluster beans may fail.
+**Rationale:** Same pattern as `RelayProducer`. Resource doesn't exist when relay is disabled, preventing CDI resolution failures.
+**Trade-offs:** Build-time only — can't toggle at runtime. Acceptable: relay is an architectural choice, not a runtime toggle.
+**Depends on:** D39 (Phase A audit scope)
+**Sources:** RelayProducer.java (existing @IfBuildProperty pattern)
+**Exploration:** quick
+**Status:** captured
+
+## D41: HeartbeatService CDI production
+
+**Choice:** Add to `RelayProducer` alongside `ClusterManager`, `WriteProxyClient`, etc.
+**Alternatives:**
+- Self-registered `@ApplicationScoped` with own `@IfBuildProperty` — less centralized
+**Rationale:** Single producer, single gate. All cluster beans share the same lifecycle and activation condition.
+**Trade-offs:** `RelayProducer` grows by one `@Produces` method. Trivial.
+**Depends on:** D39 (Phase A audit scope)
+**Sources:** RelayProducer.java (cluster CDI producer)
+**Exploration:** quick
+**Status:** captured
+
+## D42: Write-frequency tracking position
+
+**Choice:** Track only locally-executed writes. Move `tracker.recordWrite()` into the local-dispatch branch of `WriteRoutingDecorator`, exclude proxied writes.
+**Alternatives:**
+- Track all writes, subtract proxied — more complex, no clear benefit
+**Rationale:** The node that actually handles writes gets the count. Proxied-away writes inflating the local count would cause oscillating ownership claims.
+**Trade-offs:** The proxying node has no frequency data for the channel it proxied — this is correct, it shouldn't claim ownership.
+**Depends on:** D32 (tracker), D36 (evaluator)
+**Sources:** WriteRoutingDecorator.java (current tracking position), OwnershipEvaluator.java
+**Exploration:** quick
+**Status:** captured
+
+## D43: E2E test module structure
+
+**Choice:** New `e2e-cluster/` Maven module, profile-gated with `-Pwith-e2e-cluster`
+**Alternatives:**
+- Tests inside `cluster/src/test/` with profile gate — mixes unit and container tests
+**Rationale:** Follows `examples/agent-communication/` pattern. Clean separation from fast unit tests. Testcontainers + PostgreSQL container are heavyweight deps.
+**Trade-offs:** Additional Maven module and profile. CI must explicitly opt in.
+**Depends on:** D39 (Phase C scope)
+**Sources:** examples/agent-communication/ (profile-gated module pattern)
+**Exploration:** quick
+**Status:** captured
+
+## D44: Testcontainers topology
+
+**Choice:** `GenericContainer` with mesh module JAR in a JRE base image. Each container gets different env vars for `nodeId`, `peers`, shared PostgreSQL URL.
+**Alternatives:**
+- `DockerComposeContainer` — declarative but less programmatic control over individual node lifecycle
+- Custom Quarkus DevServices extension — most Quarkus-native but heaviest to build
+**Rationale:** Programmatic control over individual node lifecycle is essential for failure+recovery scenarios (stop Node C, verify detection, restart). `GenericContainer` provides this directly.
+**Trade-offs:** Must build a Dockerfile and manage JAR copying. Straightforward with Quarkus uber-jar.
+**Depends on:** D43 (module structure)
+**Sources:** Testcontainers documentation, mesh/ module (QuarkusMain)
+**Exploration:** quick
+**Status:** captured
+
+## D45: Internal endpoint security
+
+**Choice:** Add shared-secret header authentication. Pre-shared key in `casehub.qhorus.relay.internal-secret` config, checked by a JAX-RS `@PreMatching` filter on `/internal/*` paths.
+**Alternatives:**
+- Document only, defer — lower effort but leaves endpoints open
+**Rationale:** Defense-in-depth. Even on single-machine deployments, other processes can call these endpoints. Low implementation cost.
+**Trade-offs:** One more config property. `WriteProxyClient` must send the header. Tests must set the config value.
+**Depends on:** D39 (Phase A scope), D40 (InternalMeshResource gating)
+**Sources:** TenancyContextFilter (existing @PreMatching filter pattern)
+**Exploration:** quick
+**Status:** captured
+
+## D46: FullSyncService scheduler
+
+**Choice:** New `CacheSyncScheduler` — `@Scheduled` driver bean in cache module, analogous to `OwnershipScheduler`. Gated by `cache.enabled + cache.mode=full`.
+**Alternatives:**
+- `@Observes StartupEvent` one-shot bulk load — misses channels created after startup
+**Rationale:** Periodic sync handles new channels and recovers from interrupted syncs. Same pattern as `OwnershipScheduler`.
+**Trade-offs:** One more `@Scheduled` bean. `@IfBuildProperty` gate keeps it invisible in non-cache deployments.
+**Depends on:** D30 (cache module), D31 (full mode sync strategy)
+**Sources:** OwnershipScheduler.java (existing @Scheduled pattern), FullSyncService.java
+**Exploration:** quick
+**Status:** captured
