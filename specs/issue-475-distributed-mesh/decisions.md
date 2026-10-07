@@ -349,31 +349,34 @@ Writes always go through PostgreSQL regardless of depth. The full relay is a rea
 **Exploration:** quick
 **Status:** captured
 
-## D27: Cache population — inline post-dispatch for local writes
+## D27: Cache population — post-commit for local writes
 
-**Choice:** The decorator intercepts `MessageStore.put()` to capture the returned `Message` with its assigned ID and adds it to the channel's ring buffer immediately. Zero latency for local reads of just-dispatched messages.
+**Choice:** The decorator intercepts `MessageStore.put()` and registers a JTA `afterCompletion(STATUS_COMMITTED)` callback to add the message to the ring buffer after the transaction commits. This ensures the cache never contains uncommitted data — rollbacks (ledger write failure, enforcement gate, commitment conflict) do not pollute the cache.
 **Alternatives:**
-- Populate via pg_notify only (all cache updates come through the notification path) — simpler single invalidation mechanism but adds a pg_notify round-trip for local reads of just-sent messages
-- MessageObserver hook — uses existing observer infrastructure but observers fire after `TransactionSynchronizationRegistry.afterCompletion()`, adding a timing gap where a read could miss the just-dispatched message
-**Rationale:** The relay that dispatches a message should immediately be able to serve it from cache. This is the common case — an agent sends a message and another agent on the same relay reads it. The inline approach eliminates the round-trip.
-**Trade-offs:** The decorator intercepts both read and write paths, making it a `MessageStore` decorator. This is acceptable — the write interception is minimal (one method: `put()`).
+- Inline population (add to cache immediately in `put()`) — zero latency but cache may contain phantom messages from rolled-back transactions, violating the invariant that JPA is authoritative (identified in decision review R1-08)
+- Populate via pg_notify only — simpler single mechanism but adds round-trip latency for local reads
+**Rationale:** The relay that dispatches a message should serve it from cache as soon as possible, but never serve uncommitted data. `afterCompletion` fires immediately after commit, before the dispatch response returns — the latency cost is negligible while maintaining correctness.
+**Trade-offs:** The decorator intercepts both read and write paths, making it a `MessageStore` decorator. Brief window between `put()` and commit where the message is not yet in cache — acceptable since `dispatch()` commits immediately.
 **Depends on:** D25 (decorator approach), D26 (ring buffer structure)
-**Sources:** MessageService.dispatch() (inline after commit), PostgresChannelActivityBroadcaster (remote notification path)
+**Sources:** MessageService.dispatch(), MessageObserverDispatcher (afterCompletion pattern — PP-20260608-07daa6)
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-08)
 
-## D28: Remote cache invalidation — piggyback on deliverRemote
+## D28: Remote cache invalidation — MessageObserver (CLUSTER scope)
 
-**Choice:** Remote writes arrive via the existing `PostgresChannelActivityBroadcaster` → `ChannelGateway.deliverRemote(channelId, messageId)` path. `deliverRemote()` loads the message from PostgreSQL via `messageStore.find(messageId)`. The cache decorator's `find()` implementation populates the ring buffer as a side effect of this read. No new notification channel needed.
+**Choice:** The cache module implements `MessageObserver` with scope `CLUSTER`. When `deliverRemote()` fires CLUSTER-scoped observers, the cache observer receives the `MessageReceivedEvent` and adds the message to the ring buffer. This uses the existing observer infrastructure — no new notification channel or invalidation mechanism.
+
+Note: the original design proposed piggybacking on `deliverRemote()`'s `messageStore.find()` call, but `deliverRemote()` uses `CrossTenantMessageStore.find()` — a separate interface hierarchy that a `MessageStore` decorator does not intercept (identified in decision review R1-02).
 **Alternatives:**
-- Dedicated cache invalidation listener on pg_notify — duplicates the notification path and the message load
+- Decorate `CrossTenantMessageStore` as well — two decorators on unrelated interfaces, more surface area
 - Proactive cache push via internal RPC — lower latency but couples relays at the cache layer
-**Rationale:** `deliverRemote()` already loads the message from PostgreSQL to fire CLUSTER-scoped observers. The cache decorator intercepts this read transparently — the message enters the cache as a natural consequence of delivery. One load, two purposes.
-**Trade-offs:** Cache population depends on `deliverRemote()` being called. If pg_notify is lossy (connection drops), the cache misses messages until the next read. Acceptable — the cache is a performance optimisation, not a correctness layer.
-**Depends on:** D27 (write-through for local), D26 (ring buffer populated by find())
-**Sources:** PostgresChannelActivityBroadcaster.java, ChannelGateway.deliverRemote()
+- `MessageStore.find()` piggyback — broken because `deliverRemote` uses `CrossTenantMessageStore`, not `MessageStore`
+**Rationale:** CLUSTER-scoped observers already fire for every remote write via `deliverRemote()` → `MessageObserverDispatcher.dispatchClusterOnly()`. The observer fires after transaction commit, so the cache never contains uncommitted data. The `MessageReceivedEvent` carries all fields needed to construct a cache entry.
+**Trade-offs:** `MessageReceivedEvent` does not carry the full `Message` object — it carries `messageId`, `channelName`, `channelId`, `messageType`, `senderId`, `correlationId`, `occurredAt`, `content`. The cache observer must reconstruct enough state for the ring buffer or load the full `Message` from JPA on first cache-miss read. Loading from JPA on the observer path is acceptable — it's a single-row read.
+**Depends on:** D27 (post-commit for local), D26 (ring buffer)
+**Sources:** MessageObserver.java (api/gateway/), MessageObserverDispatcher, ChannelGateway.deliverRemote(), CrossTenantMessageStore (decision review R1-02)
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-02)
 
 ## D29: Cache miss behaviour — range check then fall-through
 

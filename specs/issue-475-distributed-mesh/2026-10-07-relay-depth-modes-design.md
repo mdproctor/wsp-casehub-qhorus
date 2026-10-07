@@ -93,18 +93,32 @@ class ChannelMessageBuffer {
 
 ### Cache population — two paths
 
-**Local writes (inline):** When `dispatch()` calls `messageStore.put()`,
-the decorator delegates to JPA, gets back the `Message` with its
-database-assigned ID, and adds it to the ring buffer immediately. Zero
-latency for local reads of just-dispatched messages.
+**Local writes (post-commit):** When `dispatch()` calls
+`messageStore.put()`, the decorator delegates to JPA and registers a
+JTA `TransactionSynchronizationRegistry.afterCompletion()` callback.
+On `STATUS_COMMITTED`, the callback adds the message to the ring
+buffer. This ensures the cache never contains uncommitted data — if
+the transaction rolls back (ledger write failure, enforcement gate,
+commitment conflict), the cache is not polluted. The latency cost is
+negligible — the callback fires immediately after commit, before the
+dispatch response returns to the caller.
 
 **Remote writes (pg_notify):** When another relay dispatches a message,
 `PostgresChannelActivityBroadcaster` delivers the notification.
 `ChannelGateway.deliverRemote(channelId, messageId)` calls
-`messageStore.find(messageId)`, which goes through the decorator. The
-decorator delegates to JPA (cache miss for this message ID), gets the
-message, adds it to the ring buffer, and returns it. The cache populates
-as a natural side effect of the existing remote delivery path.
+`crossTenantMessageStore.find(messageId)` — note: this uses the
+`CrossTenantMessageStore` interface, which is a separate interface
+hierarchy from `MessageStore`. The cache decorator on `MessageStore`
+does NOT intercept this call.
+
+To populate the cache from remote writes, the cache module implements
+`MessageObserver` (scope `CLUSTER`). When `deliverRemote()` fires the
+CLUSTER-scoped observer dispatch, the cache observer receives the
+`MessageReceivedEvent` and adds the message to the ring buffer. This
+uses the existing observer infrastructure — no new notification channel.
+The observer fires after the transaction commits (via
+`TransactionSynchronizationRegistry.afterCompletion`), so the cache
+never contains uncommitted data.
 
 ### Cache miss behaviour
 
@@ -245,6 +259,7 @@ cache/
     ├── CacheConfig.java              — @ConfigMapping(prefix = "casehub.qhorus.cache")
     ├── CachingMessageStore.java      — @Alternative @Priority(1) MessageStore decorator
     ├── ChannelMessageBuffer.java     — Per-channel ring buffer (ConcurrentSkipListMap)
+    ├── CachePopulationObserver.java  — MessageObserver (CLUSTER): populates cache from remote writes
     ├── FullSyncService.java          — @Scheduled background sync for full mode
     └── CacheHealthCheck.java         — Health check reporting cache stats and sync status
 ```
@@ -311,9 +326,12 @@ The `mesh/pom.xml` adds `casehub-qhorus-cache` as a dependency. The
 casehub.qhorus.cache.mode=${CASEHUB_QHORUS_CACHE_MODE:shallow}
 ```
 
-The existing `RelayConfig.depth()` is kept for cluster-level depth
-reporting but the cache module uses its own config prefix for
-self-contained activation.
+**Configuration interaction with RelayConfig:**
+`RelayConfig.depth()` (`casehub.qhorus.relay.depth`) is removed — the
+cache module owns depth configuration via `casehub.qhorus.cache.mode`.
+The `RelayConfig` interface drops its `depth()` method. This eliminates
+the dual-configuration surface: one module, one config prefix, one
+place to set the mode.
 
 ## 6. Consistency Model
 
