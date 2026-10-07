@@ -318,3 +318,120 @@ Writes always go through PostgreSQL regardless of depth. The full relay is a rea
 **Sources:** Session discussion on read scaling and relay caching depth
 **Exploration:** quick
 **Status:** captured
+
+---
+
+# Phase 5 — Relay Depth Modes Implementation Decisions
+
+## D25: Cache interception point
+
+**Choice:** CDI decorator on `MessageStore` (wrapping both read and write paths). All callers — REST, MCP, A2A, WebSocket, projections — get caching transparently. Same interception pattern as `WriteRoutingDecorator` on `MessageDispatcher`. Cache miss falls through to the JPA store. Write interception captures dispatched messages for inline cache population.
+**Alternatives:**
+- Core/Resource layer interception — simpler scope but MCP tools and direct service-layer callers bypass the cache, requiring multiple interception points
+- Dedicated `CachedMessageService` — explicit opt-in by callers gives most control but requires changing all read call sites and makes caching non-transparent
+**Rationale:** The decorator pattern is proven in this codebase (`WriteRoutingDecorator`). Decorating `MessageStore` captures both reads (cache hits) and writes (cache population) in one place. Every caller that reads or writes messages goes through `MessageStore`, so the cache is comprehensive without caller changes.
+**Trade-offs:** Decorator must handle all `MessageStore` methods, including `count()` and `distinctSendersByChannel()` which aren't cache-friendly. These pass through to JPA unchanged.
+**Depends on:** D24 (relay depth modes)
+**Sources:** WriteRoutingDecorator.java, MessageReader.java (api/store/), MessageStore.java (api/store/)
+**Exploration:** quick
+**Status:** captured
+
+## D26: Cache data structure — per-channel message ring buffer
+
+**Choice:** Caffeine cache keyed by `UUID` (channelId), value is a bounded ordered `NavigableMap<Long, Message>` (keyed by message ID). LRU eviction at the channel level — inactive channels evict before active ones. Supports `afterId` pagination natively via `tailMap(afterId, false)`. Configurable `max-messages-per-channel` (default 200) and `max-channels` (default 1000).
+**Alternatives:**
+- Full `MessageQuery` result cache (keyed by query hash) — higher hit rate for repeated identical queries but harder invalidation: any write to a channel must invalidate all cached query results touching that channel. Combinatorial explosion of cache keys.
+- Per-channel complete state (all messages cached) — simplest consistency model but unbounded memory for channels with long history. Only appropriate for full mode.
+**Rationale:** Per-channel ring buffer matches the access pattern: agents read recent messages in a channel, paginating forward. The `NavigableMap` supports the critical `afterId` query directly. Channel-level LRU means the cache naturally holds the hot working set — channels with active conversations stay cached, dormant channels evict.
+**Trade-offs:** Complex queries (topic filter, type filter, content pattern) cannot be served purely from cache — they require post-filter on the ring buffer or fall through to JPA. Acceptable since these queries are uncommon in the real-time path.
+**Depends on:** D25 (MessageStore decorator)
+**Sources:** PresenceService.java (Caffeine pattern), MessageQuery.java (afterId pagination)
+**Exploration:** quick
+**Status:** captured
+
+## D27: Cache population — inline post-dispatch for local writes
+
+**Choice:** The decorator intercepts `MessageStore.put()` to capture the returned `Message` with its assigned ID and adds it to the channel's ring buffer immediately. Zero latency for local reads of just-dispatched messages.
+**Alternatives:**
+- Populate via pg_notify only (all cache updates come through the notification path) — simpler single invalidation mechanism but adds a pg_notify round-trip for local reads of just-sent messages
+- MessageObserver hook — uses existing observer infrastructure but observers fire after `TransactionSynchronizationRegistry.afterCompletion()`, adding a timing gap where a read could miss the just-dispatched message
+**Rationale:** The relay that dispatches a message should immediately be able to serve it from cache. This is the common case — an agent sends a message and another agent on the same relay reads it. The inline approach eliminates the round-trip.
+**Trade-offs:** The decorator intercepts both read and write paths, making it a `MessageStore` decorator. This is acceptable — the write interception is minimal (one method: `put()`).
+**Depends on:** D25 (decorator approach), D26 (ring buffer structure)
+**Sources:** MessageService.dispatch() (inline after commit), PostgresChannelActivityBroadcaster (remote notification path)
+**Exploration:** quick
+**Status:** captured
+
+## D28: Remote cache invalidation — piggyback on deliverRemote
+
+**Choice:** Remote writes arrive via the existing `PostgresChannelActivityBroadcaster` → `ChannelGateway.deliverRemote(channelId, messageId)` path. `deliverRemote()` loads the message from PostgreSQL via `messageStore.find(messageId)`. The cache decorator's `find()` implementation populates the ring buffer as a side effect of this read. No new notification channel needed.
+**Alternatives:**
+- Dedicated cache invalidation listener on pg_notify — duplicates the notification path and the message load
+- Proactive cache push via internal RPC — lower latency but couples relays at the cache layer
+**Rationale:** `deliverRemote()` already loads the message from PostgreSQL to fire CLUSTER-scoped observers. The cache decorator intercepts this read transparently — the message enters the cache as a natural consequence of delivery. One load, two purposes.
+**Trade-offs:** Cache population depends on `deliverRemote()` being called. If pg_notify is lossy (connection drops), the cache misses messages until the next read. Acceptable — the cache is a performance optimisation, not a correctness layer.
+**Depends on:** D27 (write-through for local), D26 (ring buffer populated by find())
+**Sources:** PostgresChannelActivityBroadcaster.java, ChannelGateway.deliverRemote()
+**Exploration:** quick
+**Status:** captured
+
+## D29: Cache miss behaviour — range check then fall-through
+
+**Choice:** For `scan(MessageQuery)`, the decorator checks if the channel's ring buffer covers the requested range:
+- **Hit:** `afterId` is within the buffer range (or absent, requesting latest) → serve from cache, apply filters in-memory
+- **Miss:** `afterId` is before the buffer's earliest entry (requesting older history) → fall through to JPA store
+- **Full mode exception:** after background sync completes, the cache holds all messages. Misses during sync fall through to JPA with a log warning.
+
+For other methods: `find(Long id)` checks cache first, falls through on miss. `findRecent()` served from cache when buffer has enough entries. `count()`, `distinctSendersByChannel()`, `countByChannel()` pass through to JPA unchanged.
+**Alternatives:**
+- Always fall through on any filter beyond afterId — simpler but misses the common unfiltered read
+- Negative cache — useful for full mode but adds complexity
+**Rationale:** Range check is O(1). In-memory filtering on small buffers (200 messages) is fast. The decorator never serves stale data — JPA serves the authoritative answer on cache miss.
+**Trade-offs:** In-memory filtering may return fewer results than `limit` requests. The caller paginates again, potentially hitting JPA. This is correct behaviour.
+**Depends on:** D26 (ring buffer structure), D24 (shallow vs full modes)
+**Sources:** MessageQuery.java (afterId, limit, filter fields), MessageQuery.matches()
+**Exploration:** quick
+**Status:** captured
+
+## D30: Module structure — casehub-qhorus-cache
+
+**Choice:** New Maven module `casehub-qhorus-cache`. Activated by classpath presence + config gate (`casehub.qhorus.cache.enabled`, default true). Independent of the cluster module.
+
+Config prefix `casehub.qhorus.cache`:
+- `enabled` (boolean, default true)
+- `max-channels` (int, default 1000)
+- `max-messages-per-channel` (int, default 200)
+- `full-sync-batch-size` (int, default 1000)
+- `full-sync-interval` (Duration, default 5s)
+**Alternatives:**
+- Inside cluster module — forces clustering onto Level 2 servers that only want caching
+- Inside runtime module — always active, adds memory overhead to embedded Level 1 deploys
+**Rationale:** Caching is orthogonal to clustering. A Level 2 server benefits from caching without clustering. Separate modules let ops compose features per deployment.
+**Trade-offs:** Additional Maven module. Mitigated by established optional module pattern.
+**Depends on:** D14 (module structure pattern), D24 (relay depth modes)
+**Sources:** connector-backend/, slack-channel/, a2a-outbound/ (optional module pattern)
+**Exploration:** quick
+**Status:** captured
+
+## D31: Full mode — background sync strategy
+
+**Choice:** `@Scheduled` driver loads channels ordered by `last_activity DESC`, batch-copies messages (default 1000 per batch). Real-time messages arrive via pg_notify during sync — no gap. Relay starts as shallow immediately, transitions to full once all channels synced.
+
+Sync progress: in-memory `SyncCursor` tracks per-channel last-synced ID and overall state (`SYNCING` → `READY`). Health endpoint reports `depth_status`.
+
+Process:
+1. Query channels ordered by most recent activity
+2. For each channel: load messages in batches (`afterId` cursor, ascending)
+3. Populate ring buffer (unbounded in full mode)
+4. Sleep `full-sync-interval` between batches
+5. When all channels synced, set status to READY
+
+**Alternatives:**
+- On-demand sync (cache-miss triggers channel sync) — latency spikes on first access
+- Single bulk load at startup — relay unavailable until sync completes
+**Rationale:** Background sync with activity ordering serves the most valuable channels first. Real-time messages are never delayed.
+**Trade-offs:** History queries for not-yet-synced channels fall through to PostgreSQL during sync. Documented via health endpoint.
+**Depends on:** D24 (shallow/full), D26 (ring buffer — unbounded for full), D29 (fall-through)
+**Sources:** Consolidated spec §5 (sync strategy)
+**Exploration:** quick
+**Status:** captured
