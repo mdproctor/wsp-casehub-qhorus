@@ -176,7 +176,7 @@ Only active when cache is enabled. Runtime check for full mode so shallow-mode d
 
 `CacheProducer` uses `@IfBuildProperty(enableIfMissing = false)` — cache is off by default despite the config default of `enabled = true`. This is a build-time vs runtime mismatch.
 
-**Fix:** Change to `enableIfMissing = true` so the build-time gate matches the runtime config default. When both say "enabled by default," the behaviour is consistent.
+**Fix:** Change `enableIfMissing = false` to `enableIfMissing = true`. The runtime config default is `enabled = true` (`CacheConfig.enabled()` has `@WithDefault("true")`), so the build-time gate must also default to enabled. Currently, if the property is absent from `application.properties`, the runtime config says "enabled" but the build-time gate says "disabled" — the producer class is excluded and no cache beans are created.
 
 ## Phase B: Integration Tests
 
