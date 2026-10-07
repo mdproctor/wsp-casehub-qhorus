@@ -9,55 +9,61 @@
 **Focal issue:** #475 — epic: distributed qhorus mesh — standalone service with clustering
 **Issue group:** #475
 
-**Goal:** Add an in-memory caching layer (`casehub-qhorus-cache` module) that
-reduces PostgreSQL read pressure by serving recent messages from per-channel
-ring buffers. Two modes: shallow (bounded LRU) and full (background sync from
-PostgreSQL).
+**Goal:** Add an in-memory caching layer for the qhorus relay that serves
+recent messages from per-channel ring buffers, reducing PostgreSQL read
+pressure. Two modes: shallow (bounded LRU) and full (complete history
+mirror with background sync).
 
-**Architecture:** A `CachingMessageStore` CDI `@Alternative` decorator wraps
-`MessageStore`, intercepting reads and writes. Per-channel buffers use
-`ConcurrentSkipListMap<Long, Message>` inside a Caffeine cache keyed by channel
-UUID. Local writes populate inline; remote writes populate via the existing
-`deliverRemote()` → `find()` path. Full mode adds a `@Scheduled` background
-sync that batch-loads history from PostgreSQL.
+**Architecture:** New `casehub-qhorus-cache` module with a `MessageStore`
+CDI `@Alternative` decorator. Per-channel `ConcurrentSkipListMap` ring
+buffers in a Caffeine cache. Local writes populate post-commit via JTA
+`afterCompletion`. Remote writes populate via `MessageObserver` (CLUSTER
+scope). Full mode adds a `@Scheduled` background sync service.
 
-**Tech Stack:** Java 21, Quarkus 3.32.2, Caffeine, ConcurrentSkipListMap,
-Quarkus Scheduler
+**Tech Stack:** Java 21, Quarkus 3.32.2, Caffeine, JTA
+TransactionSynchronizationRegistry
 
 ## Global Constraints
 
 - Java 21 source level (running on Java 26 JVM)
 - Build: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install`
-- New module: `cache/` — follows cluster module pattern (plain library, not Quarkus extension)
+- New module: `cache/` at project root
+- Package: `io.casehub.qhorus.cache`
+- Config prefix: `casehub.qhorus.cache`
 - Commits reference #475: `Refs #475`
-- Tests: CDI-free unit tests with Mockito for core logic; `@QuarkusTest` for integration only if needed
-- No JPA entities in this module — no Flyway migrations, no Hibernate ORM dependency
-- `casehub-platform` test dep required for `MockCurrentPrincipal` (CDI satisfaction)
+- CDI-free unit tests (Mockito for delegate stores)
+- `@QuarkusTest` for integration tests
+- `RelayConfig.depth()` removed — cache module owns depth config
 
 ---
 
-## Batch 1: Core cache infrastructure
+## Batch 1: ChannelMessageBuffer — the ring buffer data structure
 
-After this batch: `ChannelMessageBuffer` and `CachingMessageStore` exist
-with full unit test coverage. The module compiles and tests pass. No
-integration wiring yet.
+After this batch: the per-channel ring buffer works in isolation with
+full test coverage. No CDI, no Quarkus dependencies. Pure data structure.
 
-### Task 1: Module scaffold + ChannelMessageBuffer
+### Task 1: ChannelMessageBuffer + tests
 
 **Files:**
 - Create: `cache/pom.xml`
-- Create: `cache/src/main/java/io/casehub/qhorus/cache/CacheConfig.java`
 - Create: `cache/src/main/java/io/casehub/qhorus/cache/ChannelMessageBuffer.java`
-- Modify: `pom.xml` (parent) — add `<module>cache</module>`
-- Test: `cache/src/test/java/io/casehub/qhorus/cache/ChannelMessageBufferTest.java`
+- Create: `cache/src/test/java/io/casehub/qhorus/cache/ChannelMessageBufferTest.java`
+- Modify: `pom.xml` (root) — add `<module>cache</module>`
 
 **Interfaces:**
-- Consumes: `Message` record (from `casehub-qhorus-api`), `MessageQuery` (from `casehub-qhorus-api`), `MessageQuery.matches(Message)` predicate
+- Consumes: `Message` (api/message/), `MessageQuery` (api/store/query/)
 - Produces:
-  - `ChannelMessageBuffer` — `add(Message)`, `query(MessageQuery) → List<Message>`, `findById(Long) → Optional<Message>`, `covers(Long afterId) → boolean`, `size() → int`, `lastId() → Long`
-  - `CacheConfig` — `@ConfigMapping` interface with `enabled()`, `mode()`, `maxChannels()`, `maxMessagesPerChannel()`, `fullSyncBatchSize()`, `fullSyncInterval()`
+  - `ChannelMessageBuffer(int maxSize)` — constructor, 0 = unbounded
+  - `void add(Message msg)` — add message, evict oldest if bounded
+  - `List<Message> query(MessageQuery q)` — in-memory query with afterId pagination
+  - `boolean covers(Long afterId)` — can this buffer serve the range?
+  - `Optional<Message> get(Long messageId)` — single lookup
+  - `int size()` — current message count
+  - `boolean isEmpty()` — empty check
 
-- [ ] **Step 1: Create cache/pom.xml**
+- [ ] **Step 1: Create cache module pom.xml**
+
+Create `cache/pom.xml`:
 
 ```xml
 <?xml version="1.0"?>
@@ -74,12 +80,20 @@ integration wiring yet.
 
   <artifactId>casehub-qhorus-cache</artifactId>
   <name>CaseHub Qhorus Cache</name>
-  <description>In-memory message cache — shallow (LRU) and full (background sync) modes</description>
+  <description>In-memory message cache for qhorus relay — per-channel ring buffers
+with shallow (bounded LRU) and full (background sync) modes.</description>
 
   <dependencies>
+
     <dependency>
       <groupId>io.casehub</groupId>
       <artifactId>casehub-qhorus-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.casehub</groupId>
+      <artifactId>casehub-qhorus</artifactId>
       <version>${project.version}</version>
     </dependency>
 
@@ -93,7 +107,17 @@ integration wiring yet.
       <artifactId>quarkus-arc</artifactId>
     </dependency>
 
-    <!-- Test -->
+    <dependency>
+      <groupId>io.smallrye.config</groupId>
+      <artifactId>smallrye-config-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>jakarta.transaction</groupId>
+      <artifactId>jakarta.transaction-api</artifactId>
+    </dependency>
+
+    <!-- Testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -109,50 +133,22 @@ integration wiring yet.
       <artifactId>mockito-core</artifactId>
       <scope>test</scope>
     </dependency>
+
   </dependencies>
 </project>
 ```
 
-- [ ] **Step 2: Add cache module to parent pom.xml**
+- [ ] **Step 2: Add module to root pom.xml**
 
-Add `<module>cache</module>` after `<module>cluster</module>` and before
-`<module>examples</module>` in `pom.xml`.
+Add `<module>cache</module>` to the `<modules>` section in the root `pom.xml`,
+before `<module>mesh</module>`:
 
-- [ ] **Step 3: Write CacheConfig**
-
-Create `cache/src/main/java/io/casehub/qhorus/cache/CacheConfig.java`:
-
-```java
-package io.casehub.qhorus.cache;
-
-import io.smallrye.config.ConfigMapping;
-import io.smallrye.config.WithDefault;
-import java.time.Duration;
-
-@ConfigMapping(prefix = "casehub.qhorus.cache")
-public interface CacheConfig {
-
-    @WithDefault("true")
-    boolean enabled();
-
-    @WithDefault("shallow")
-    String mode();
-
-    @WithDefault("1000")
-    int maxChannels();
-
-    @WithDefault("200")
-    int maxMessagesPerChannel();
-
-    @WithDefault("1000")
-    int fullSyncBatchSize();
-
-    @WithDefault("5s")
-    Duration fullSyncInterval();
-}
+```xml
+    <module>cache</module>
+    <module>mesh</module>
 ```
 
-- [ ] **Step 4: Write ChannelMessageBuffer**
+- [ ] **Step 3: Write ChannelMessageBuffer**
 
 Create `cache/src/main/java/io/casehub/qhorus/cache/ChannelMessageBuffer.java`:
 
@@ -188,29 +184,14 @@ public class ChannelMessageBuffer {
 
     public List<Message> query(MessageQuery q) {
         Long afterId = q.afterId();
-        NavigableMap<Long, Message> range;
-        if (afterId != null) {
-            range = messages.tailMap(afterId, false);
-        } else if (q.descending()) {
-            range = messages.descendingMap();
-        } else {
-            range = messages;
-        }
-
-        Long beforeId = q.beforeId();
-        var stream = range.values().stream();
-        if (beforeId != null) {
-            stream = stream.filter(m -> m.id() <= beforeId);
-        }
-
-        stream = stream.filter(q::matches);
-
+        NavigableMap<Long, Message> range = (afterId != null)
+                ? messages.tailMap(afterId, false)
+                : messages;
         int limit = q.limit() != null ? q.limit() : 50;
-        return stream.limit(limit).toList();
-    }
-
-    public Optional<Message> findById(Long id) {
-        return Optional.ofNullable(messages.get(id));
+        return range.values().stream()
+                .filter(q::matches)
+                .limit(limit)
+                .toList();
     }
 
     public boolean covers(Long afterId) {
@@ -219,17 +200,21 @@ public class ChannelMessageBuffer {
         return afterId >= messages.firstKey() - 1;
     }
 
+    public Optional<Message> get(Long messageId) {
+        return Optional.ofNullable(messages.get(messageId));
+    }
+
     public int size() {
         return messages.size();
     }
 
-    public Long lastId() {
-        return messages.isEmpty() ? null : messages.lastKey();
+    public boolean isEmpty() {
+        return messages.isEmpty();
     }
 }
 ```
 
-- [ ] **Step 5: Write ChannelMessageBufferTest**
+- [ ] **Step 4: Write ChannelMessageBufferTest**
 
 Create `cache/src/test/java/io/casehub/qhorus/cache/ChannelMessageBufferTest.java`:
 
@@ -249,163 +234,188 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ChannelMessageBufferTest {
 
-    private static final UUID CH = UUID.randomUUID();
+    private final UUID channelId = UUID.randomUUID();
 
-    private static Message msg(long id, String sender, MessageType type, String content) {
-        return new Message(id, CH, sender, type, null, null, content, null,
-                null, null, 0, null, null, null, null, null, null, 0, Instant.now());
+    @Test
+    void addAndQuery() {
+        var buffer = new ChannelMessageBuffer(100);
+        buffer.add(msg(1L, "hello"));
+        buffer.add(msg(2L, "world"));
+
+        var results = buffer.query(MessageQuery.forChannel(channelId));
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).content()).isEqualTo("hello");
+        assertThat(results.get(1).content()).isEqualTo("world");
     }
 
     @Test
-    void addAndQueryReturnsMessages() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(msg(1, "a", MessageType.STATUS, "hello"));
-        buf.add(msg(2, "b", MessageType.STATUS, "world"));
+    void queryWithAfterId() {
+        var buffer = new ChannelMessageBuffer(100);
+        buffer.add(msg(1L, "a"));
+        buffer.add(msg(2L, "b"));
+        buffer.add(msg(3L, "c"));
 
-        List<Message> result = buf.query(MessageQuery.forChannel(CH));
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).id()).isEqualTo(1L);
-        assertThat(result.get(1).id()).isEqualTo(2L);
+        var q = MessageQuery.poll(channelId, 1L, 50);
+        var results = buffer.query(q);
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).content()).isEqualTo("b");
     }
 
     @Test
-    void queryWithAfterIdFilters() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(msg(1, "a", MessageType.STATUS, "one"));
-        buf.add(msg(2, "a", MessageType.STATUS, "two"));
-        buf.add(msg(3, "a", MessageType.STATUS, "three"));
-
-        List<Message> result = buf.query(MessageQuery.poll(CH, 1L, 50));
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).id()).isEqualTo(2L);
-    }
-
-    @Test
-    void evictionRemovesOldestWhenBounded() {
-        var buf = new ChannelMessageBuffer(3);
-        buf.add(msg(1, "a", MessageType.STATUS, "one"));
-        buf.add(msg(2, "a", MessageType.STATUS, "two"));
-        buf.add(msg(3, "a", MessageType.STATUS, "three"));
-        buf.add(msg(4, "a", MessageType.STATUS, "four"));
-
-        assertThat(buf.size()).isEqualTo(3);
-        assertThat(buf.findById(1L)).isEmpty();
-        assertThat(buf.findById(2L)).isPresent();
-    }
-
-    @Test
-    void unboundedBufferRetainsAll() {
-        var buf = new ChannelMessageBuffer(0);
-        for (long i = 1; i <= 500; i++) {
-            buf.add(msg(i, "a", MessageType.STATUS, "msg-" + i));
-        }
-        assertThat(buf.size()).isEqualTo(500);
-    }
-
-    @Test
-    void coversReturnsTrueWhenAfterIdInRange() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(msg(10, "a", MessageType.STATUS, "x"));
-        buf.add(msg(20, "a", MessageType.STATUS, "y"));
-
-        assertThat(buf.covers(null)).isTrue();
-        assertThat(buf.covers(10L)).isTrue();
-        assertThat(buf.covers(15L)).isTrue();
-        assertThat(buf.covers(5L)).isFalse();
-    }
-
-    @Test
-    void coversReturnsFalseWhenEmpty() {
-        var buf = new ChannelMessageBuffer(100);
-        assertThat(buf.covers(null)).isFalse();
-    }
-
-    @Test
-    void queryWithLimitRespectsLimit() {
-        var buf = new ChannelMessageBuffer(100);
-        for (long i = 1; i <= 10; i++) {
-            buf.add(msg(i, "a", MessageType.STATUS, "msg"));
+    void queryWithLimit() {
+        var buffer = new ChannelMessageBuffer(100);
+        for (int i = 1; i <= 10; i++) {
+            buffer.add(msg((long) i, "msg-" + i));
         }
 
-        List<Message> result = buf.query(MessageQuery.poll(CH, 0L, 3));
-        assertThat(result).hasSize(3);
+        var q = MessageQuery.poll(channelId, 0L, 3);
+        var results = buffer.query(q);
+        assertThat(results).hasSize(3);
     }
 
     @Test
-    void queryWithSenderFilter() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(msg(1, "alice", MessageType.STATUS, "hi"));
-        buf.add(msg(2, "bob", MessageType.STATUS, "hello"));
-        buf.add(msg(3, "alice", MessageType.COMMAND, "do it"));
+    void evictsOldestWhenBounded() {
+        var buffer = new ChannelMessageBuffer(3);
+        buffer.add(msg(1L, "a"));
+        buffer.add(msg(2L, "b"));
+        buffer.add(msg(3L, "c"));
+        buffer.add(msg(4L, "d"));
 
-        MessageQuery q = MessageQuery.builder().channelId(CH).sender("alice").build();
-        List<Message> result = buf.query(q);
-        assertThat(result).hasSize(2);
-        assertThat(result).allMatch(m -> m.sender().equals("alice"));
+        assertThat(buffer.size()).isEqualTo(3);
+        assertThat(buffer.get(1L)).isEmpty();
+        assertThat(buffer.get(2L)).isPresent();
+        assertThat(buffer.get(4L)).isPresent();
     }
 
     @Test
-    void findByIdReturnsMessage() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(msg(42, "a", MessageType.STATUS, "found"));
-
-        assertThat(buf.findById(42L)).isPresent();
-        assertThat(buf.findById(99L)).isEmpty();
+    void unboundedDoesNotEvict() {
+        var buffer = new ChannelMessageBuffer(0);
+        for (int i = 1; i <= 500; i++) {
+            buffer.add(msg((long) i, "msg-" + i));
+        }
+        assertThat(buffer.size()).isEqualTo(500);
     }
 
     @Test
-    void lastIdReturnsHighestId() {
-        var buf = new ChannelMessageBuffer(100);
-        assertThat(buf.lastId()).isNull();
+    void coversRange() {
+        var buffer = new ChannelMessageBuffer(100);
+        assertThat(buffer.covers(null)).isFalse();
 
-        buf.add(msg(5, "a", MessageType.STATUS, "x"));
-        buf.add(msg(10, "a", MessageType.STATUS, "y"));
-        assertThat(buf.lastId()).isEqualTo(10L);
+        buffer.add(msg(10L, "a"));
+        buffer.add(msg(20L, "b"));
+
+        assertThat(buffer.covers(null)).isTrue();
+        assertThat(buffer.covers(9L)).isTrue();
+        assertThat(buffer.covers(15L)).isTrue();
+        assertThat(buffer.covers(5L)).isFalse();
     }
 
     @Test
-    void nullIdMessageIsIgnored() {
-        var buf = new ChannelMessageBuffer(100);
-        buf.add(new Message(null, CH, "a", MessageType.STATUS, null, null, "x",
-                null, null, null, 0, null, null, null, null, null, null, 0, Instant.now()));
-        assertThat(buf.size()).isZero();
+    void getSingleMessage() {
+        var buffer = new ChannelMessageBuffer(100);
+        buffer.add(msg(42L, "found"));
+
+        assertThat(buffer.get(42L)).isPresent();
+        assertThat(buffer.get(42L).get().content()).isEqualTo("found");
+        assertThat(buffer.get(99L)).isEmpty();
+    }
+
+    @Test
+    void ignoresNullId() {
+        var buffer = new ChannelMessageBuffer(100);
+        buffer.add(msg(null, "no-id"));
+        assertThat(buffer.isEmpty()).isTrue();
+    }
+
+    private Message msg(Long id, String content) {
+        return new Message(id, channelId, "agent-1", MessageType.STATUS,
+                content, null, null, null, null,
+                null, null, null, null, Instant.now(),
+                null, null);
     }
 }
 ```
 
-- [ ] **Step 6: Run tests**
+- [ ] **Step 5: Run tests**
 
-Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl cache`
-Expected: All 10 tests PASS
+Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl cache -Dtest=ChannelMessageBufferTest`
+Expected: All 7 tests PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add cache/ pom.xml
 git commit -m "feat(#475): add casehub-qhorus-cache module with ChannelMessageBuffer
 
-Per-channel ring buffer backed by ConcurrentSkipListMap. Supports
-afterId pagination, in-memory filtering via MessageQuery.matches(),
-bounded eviction, and unbounded mode for full sync.
+Per-channel ring buffer using ConcurrentSkipListMap. Bounded (shallow)
+and unbounded (full) modes. Supports afterId pagination and in-memory
+MessageQuery filtering.
 
 Refs #475"
 ```
 
-### Task 2: CachingMessageStore decorator
+---
+
+## Batch 2: CachingMessageStore — the MessageStore decorator
+
+After this batch: the cache decorator intercepts MessageStore reads and
+writes. Local writes populate the cache inline after delegate.put().
+Cache hits served from ring buffers. Cache misses fall through to JPA.
+Shallow mode fully functional.
+
+### Task 2: CacheConfig + CachingMessageStore + tests
 
 **Files:**
+- Create: `cache/src/main/java/io/casehub/qhorus/cache/CacheConfig.java`
 - Create: `cache/src/main/java/io/casehub/qhorus/cache/CachingMessageStore.java`
-- Test: `cache/src/test/java/io/casehub/qhorus/cache/CachingMessageStoreTest.java`
+- Create: `cache/src/test/java/io/casehub/qhorus/cache/CachingMessageStoreTest.java`
 
 **Interfaces:**
-- Consumes: `MessageStore` (delegate), `ChannelMessageBuffer` (from Task 1), `CacheConfig` (from Task 1)
+- Consumes: `MessageStore` (api/store/), `ChannelMessageBuffer` (Task 1), `MessageQuery` (api/store/query/)
 - Produces:
-  - `CachingMessageStore implements MessageStore` — CDI-free POJO with `MessageStore delegate` constructor arg
-  - `addToBuffer(UUID channelId, Message msg)` — public, used by FullSyncService later
-  - `invalidateAll()` — public, for test cleanup
-  - `channelsCached() → int`, `messagesCached() → long` — stats for health check
+  - `CachingMessageStore` implements `MessageStore` — decorator with cache
+  - `CacheConfig` — `@ConfigMapping(prefix = "casehub.qhorus.cache")`
+  - `void addToBuffer(UUID channelId, Message msg)` — public for FullSyncService
+  - `long cachedMessageCount()` — total messages across all buffers
+  - `int cachedChannelCount()` — number of cached channels
+  - `void invalidateAll()` — clear cache (test utility)
 
-- [ ] **Step 1: Write CachingMessageStore**
+- [ ] **Step 1: Write CacheConfig**
+
+Create `cache/src/main/java/io/casehub/qhorus/cache/CacheConfig.java`:
+
+```java
+package io.casehub.qhorus.cache;
+
+import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithDefault;
+
+import java.time.Duration;
+
+@ConfigMapping(prefix = "casehub.qhorus.cache")
+public interface CacheConfig {
+
+    @WithDefault("true")
+    boolean enabled();
+
+    @WithDefault("shallow")
+    String mode();
+
+    @WithDefault("1000")
+    int maxChannels();
+
+    @WithDefault("200")
+    int maxMessagesPerChannel();
+
+    @WithDefault("1000")
+    int fullSyncBatchSize();
+
+    @WithDefault("5s")
+    Duration fullSyncInterval();
+}
+```
+
+- [ ] **Step 2: Write CachingMessageStore**
 
 Create `cache/src/main/java/io/casehub/qhorus/cache/CachingMessageStore.java`:
 
@@ -427,22 +437,32 @@ import java.util.UUID;
 
 public class CachingMessageStore implements MessageStore {
 
+    private static final org.jboss.logging.Logger LOG =
+            org.jboss.logging.Logger.getLogger(CachingMessageStore.class);
+
     private final MessageStore delegate;
     private final Cache<UUID, ChannelMessageBuffer> channelCache;
     private final int maxMessagesPerChannel;
     private final boolean fullMode;
 
-    public CachingMessageStore(MessageStore delegate, int maxChannels,
-                               int maxMessagesPerChannel, boolean fullMode) {
+    public CachingMessageStore(MessageStore delegate, CacheConfig config) {
+        this.delegate = delegate;
+        this.maxMessagesPerChannel = config.maxMessagesPerChannel();
+        this.fullMode = "full".equalsIgnoreCase(config.mode());
+        this.channelCache = Caffeine.newBuilder()
+                .maximumSize(config.maxChannels())
+                .build();
+    }
+
+    CachingMessageStore(MessageStore delegate, int maxChannels,
+                        int maxMessagesPerChannel, boolean fullMode) {
         this.delegate = delegate;
         this.maxMessagesPerChannel = maxMessagesPerChannel;
         this.fullMode = fullMode;
         this.channelCache = Caffeine.newBuilder()
-                .maximumSize(fullMode ? Long.MAX_VALUE : maxChannels)
+                .maximumSize(maxChannels)
                 .build();
     }
-
-    // ── Write path: delegate then populate cache ─────────────
 
     @Override
     public Message put(Message message) {
@@ -453,12 +473,12 @@ public class CachingMessageStore implements MessageStore {
         return persisted;
     }
 
-    // ── Read path: cache first, fall through on miss ─────────
-
     @Override
     public Optional<Message> find(Long id) {
-        // No efficient way to find by ID across all channel buffers —
-        // fall through to delegate, then populate if channel known
+        for (var buffer : channelCache.asMap().values()) {
+            var found = buffer.get(id);
+            if (found.isPresent()) return found;
+        }
         Optional<Message> result = delegate.find(id);
         result.ifPresent(msg -> {
             if (msg.channelId() != null) {
@@ -476,7 +496,7 @@ public class CachingMessageStore implements MessageStore {
         ChannelMessageBuffer buffer = channelCache.getIfPresent(query.channelId());
         if (buffer != null && buffer.covers(query.afterId())) {
             List<Message> cached = buffer.query(query);
-            if (!cached.isEmpty() || buffer.covers(query.afterId())) {
+            if (!cached.isEmpty()) {
                 return cached;
             }
         }
@@ -484,23 +504,19 @@ public class CachingMessageStore implements MessageStore {
     }
 
     @Override
-    public Optional<Message> findLastMessage(UUID channelId) {
-        ChannelMessageBuffer buffer = channelCache.getIfPresent(channelId);
-        if (buffer != null && buffer.size() > 0) {
-            Long lastId = buffer.lastId();
-            if (lastId != null) {
-                return buffer.findById(lastId);
-            }
-        }
-        return delegate.findLastMessage(channelId);
-    }
-
-    @Override
     public List<MessageView> findRecent(UUID channelId, int limit) {
         return delegate.findRecent(channelId, limit);
     }
 
-    // ── Pass-through methods ─────────────────────────────────
+    @Override
+    public Optional<Message> findLastMessage(UUID channelId) {
+        return delegate.findLastMessage(channelId);
+    }
+
+    @Override
+    public Optional<Message> findLastMessageForUpdate(UUID channelId) {
+        return delegate.findLastMessageForUpdate(channelId);
+    }
 
     @Override
     public int countByChannel(UUID channelId) {
@@ -520,11 +536,6 @@ public class CachingMessageStore implements MessageStore {
     @Override
     public List<String> distinctSendersByChannel(UUID channelId, MessageType excludedType) {
         return delegate.distinctSendersByChannel(channelId, excludedType);
-    }
-
-    @Override
-    public Optional<Message> findLastMessageForUpdate(UUID channelId) {
-        return delegate.findLastMessageForUpdate(channelId);
     }
 
     @Override
@@ -562,36 +573,29 @@ public class CachingMessageStore implements MessageStore {
         return delegate.updateChannelId(sourceChannelId, topic, targetChannelId);
     }
 
-    // ── Cache management ─────────────────────────────────────
-
     public void addToBuffer(UUID channelId, Message msg) {
-        int bufSize = fullMode ? 0 : maxMessagesPerChannel;
         ChannelMessageBuffer buffer = channelCache.get(channelId,
-                k -> new ChannelMessageBuffer(bufSize));
+                id -> new ChannelMessageBuffer(fullMode ? 0 : maxMessagesPerChannel));
         buffer.add(msg);
+    }
+
+    public long cachedMessageCount() {
+        return channelCache.asMap().values().stream()
+                .mapToLong(ChannelMessageBuffer::size)
+                .sum();
+    }
+
+    public int cachedChannelCount() {
+        return (int) channelCache.estimatedSize();
     }
 
     public void invalidateAll() {
         channelCache.invalidateAll();
     }
-
-    public int channelsCached() {
-        channelCache.cleanUp();
-        return (int) channelCache.estimatedSize();
-    }
-
-    public long messagesCached() {
-        channelCache.cleanUp();
-        long total = 0;
-        for (ChannelMessageBuffer buf : channelCache.asMap().values()) {
-            total += buf.size();
-        }
-        return total;
-    }
 }
 ```
 
-- [ ] **Step 2: Write CachingMessageStoreTest**
+- [ ] **Step 3: Write CachingMessageStoreTest**
 
 Create `cache/src/test/java/io/casehub/qhorus/cache/CachingMessageStoreTest.java`:
 
@@ -619,12 +623,7 @@ class CachingMessageStoreTest {
 
     private MessageStore delegate;
     private CachingMessageStore cache;
-    private static final UUID CH = UUID.randomUUID();
-
-    private static Message msg(long id, UUID channelId) {
-        return new Message(id, channelId, "agent", MessageType.STATUS, null, null,
-                "content", null, null, null, 0, null, null, null, null, null, null, 0, Instant.now());
-    }
+    private final UUID channelId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -633,168 +632,282 @@ class CachingMessageStoreTest {
     }
 
     @Test
-    void putDelegatesToStoreAndPopulatesCache() {
-        Message input = msg(0, CH);
-        Message persisted = msg(1, CH);
-        when(delegate.put(input)).thenReturn(persisted);
+    void putPopulatesCacheAndDelegates() {
+        Message input = msg(null, "hello");
+        Message persisted = msg(1L, "hello");
+        when(delegate.put(any())).thenReturn(persisted);
 
         Message result = cache.put(input);
-
         assertThat(result.id()).isEqualTo(1L);
         verify(delegate).put(input);
 
-        // Subsequent scan should hit cache, not delegate
-        MessageQuery q = MessageQuery.forChannel(CH);
+        var q = MessageQuery.forChannel(channelId);
         List<Message> cached = cache.scan(q);
         assertThat(cached).hasSize(1);
+        assertThat(cached.get(0).content()).isEqualTo("hello");
         verify(delegate, never()).scan(any());
     }
 
     @Test
     void scanFallsThroughOnCacheMiss() {
-        UUID otherCh = UUID.randomUUID();
-        MessageQuery q = MessageQuery.forChannel(otherCh);
-        when(delegate.scan(q)).thenReturn(List.of(msg(1, otherCh)));
+        Message m = msg(1L, "from-db");
+        when(delegate.scan(any())).thenReturn(List.of(m));
 
-        List<Message> result = cache.scan(q);
-
-        assertThat(result).hasSize(1);
+        var q = MessageQuery.forChannel(channelId);
+        List<Message> results = cache.scan(q);
+        assertThat(results).hasSize(1);
         verify(delegate).scan(q);
     }
 
     @Test
-    void scanFallsThroughWhenAfterIdBeforeBufferRange() {
-        Message persisted = msg(100, CH);
+    void scanServesFromCacheOnHit() {
+        Message persisted = msg(1L, "cached");
         when(delegate.put(any())).thenReturn(persisted);
-        cache.put(msg(0, CH));
+        cache.put(msg(null, "cached"));
 
-        // Request messages after ID 5 — before the buffer's first entry (100)
-        MessageQuery q = MessageQuery.poll(CH, 5L, 50);
-        when(delegate.scan(q)).thenReturn(List.of(msg(10, CH), msg(50, CH)));
-
-        List<Message> result = cache.scan(q);
-        verify(delegate).scan(q);
-        assertThat(result).hasSize(2);
-    }
-
-    @Test
-    void scanServesFromCacheWhenInRange() {
-        // Pre-populate cache
-        cache.addToBuffer(CH, msg(10, CH));
-        cache.addToBuffer(CH, msg(20, CH));
-        cache.addToBuffer(CH, msg(30, CH));
-
-        MessageQuery q = MessageQuery.poll(CH, 10L, 50);
-        List<Message> result = cache.scan(q);
-
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).id()).isEqualTo(20L);
-        assertThat(result.get(1).id()).isEqualTo(30L);
+        var q = MessageQuery.forChannel(channelId);
+        List<Message> results = cache.scan(q);
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).content()).isEqualTo("cached");
         verify(delegate, never()).scan(any());
     }
 
     @Test
-    void findPopulatesCacheOnDelegateHit() {
-        Message m = msg(42, CH);
-        when(delegate.find(42L)).thenReturn(Optional.of(m));
+    void scanFallsThroughWhenAfterIdBeforeBuffer() {
+        Message persisted = msg(10L, "msg");
+        when(delegate.put(any())).thenReturn(persisted);
+        cache.put(msg(null, "msg"));
 
-        Optional<Message> result = cache.find(42L);
-
-        assertThat(result).isPresent();
-        verify(delegate).find(42L);
-
-        // Now the message should be in the cache buffer
-        assertThat(cache.messagesCached()).isEqualTo(1);
-    }
-
-    @Test
-    void deleteAllInvalidatesChannelCache() {
-        cache.addToBuffer(CH, msg(1, CH));
-        assertThat(cache.channelsCached()).isEqualTo(1);
-
-        cache.deleteAll(CH);
-
-        assertThat(cache.channelsCached()).isZero();
-        verify(delegate).deleteAll(CH);
-    }
-
-    @Test
-    void scanWithNullChannelIdFallsThrough() {
-        MessageQuery q = MessageQuery.recent(10);
+        var q = MessageQuery.poll(channelId, 2L, 50);
         when(delegate.scan(q)).thenReturn(List.of());
-
         cache.scan(q);
         verify(delegate).scan(q);
     }
 
     @Test
-    void invalidateAllClearsEverything() {
-        cache.addToBuffer(CH, msg(1, CH));
-        cache.addToBuffer(UUID.randomUUID(), msg(2, UUID.randomUUID()));
+    void findChecksBufferFirst() {
+        Message persisted = msg(42L, "cached");
+        when(delegate.put(any())).thenReturn(persisted);
+        cache.put(msg(null, "cached"));
 
-        cache.invalidateAll();
-
-        assertThat(cache.channelsCached()).isZero();
-    }
-
-    @Test
-    void countMethodsPassThrough() {
-        when(delegate.countByChannel(CH)).thenReturn(42);
-        assertThat(cache.countByChannel(CH)).isEqualTo(42);
-        verify(delegate).countByChannel(CH);
-    }
-
-    @Test
-    void findLastMessageServesFromCache() {
-        cache.addToBuffer(CH, msg(10, CH));
-        cache.addToBuffer(CH, msg(20, CH));
-
-        Optional<Message> result = cache.findLastMessage(CH);
+        Optional<Message> result = cache.find(42L);
         assertThat(result).isPresent();
-        assertThat(result.get().id()).isEqualTo(20L);
-        verify(delegate, never()).findLastMessage(any());
+        assertThat(result.get().content()).isEqualTo("cached");
+        verify(delegate, never()).find(any());
+    }
+
+    @Test
+    void findFallsThroughAndPopulatesCache() {
+        Message fromDb = msg(99L, "from-db");
+        when(delegate.find(99L)).thenReturn(Optional.of(fromDb));
+
+        Optional<Message> result = cache.find(99L);
+        assertThat(result).isPresent();
+        verify(delegate).find(99L);
+
+        reset(delegate);
+        Optional<Message> cached = cache.find(99L);
+        assertThat(cached).isPresent();
+        verify(delegate, never()).find(any());
+    }
+
+    @Test
+    void deleteAllInvalidatesChannel() {
+        Message persisted = msg(1L, "cached");
+        when(delegate.put(any())).thenReturn(persisted);
+        cache.put(msg(null, "cached"));
+
+        cache.deleteAll(channelId);
+        verify(delegate).deleteAll(channelId);
+
+        var q = MessageQuery.forChannel(channelId);
+        when(delegate.scan(q)).thenReturn(List.of());
+        cache.scan(q);
+        verify(delegate).scan(q);
+    }
+
+    @Test
+    void countPassesThrough() {
+        when(delegate.countByChannel(channelId)).thenReturn(42);
+        assertThat(cache.countByChannel(channelId)).isEqualTo(42);
+        verify(delegate).countByChannel(channelId);
+    }
+
+    @Test
+    void scanWithoutChannelIdPassesThrough() {
+        var q = MessageQuery.recent(10);
+        when(delegate.scan(q)).thenReturn(List.of());
+        cache.scan(q);
+        verify(delegate).scan(q);
+    }
+
+    private Message msg(Long id, String content) {
+        return new Message(id, channelId, "agent-1", MessageType.STATUS,
+                content, null, null, null, null,
+                null, null, null, null, Instant.now(),
+                null, null);
     }
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 4: Run tests**
 
-Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl cache`
-Expected: All 10 tests PASS
+Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl cache -Dtest=CachingMessageStoreTest`
+Expected: All 9 tests PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add cache/
-git commit -m "feat(#475): add CachingMessageStore — MessageStore decorator with cache
+git commit -m "feat(#475): add CachingMessageStore — MessageStore decorator with ring buffers
 
-Caffeine-backed per-channel ring buffers. Cache hit path for scan(),
-find(), findLastMessage(). Write-through on put(). Pass-through for
-aggregate queries. Invalidation on delete/update operations.
+CacheConfig for shallow/full mode configuration. CachingMessageStore
+decorates MessageStore: scan/find check cache first, put populates cache,
+delete invalidates. Count and aggregate methods pass through to JPA.
 
 Refs #475"
 ```
 
 ---
 
-## Batch 2: Full mode background sync + mesh integration
+## Batch 3: CachePopulationObserver + FullSyncService + health check
 
-After this batch: the full sync service exists with tests, the mesh module
-includes the cache dependency, and the full build is green.
+After this batch: remote writes populate the cache via MessageObserver
+(CLUSTER scope). Full mode background sync works. Health check reports
+cache stats and sync status.
 
-### Task 3: FullSyncService
+### Task 3: CachePopulationObserver + FullSyncService + CacheHealthCheck
 
 **Files:**
+- Create: `cache/src/main/java/io/casehub/qhorus/cache/CachePopulationObserver.java`
 - Create: `cache/src/main/java/io/casehub/qhorus/cache/FullSyncService.java`
-- Test: `cache/src/test/java/io/casehub/qhorus/cache/FullSyncServiceTest.java`
+- Create: `cache/src/main/java/io/casehub/qhorus/cache/CacheHealthCheck.java`
+- Create: `cache/src/test/java/io/casehub/qhorus/cache/CachePopulationObserverTest.java`
+- Create: `cache/src/test/java/io/casehub/qhorus/cache/FullSyncServiceTest.java`
 
 **Interfaces:**
-- Consumes: `MessageStore` (delegate, bypassing cache), `ChannelStore.listAll()` (from `casehub-qhorus-api`), `CachingMessageStore.addToBuffer()` (from Task 2), `CacheConfig` (from Task 1)
+- Consumes: `MessageObserver` (api/gateway/), `MessageReceivedEvent` (api/gateway/), `CachingMessageStore` (Task 2), `MessageStore` (api/store/), `ChannelService` (runtime/channel/)
 - Produces:
-  - `FullSyncService` — `syncBatch()` method (called by scheduler or test), `status() → SyncStatus`, `channelsSynced() → int`, `channelsTotal() → int`
-  - `FullSyncService.SyncStatus` — enum `SYNCING`, `READY`, `DISABLED`
+  - `CachePopulationObserver` — `MessageObserver` (CLUSTER), loads full `Message` from JPA on event
+  - `FullSyncService` — `@Scheduled` background sync for full mode
+  - `FullSyncService.SyncStatus` — enum `DISABLED`, `SYNCING`, `READY`
+  - `CacheHealthCheck` — health data: mode, depth_status, channels_cached, messages_cached
 
-- [ ] **Step 1: Write FullSyncService**
+- [ ] **Step 1: Write CachePopulationObserver**
+
+Create `cache/src/main/java/io/casehub/qhorus/cache/CachePopulationObserver.java`:
+
+```java
+package io.casehub.qhorus.cache;
+
+import io.casehub.qhorus.api.gateway.MessageObserver;
+import io.casehub.qhorus.api.gateway.MessageReceivedEvent;
+import io.casehub.qhorus.api.message.Message;
+import io.casehub.qhorus.api.store.MessageStore;
+
+import java.util.Optional;
+
+public class CachePopulationObserver implements MessageObserver {
+
+    private static final org.jboss.logging.Logger LOG =
+            org.jboss.logging.Logger.getLogger(CachePopulationObserver.class);
+
+    private final CachingMessageStore cachingStore;
+    private final MessageStore jpaStore;
+
+    public CachePopulationObserver(CachingMessageStore cachingStore, MessageStore jpaStore) {
+        this.cachingStore = cachingStore;
+        this.jpaStore = jpaStore;
+    }
+
+    @Override
+    public void onMessage(MessageReceivedEvent event) {
+        if (event.messageId() == null || event.channelId() == null) return;
+
+        Optional<Message> existing = cachingStore.find(event.messageId());
+        if (existing.isEmpty()) {
+            Optional<Message> fromDb = jpaStore.find(event.messageId());
+            fromDb.ifPresent(msg -> cachingStore.addToBuffer(event.channelId(), msg));
+        }
+    }
+
+    @Override
+    public Scope scope() {
+        return Scope.CLUSTER;
+    }
+}
+```
+
+- [ ] **Step 2: Write CachePopulationObserverTest**
+
+Create `cache/src/test/java/io/casehub/qhorus/cache/CachePopulationObserverTest.java`:
+
+```java
+package io.casehub.qhorus.cache;
+
+import io.casehub.qhorus.api.gateway.MessageObserver;
+import io.casehub.qhorus.api.gateway.MessageReceivedEvent;
+import io.casehub.qhorus.api.message.Message;
+import io.casehub.qhorus.api.message.MessageType;
+import io.casehub.qhorus.api.store.MessageStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+
+class CachePopulationObserverTest {
+
+    private MessageStore jpaStore;
+    private CachingMessageStore cachingStore;
+    private CachePopulationObserver observer;
+    private final UUID channelId = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        jpaStore = Mockito.mock(MessageStore.class);
+        MessageStore delegate = Mockito.mock(MessageStore.class);
+        cachingStore = new CachingMessageStore(delegate, 100, 200, false);
+        observer = new CachePopulationObserver(cachingStore, jpaStore);
+    }
+
+    @Test
+    void populatesCacheFromRemoteWrite() {
+        Message fromDb = new Message(42L, channelId, "remote-agent", MessageType.STATUS,
+                "remote msg", null, null, null, null,
+                null, null, null, null, Instant.now(), null, null);
+        when(jpaStore.find(42L)).thenReturn(Optional.of(fromDb));
+
+        var event = new MessageReceivedEvent(42L, "test-channel", channelId,
+                "default", MessageType.STATUS, "remote-agent", null, null,
+                null, Instant.now(), "remote msg", null, null);
+        observer.onMessage(event);
+
+        assertThat(cachingStore.cachedChannelCount()).isGreaterThan(0);
+    }
+
+    @Test
+    void scopeIsCluster() {
+        assertThat(observer.scope()).isEqualTo(MessageObserver.Scope.CLUSTER);
+    }
+
+    @Test
+    void ignoresNullMessageId() {
+        var event = new MessageReceivedEvent(null, "ch", channelId,
+                "default", MessageType.STATUS, "agent", null, null,
+                null, Instant.now(), "msg", null, null);
+        observer.onMessage(event);
+        verify(jpaStore, never()).find(any());
+    }
+}
+```
+
+- [ ] **Step 3: Write FullSyncService**
 
 Create `cache/src/main/java/io/casehub/qhorus/cache/FullSyncService.java`:
 
@@ -802,10 +915,10 @@ Create `cache/src/main/java/io/casehub/qhorus/cache/FullSyncService.java`:
 package io.casehub.qhorus.cache;
 
 import io.casehub.qhorus.api.message.Message;
-import io.casehub.qhorus.api.store.ChannelStore;
 import io.casehub.qhorus.api.store.MessageStore;
 import io.casehub.qhorus.api.store.query.MessageQuery;
-import io.casehub.qhorus.api.channel.ChannelDetail;
+import io.casehub.qhorus.runtime.channel.Channel;
+import io.casehub.qhorus.runtime.channel.ChannelService;
 
 import java.util.List;
 import java.util.Map;
@@ -817,44 +930,39 @@ public class FullSyncService {
     private static final org.jboss.logging.Logger LOG =
             org.jboss.logging.Logger.getLogger(FullSyncService.class);
 
-    public enum SyncStatus { SYNCING, READY, DISABLED }
+    public enum SyncStatus { DISABLED, SYNCING, READY }
 
     private final MessageStore jpaStore;
-    private final ChannelStore channelStore;
+    private final ChannelService channelService;
     private final CachingMessageStore cachingStore;
     private final int batchSize;
-
     private volatile SyncStatus status;
     private final Map<UUID, Long> cursors = new ConcurrentHashMap<>();
-    private volatile int channelsTotal;
 
-    public FullSyncService(MessageStore jpaStore, ChannelStore channelStore,
-                           CachingMessageStore cachingStore, int batchSize,
-                           boolean fullMode) {
+    public FullSyncService(MessageStore jpaStore, ChannelService channelService,
+                           CachingMessageStore cachingStore, CacheConfig config) {
         this.jpaStore = jpaStore;
-        this.channelStore = channelStore;
+        this.channelService = channelService;
         this.cachingStore = cachingStore;
-        this.batchSize = batchSize;
-        this.status = fullMode ? SyncStatus.SYNCING : SyncStatus.DISABLED;
+        this.batchSize = config.fullSyncBatchSize();
+        this.status = "full".equalsIgnoreCase(config.mode())
+                ? SyncStatus.SYNCING : SyncStatus.DISABLED;
     }
 
     public void syncBatch() {
         if (status != SyncStatus.SYNCING) return;
 
-        List<UUID> channelIds = channelStore.listAllIds();
-        channelsTotal = channelIds.size();
-
+        List<Channel> channels = channelService.listAll();
         boolean allDone = true;
-        for (UUID chId : channelIds) {
-            Long cursor = cursors.getOrDefault(chId, 0L);
-            MessageQuery q = MessageQuery.poll(chId, cursor, batchSize);
+
+        for (Channel ch : channels) {
+            Long cursor = cursors.getOrDefault(ch.id(), 0L);
+            MessageQuery q = MessageQuery.poll(ch.id(), cursor, batchSize);
             List<Message> batch = jpaStore.scan(q);
 
             if (!batch.isEmpty()) {
-                for (Message msg : batch) {
-                    cachingStore.addToBuffer(chId, msg);
-                }
-                cursors.put(chId, batch.getLast().id());
+                batch.forEach(msg -> cachingStore.addToBuffer(ch.id(), msg));
+                cursors.put(ch.id(), batch.getLast().id());
                 allDone = false;
                 return;
             }
@@ -862,7 +970,7 @@ public class FullSyncService {
 
         if (allDone) {
             status = SyncStatus.READY;
-            LOG.infof("Full sync complete — %d channels cached", channelIds.size());
+            LOG.info("Full sync complete — all channels cached");
         }
     }
 
@@ -873,19 +981,10 @@ public class FullSyncService {
     public int channelsSynced() {
         return cursors.size();
     }
-
-    public int channelsTotal() {
-        return channelsTotal;
-    }
 }
 ```
 
-Note: `ChannelStore.listAllIds()` may not exist yet — if not, use
-`channelStore.listAll()` and map to IDs. The plan assumes a `listAllIds()`
-method exists or can be derived from `listAll()` by extracting
-`channel.id()`. Check the interface at implementation time and adjust.
-
-- [ ] **Step 2: Write FullSyncServiceTest**
+- [ ] **Step 4: Write FullSyncServiceTest**
 
 Create `cache/src/test/java/io/casehub/qhorus/cache/FullSyncServiceTest.java`:
 
@@ -894,11 +993,13 @@ package io.casehub.qhorus.cache;
 
 import io.casehub.qhorus.api.message.Message;
 import io.casehub.qhorus.api.message.MessageType;
-import io.casehub.qhorus.api.store.ChannelStore;
 import io.casehub.qhorus.api.store.MessageStore;
 import io.casehub.qhorus.api.store.query.MessageQuery;
+import io.casehub.qhorus.runtime.channel.Channel;
+import io.casehub.qhorus.runtime.channel.ChannelService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.time.Instant;
 import java.util.List;
@@ -906,114 +1007,167 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
 
 class FullSyncServiceTest {
 
     private MessageStore jpaStore;
-    private ChannelStore channelStore;
+    private ChannelService channelService;
     private CachingMessageStore cachingStore;
     private FullSyncService syncService;
-
-    private static final UUID CH1 = UUID.randomUUID();
-    private static final UUID CH2 = UUID.randomUUID();
-
-    private static Message msg(long id, UUID channelId) {
-        return new Message(id, channelId, "agent", MessageType.STATUS, null, null,
-                "content", null, null, null, 0, null, null, null, null, null, null, 0, Instant.now());
-    }
+    private final UUID channelId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        jpaStore = mock(MessageStore.class);
-        channelStore = mock(ChannelStore.class);
-        MessageStore mockDelegate = mock(MessageStore.class);
-        cachingStore = new CachingMessageStore(mockDelegate, 100, 0, true);
-        syncService = new FullSyncService(jpaStore, channelStore, cachingStore, 2, true);
+        jpaStore = Mockito.mock(MessageStore.class);
+        channelService = Mockito.mock(ChannelService.class);
+        MessageStore delegate = Mockito.mock(MessageStore.class);
+        cachingStore = new CachingMessageStore(delegate, 100, 0, true);
+        CacheConfig config = mockConfig("full", 1000, 0, 100);
+        syncService = new FullSyncService(jpaStore, channelService, cachingStore, config);
     }
 
     @Test
-    void syncBatchLoadsOneChannelPerTick() {
-        when(channelStore.listAllIds()).thenReturn(List.of(CH1, CH2));
+    void syncsBatchAndPopulatesCache() {
+        Channel ch = mockChannel(channelId);
+        when(channelService.listAll()).thenReturn(List.of(ch));
+
+        Message m1 = msg(1L, "first");
+        Message m2 = msg(2L, "second");
         when(jpaStore.scan(any(MessageQuery.class)))
-                .thenReturn(List.of(msg(1, CH1), msg(2, CH1)))
+                .thenReturn(List.of(m1, m2))
                 .thenReturn(List.of());
 
         syncService.syncBatch();
-
         assertThat(syncService.status()).isEqualTo(FullSyncService.SyncStatus.SYNCING);
-        assertThat(syncService.channelsSynced()).isEqualTo(1);
-        assertThat(cachingStore.messagesCached()).isEqualTo(2);
+        assertThat(cachingStore.cachedMessageCount()).isEqualTo(2);
+
+        syncService.syncBatch();
+        assertThat(syncService.status()).isEqualTo(FullSyncService.SyncStatus.READY);
     }
 
     @Test
-    void syncCompletesWhenAllChannelsDrained() {
-        when(channelStore.listAllIds()).thenReturn(List.of(CH1));
+    void disabledInShallowMode() {
+        CacheConfig config = mockConfig("shallow", 1000, 200, 100);
+        var service = new FullSyncService(jpaStore, channelService, cachingStore, config);
+        assertThat(service.status()).isEqualTo(FullSyncService.SyncStatus.DISABLED);
+    }
+
+    @Test
+    void syncsOneChannelBatchPerTick() {
+        Channel ch1 = mockChannel(UUID.randomUUID());
+        Channel ch2 = mockChannel(UUID.randomUUID());
+        when(channelService.listAll()).thenReturn(List.of(ch1, ch2));
+
         when(jpaStore.scan(any(MessageQuery.class)))
-                .thenReturn(List.of(msg(1, CH1)))
+                .thenReturn(List.of(msg(1L, "ch1-msg")))
                 .thenReturn(List.of());
 
         syncService.syncBatch();
-        syncService.syncBatch();
-
-        assertThat(syncService.status()).isEqualTo(FullSyncService.SyncStatus.READY);
+        assertThat(syncService.channelsSynced()).isEqualTo(1);
     }
 
-    @Test
-    void disabledModeSkipsSyncBatch() {
-        syncService = new FullSyncService(jpaStore, channelStore, cachingStore, 2, false);
-
-        syncService.syncBatch();
-
-        assertThat(syncService.status()).isEqualTo(FullSyncService.SyncStatus.DISABLED);
-        verifyNoInteractions(channelStore);
+    private Channel mockChannel(UUID id) {
+        Channel ch = Mockito.mock(Channel.class);
+        when(ch.id()).thenReturn(id);
+        return ch;
     }
 
-    @Test
-    void emptyDatabaseCompletesImmediately() {
-        when(channelStore.listAllIds()).thenReturn(List.of());
+    private Message msg(Long id, String content) {
+        return new Message(id, channelId, "agent", MessageType.STATUS,
+                content, null, null, null, null,
+                null, null, null, null, Instant.now(), null, null);
+    }
 
-        syncService.syncBatch();
-
-        assertThat(syncService.status()).isEqualTo(FullSyncService.SyncStatus.READY);
+    private CacheConfig mockConfig(String mode, int maxChannels,
+                                    int maxMsgsPerChannel, int batchSize) {
+        CacheConfig config = Mockito.mock(CacheConfig.class);
+        when(config.mode()).thenReturn(mode);
+        when(config.maxChannels()).thenReturn(maxChannels);
+        when(config.maxMessagesPerChannel()).thenReturn(maxMsgsPerChannel);
+        when(config.fullSyncBatchSize()).thenReturn(batchSize);
+        when(config.enabled()).thenReturn(true);
+        return config;
     }
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 5: Write CacheHealthCheck**
+
+Create `cache/src/main/java/io/casehub/qhorus/cache/CacheHealthCheck.java`:
+
+```java
+package io.casehub.qhorus.cache;
+
+import java.util.Map;
+
+public class CacheHealthCheck {
+
+    private final CachingMessageStore cachingStore;
+    private final FullSyncService syncService;
+    private final CacheConfig config;
+
+    public CacheHealthCheck(CachingMessageStore cachingStore,
+                            FullSyncService syncService, CacheConfig config) {
+        this.cachingStore = cachingStore;
+        this.syncService = syncService;
+        this.config = config;
+    }
+
+    public Map<String, Object> health() {
+        return Map.of(
+                "enabled", config.enabled(),
+                "mode", config.mode(),
+                "depth_status", syncService.status().name().toLowerCase(),
+                "channels_cached", cachingStore.cachedChannelCount(),
+                "messages_cached", cachingStore.cachedMessageCount()
+        );
+    }
+}
+```
+
+- [ ] **Step 6: Run all cache tests**
 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test -pl cache`
-Expected: All tests PASS (buffer + store + sync)
+Expected: All tests PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add cache/
-git commit -m "feat(#475): add FullSyncService — background sync for full mode
+git commit -m "feat(#475): add CachePopulationObserver, FullSyncService, and health check
 
-Batch-loads messages from PostgreSQL ordered by channel activity.
-One batch per tick. Transitions from SYNCING to READY when complete.
-DISABLED when mode=shallow.
+CachePopulationObserver (CLUSTER scope MessageObserver) populates the
+cache from remote writes via pg_notify path. FullSyncService batch-loads
+channel history for full mode. CacheHealthCheck reports stats and status.
 
 Refs #475"
 ```
 
-### Task 4: Mesh module integration + full build
+---
+
+## Batch 4: Mesh integration + RelayConfig cleanup
+
+After this batch: the cache module is wired into the mesh relay.
+`RelayConfig.depth()` removed. Full build green.
+
+### Task 4: Mesh wiring + RelayConfig cleanup
 
 **Files:**
 - Modify: `mesh/pom.xml` — add `casehub-qhorus-cache` dependency
-- Modify: `mesh/src/main/resources/application.properties` — add cache config with env var
+- Modify: `mesh/src/main/resources/application.properties` — add cache config
+- Modify: `cluster/src/main/java/io/casehub/qhorus/cluster/RelayConfig.java` — remove `depth()`
+- Modify: `cluster/src/test/` — update any tests referencing `depth()`
 
 **Interfaces:**
-- Consumes: `casehub-qhorus-cache` module (classpath activation)
-- Produces: Cache available in mesh relay via classpath, mode configurable via `CASEHUB_QHORUS_CACHE_MODE` env var
+- Consumes: `CacheConfig` (Task 2), `CachingMessageStore` (Task 2)
+- Produces: Working mesh relay with caching activated via env vars
 
 - [ ] **Step 1: Add cache dependency to mesh pom.xml**
 
-Add to `mesh/pom.xml` after the cluster dependency:
+Add to `mesh/pom.xml` dependencies after `casehub-qhorus-cluster`:
 
 ```xml
-    <!-- In-memory message cache — shallow and full modes -->
     <dependency>
       <groupId>io.casehub</groupId>
       <artifactId>casehub-qhorus-cache</artifactId>
@@ -1023,27 +1177,38 @@ Add to `mesh/pom.xml` after the cluster dependency:
 
 - [ ] **Step 2: Add cache config to mesh application.properties**
 
-Add after the stale instance cleanup line:
+Add to `mesh/src/main/resources/application.properties`:
 
 ```properties
-
-# ── Message cache ─────────────────────────────────────────
+# ── Cache config (shallow default) ────────────────────────
 casehub.qhorus.cache.mode=${CASEHUB_QHORUS_CACHE_MODE:shallow}
+casehub.qhorus.cache.max-channels=${CASEHUB_QHORUS_CACHE_MAX_CHANNELS:1000}
+casehub.qhorus.cache.max-messages-per-channel=${CASEHUB_QHORUS_CACHE_MAX_MESSAGES:200}
 ```
 
-- [ ] **Step 3: Run full build**
+- [ ] **Step 3: Remove depth() from RelayConfig**
+
+Remove the `depth()` method and `@WithDefault("shallow")` from
+`cluster/src/main/java/io/casehub/qhorus/cluster/RelayConfig.java`.
+
+- [ ] **Step 4: Fix compilation errors from depth() removal**
+
+Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn test-compile -pl cluster`
+Expected: Compilation succeeds. Fix any references to `depth()`.
+
+- [ ] **Step 5: Run full build**
 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install`
-Expected: BUILD SUCCESS — all modules compile, all tests pass
+Expected: BUILD SUCCESS — all modules compile and pass
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add mesh/
-git commit -m "feat(#475): wire cache module into mesh relay
+git add mesh/ cluster/ cache/
+git commit -m "feat(#475): wire cache module into mesh, remove RelayConfig.depth()
 
-Cache activated by classpath presence. Mode configurable via
-CASEHUB_QHORUS_CACHE_MODE env var (default: shallow).
+Cache module activated via CASEHUB_QHORUS_CACHE_MODE env var (default:
+shallow). RelayConfig.depth() removed — cache module owns depth config.
 
 Refs #475"
 ```
@@ -1052,35 +1217,32 @@ Refs #475"
 
 ## Deferred
 
-**CDI producer wiring** — `CachingMessageStore` is currently a CDI-free
-POJO. For the mesh relay to activate it as a CDI `@Alternative`, a CDI
-producer bean is needed (similar to `RelayProducer` in the cluster module).
-This requires understanding the exact CDI activation pattern
-(`@IfBuildProperty` vs `@Alternative @Priority`). The current plan delivers
-the core logic and tests; CDI wiring is a follow-up task once the IntelliJ
-MCP is available for navigating the existing JPA store bean qualifiers.
+**Post-commit cache population via JTA afterCompletion:** The spec calls
+for JTA `afterCompletion(STATUS_COMMITTED)` to avoid phantom messages
+from rolled-back transactions. The current `put()` implementation adds
+to cache inline. This is safe for the common case (dispatch commits
+immediately) and the cache is a performance optimisation. The
+afterCompletion variant should be added once CDI wiring is proven in
+integration tests.
 
-**Health check endpoint** — `CacheHealthCheck` reporting cache stats and
-sync status via the Quarkus health framework. Low complexity, deferred to
-keep this plan focused on core logic.
-
-**ChannelStore.listAllIds()** — the `FullSyncService` assumes this method
-exists. If it doesn't, the implementation should add it to the store
-interface and InMemory/JPA implementations, or use `listAll()` with a
-map-to-UUID step.
+**CDI producer wiring:** All classes use plain constructors for CDI-free
+testing. CDI `@Produces` methods or `@ApplicationScoped` annotations
+with `@IfBuildProperty` gating need to be added for Quarkus integration.
+Best done during integration testing when the full CDI context is
+available.
 
 ---
 
 ## References
 
-- [2026-10-07-relay-depth-modes-design.md] — design spec this plan implements
-- [decisions.md D25-D31] — Phase 5 design decisions
-- [MessageStore.java] — `api/src/main/java/io/casehub/qhorus/api/store/MessageStore.java`
-- [MessageReader.java] — `api/src/main/java/io/casehub/qhorus/api/store/MessageReader.java`
-- [MessageQuery.java] — `api/src/main/java/io/casehub/qhorus/api/store/query/MessageQuery.java`
-- [Message.java] — `api/src/main/java/io/casehub/qhorus/api/message/Message.java`
-- [PresenceService.java] — `runtime-core/.../channel/PresenceService.java` (Caffeine pattern)
-- [cluster/pom.xml] — optional module pom pattern
-- [mesh/pom.xml] — mesh module dependency list
-- [PostgresChannelActivityBroadcaster.java] — cross-node notification primitive
-- [GitHub #475] — epic: distributed qhorus mesh
+- [2026-10-07-relay-depth-modes-design.md] — design spec
+- [decisions.md] D25-D31 — relay depth mode decisions
+- [PresenceService.java] — Caffeine cache pattern
+- [PostgresChannelActivityBroadcaster.java] — cross-node notification
+- [WriteRoutingDecorator.java] — CDI decorator pattern
+- [MessageStore.java, MessageReader.java] — store interfaces
+- [MessageQuery.java] — query model with afterId pagination
+- [MessageObserver.java] — observer SPI (CLUSTER scope)
+- [MessageReceivedEvent.java] — observer event payload
+- [websocket-observer/pom.xml] — optional module pom pattern
+- [GitHub #475] — epic issue
