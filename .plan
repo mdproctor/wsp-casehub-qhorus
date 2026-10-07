@@ -1,0 +1,15 @@
+# Work Plan — issue-485-cluster-bug-fixes
+
+## State
+branch: issue-485-cluster-bug-fixes
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 485,486,487
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#485 — Issue #485 ← active
