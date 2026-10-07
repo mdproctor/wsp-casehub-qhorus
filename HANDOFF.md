@@ -2,67 +2,65 @@
 
 ## What happened
 
-Phase 5 brainstorming and implementation for the distributed mesh epic (#475).
+Phase 6 brainstorming and implementation for the distributed mesh epic (#475).
 
-### Phase 5: relay depth modes — casehub-qhorus-cache module
+### Phase 6: dynamic ownership heuristics
 
-Designed and implemented an in-memory caching layer for the qhorus relay:
+Designed and implemented write-frequency-based channel ownership for the relay cluster:
 
-- **Brainstormed** shallow + full caching modes (7 decisions: D25-D31)
-- **Wrote spec:** `specs/issue-475-distributed-mesh/2026-10-07-relay-depth-modes-design.md`
-- **Wrote plan:** `plans/2026-10-07-relay-depth-modes-phase5.md`
-- **Implemented** (4 commits):
+- **Brainstormed** dynamic ownership (7 decisions: D32-D38)
+- **Decision review:** light pass — reviewer challenged complexity (R1-06), kept design after analysis showed ~200 LoC and DB locks guarantee correctness regardless
+- **Wrote spec:** `specs/issue-475-distributed-mesh/2026-10-07-dynamic-ownership-design.md`
+- **Wrote plan:** `plans/2026-10-07-dynamic-ownership-phase6.md`
+- **Implemented** (5 commits):
 
 | Component | What it does | Tests |
 |-----------|-------------|-------|
-| `ChannelMessageBuffer` | Per-channel ring buffer (ConcurrentSkipListMap), afterId pagination, bounded/unbounded eviction | 11 |
-| `CachingMessageStore` | MessageStore decorator: cache-first reads, write-through on put(), pass-through for aggregates | 10 |
-| `FullSyncService` | Background sync for full mode: batch-loads from PostgreSQL, SYNCING→READY transition | 5 |
-| Mesh integration | casehub-qhorus-cache dep added to mesh module | — |
+| `BucketWindow` | Circular bucket array for sliding window counting (AtomicLong, Clock-injectable) | 7 |
+| `WriteFrequencyTracker` | Per-channel ConcurrentHashMap of BucketWindows, rotateAll with prune | 6 |
+| `OwnershipClaim` | Record: nodeId + writeCount, carried in HeartbeatResponse | — |
+| `DynamicOwnershipResolver` | Layered resolver: dynamic claims → hash ring fallback | 6 |
+| `OwnershipEvaluator` | Periodic scan: claims when local > 2x owner, relinquishes on zero | 7 |
+| Integration | ClusterManager ownership methods, HeartbeatResponse extension, HeartbeatService propagation, WriteRoutingDecorator tracker, RelayProducer wiring, OwnershipConfig | 5 |
 
-**26 unit tests total**, all CDI-free with Mockito. Full build green (3m42s).
+**31 new tests, 72 total in cluster module.** Full build green (4m11s).
 
 ### Architecture summary
 
-- Cache is a CDI-free POJO (`CachingMessageStore implements MessageStore`)
-- Per-channel buffers stored in Caffeine cache keyed by channel UUID
-- Local writes populate inline after `put()` delegates to JPA
-- Remote writes populate via existing `deliverRemote()` → `find()` path (piggyback on pg_notify)
-- Shallow mode: bounded LRU (200 messages/channel, 1000 channels)
-- Full mode: unbounded buffers, background batch-load from PostgreSQL
-- Config: `CacheConfig` with `@WithDefault` — no explicit properties needed (env var override via `CASEHUB_QHORUS_CACHE_MODE`)
-
-### Config validation fix
-
-SmallRye Config validates properties against known `@ConfigMapping` roots. Setting `casehub.qhorus.cache.mode` in `application.properties` caused a startup failure because the `CacheConfig` mapping wasn't registered at augmentation time. Fix: removed the property — `@WithDefault("shallow")` provides the default, env var override works at runtime.
+- `routing=dynamic` activates the ownership heuristic alongside the hash ring
+- Each relay tracks its own originating writes via bucket-based sliding windows (5min, 10 buckets)
+- OwnershipEvaluator runs every 10s, claims channels when local writes > 2x owner's writes (and >= 5 min-claim-writes)
+- Claims propagated via HeartbeatResponse — one heartbeat round (~3s) reconstructs cluster ownership map on restart
+- Relinquishment on zero writes → reverts to hash ring
+- Config: `casehub.qhorus.relay.ownership.*` (window-seconds, bucket-count, evaluation-interval-seconds, hysteresis-ratio, min-claim-writes)
 
 ## Next action
 
-**Phase 6: dynamic ownership heuristics.** Start a new brainstorming cycle for dynamic ownership — the mechanism by which relays earn channel ownership based on write frequency (replacing the static hash ring as the default Level 4 strategy). See consolidated spec §4 (Write Model) and §2 (Level 4: Channel ownership).
+**Phase 7** or **work-end.** Possible next phases from the consolidated spec roadmap:
+- WriteProxyClient wiring (actual HTTP proxying)
+- Health check endpoint for ownership stats
+- CLUSTER-scoped MessageObserver for remote cache population (deferred from Phase 5)
 
-## Deferred items from Phase 5
+## Deferred items from Phase 6
 
-- **CDI producer wiring** — `CachingMessageStore` needs `@Alternative @Priority(1)` activation via a CDI producer bean (similar to `RelayProducer` in cluster module). Currently a CDI-free POJO.
-- **Health check endpoint** — `CacheHealthCheck` reporting cache stats and sync status via Quarkus health framework.
-- **CLUSTER-scoped observer** — Decision review suggested a `MessageObserver` (CLUSTER scope) for remote cache population instead of relying solely on the `find()` piggyback. The current approach works but an observer would be more robust against pg_notify losses.
-- **ChannelStore.listAllIds()** — `FullSyncService` uses `channelStore.scan(ChannelQuery.all())` and extracts IDs. A dedicated method would be more efficient for large channel counts.
+- **OwnershipEvaluator @Scheduled wiring** — the evaluator is a POJO with `evaluate()` method. CDI scheduling (e.g. via a `OwnershipScheduler` bean) deferred — the evaluator logic is complete and testable.
+- **WriteRoutingDecorator tracker CDI wiring** — the 5-arg constructor accepts the tracker, but RelayProducer doesn't yet construct the decorator with the tracker injected (the decorator CDI wiring for routing=dynamic needs the WriteFrequencyTracker producer piped through).
 
 ## References
 
 | Artifact | Path |
 |----------|------|
-| Phase 5 spec | `specs/issue-475-distributed-mesh/2026-10-07-relay-depth-modes-design.md` |
-| Phase 5 plan | `plans/2026-10-07-relay-depth-modes-phase5.md` |
-| Decisions D1-D31 | `specs/issue-475-distributed-mesh/decisions.md` |
+| Phase 6 spec | `specs/issue-475-distributed-mesh/2026-10-07-dynamic-ownership-design.md` |
+| Phase 6 plan | `plans/2026-10-07-dynamic-ownership-phase6.md` |
+| Decisions D1-D38 | `specs/issue-475-distributed-mesh/decisions.md` |
+| Decision review | `/Users/mdproctor/reviews/casehub-qhorus/issue-475-phase6-decision-20261007-031050/` |
 | Consolidated spec | `specs/issue-475-distributed-mesh/2026-10-06-distributed-mesh-consolidated.md` |
-| Phase 2 plan (done) | `plans/2026-10-06-cluster-module-phase2.md` |
-| Phase 3-4 plan (done) | `plans/2026-10-06-distributed-mesh-phase3-4.md` |
 | Epic issue | casehubio/qhorus#475 |
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 20 commits (Phases 1-5)
+- **Project branch:** `issue-475-distributed-mesh` — 25 commits (Phases 1-6)
 - **Workspace branch:** `issue-475-distributed-mesh`
-- Build: green (`mvn clean install` — all modules, all tests pass, 3m42s)
-- Cache module: 26 tests, 4 source files
-- Cluster module: 41 tests, 15 source files (from Phase 2)
+- Build: green (`mvn clean install` — all modules, all tests pass, 4m11s)
+- Cluster module: 72 tests, 21 source files (from Phases 2 + 6)
+- Cache module: 26 tests, 4 source files (from Phase 5)
