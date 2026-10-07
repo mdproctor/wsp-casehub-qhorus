@@ -2,46 +2,42 @@
 
 ## What happened
 
-Continued #484 (audit and e2e cluster testing). Completed all 6 batches — Batch 4 (CDI wiring integration tests), Batches 5-6 (e2e-cluster module with Podman scenario tests), plus critical infrastructure fixes discovered during e2e validation.
+Continued #484 (audit and e2e cluster testing). Completed all 6 batches and validated e2e tests against real Podman clusters. Discovered 4 production bugs in the distributed mesh through e2e testing.
 
-### Implementation — Batch 4: CDI Wiring Integration Tests
-
-| Commit | What |
-|--------|------|
-| e3f25454 | CDI wiring and config gate integration tests — first @QuarkusTest in cluster module |
-
-### Implementation — Batches 5-6: E2E Cluster Module
+### Commits
 
 | Commit | What |
 |--------|------|
-| 7a9cf6aa | e2e-cluster module with ClusterTestHarness + 3 Podman e2e scenarios |
+| e3f25454 | CDI wiring and config gate integration tests (Batch 4) |
+| 7a9cf6aa | e2e-cluster module with 3 Podman e2e scenarios (Batches 5-6) |
+| 475996f8 | Jandex indexes for cluster/cache + relay enabled in mesh |
+| 92f9a507 | e2e harness fixes — parallel startup, API field names, deps |
+| b3ab7760 | e2e timeout tuning — proxy timeout, dead detection timing |
 
-### Infrastructure Fixes (discovered during e2e validation)
+### E2E validation results
 
-| Commit | What |
-|--------|------|
-| 475996f8 | Add Jandex indexes to cluster/cache + enable relay in mesh — without these, cluster and cache beans were invisible to the mesh module's Quarkus augmentation |
-| 92f9a507 | Fix e2e harness — parallel startup (dead-peer race), API field names, deps |
+| Test | Result | What it proves |
+|------|--------|----------------|
+| DispatchRoutingE2ETest (3 tests) | GREEN | Message routing, cross-node DB visibility, cluster health |
+| NodeFailure: baseline + dead detection + writes | GREEN | DEAD detection works (3s proxy timeout × 3 misses = ~12s), surviving node accepts writes |
+| NodeFailure: restart rejoin | BLOCKED | Container startup fails — Flyway migration + HeartbeatService never re-probes DEAD peers |
+| Quorum: full cluster writes | GREEN | 3-node cluster accepts writes |
+| Quorum: minority rejects | PARTIAL | Dead detection works (24.5s for 2 peers), but write NOT rejected (200 instead of 400+) |
+| Quorum: majority restored | BLOCKED | Depends on minority test |
 
-### Key discoveries
+### Production bugs discovered
 
-1. **Cluster and cache modules had no Jandex index** — their CDI beans were completely invisible when used as library dependencies. All `@IfBuildProperty`-gated beans (relay, heartbeat, ownership, cache) were silently excluded from the mesh relay node. This means the mesh module was running WITHOUT clustering or caching in production.
+1. **Cluster/cache modules had no Jandex index** — CDI beans invisible as library deps. The mesh relay was running WITHOUT clustering or caching. FIXED in 475996f8.
 
-2. **`@IfBuildProperty` is build-time only** — must be in `application.properties` at augmentation time. Runtime env vars (`CASEHUB_QHORUS_RELAY_ENABLED`) cannot activate build-time gates. Added `casehub.qhorus.relay.enabled=true` to mesh module.
+2. **HeartbeatService skips DEAD peers permanently** — `tick()` has `if (ps.state() == NodeState.DEAD) continue`. Once a peer is DEAD, it's never re-probed. Node restarts depend on the restarted node probing the surviving nodes (reverse heartbeat). This works but is fragile.
 
-3. **HeartbeatService skips DEAD peers** — once a peer is marked DEAD (via missed heartbeats), it's never re-probed. Sequential container startup causes permanent DEAD state. Fixed in e2e with parallel startup via `Startables.deepStart()`. The heartbeat skip-DEAD design is a production concern for node restarts — should be tracked separately.
+3. **Cross-node proxy dispatch silently drops messages** — `WriteRoutingDecorator` proxies to owner via `WriteProxyClient.dispatch()`, returns 200, but the message doesn't appear in the shared database. `InternalMeshResource.dispatch()` receives the proxy but the dispatch fails silently.
 
-4. **Cross-node proxy dispatch bug** — messages dispatched via `WriteRoutingDecorator` proxy (node-b → node-a) return 200 but don't appear in the shared database. The InternalMeshResource receives the proxy request but the dispatch silently fails. Needs investigation — tracked separately.
-
-5. **`@IfBuildProperty` unregisters `@ConfigMapping`** — when the property gate removes all beans that inject a `@ConfigMapping` interface, the config mapping is unregistered. Any remaining properties under that prefix fail validation. Disabled test profiles must NOT set properties under the gated prefix.
+4. **Quorum enforcement doesn't block REST writes** — `WriteRoutingDecorator.canServeWrites()` check is present but writes via REST still return 200 in minority partition. Either the REST path bypasses the decorator, or the `QuorumViolationException` is caught/swallowed.
 
 ## Next action
 
-1. **File issues** for the two production bugs discovered:
-   - HeartbeatService skipping DEAD peers (prevents node recovery)
-   - Cross-node proxy dispatch silently dropping messages
-2. **Run NodeFailure and Quorum e2e tests** — these haven't been validated yet
-3. **Close #484** via work-end once e2e validation is complete
+File GitHub issues for the 4 bugs above, then close #484 via work-end.
 
 ## References
 
@@ -49,14 +45,12 @@ Continued #484 (audit and e2e cluster testing). Completed all 6 batches — Batc
 |----------|------|
 | Design spec | `specs/issue-475-distributed-mesh/2026-10-07-audit-e2e-design.md` |
 | Implementation plan | `plans/2026-10-07-audit-e2e-cluster.md` |
-| Decisions | `specs/issue-475-distributed-mesh/decisions.md` (D39-D47) |
 | Issue | #484 — audit and e2e cluster testing |
 | Epic | #475 — distributed mesh |
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 42 commits
+- **Project branch:** `issue-475-distributed-mesh` — 43 commits
 - **Workspace branch:** `issue-475-distributed-mesh`
-- **.plan queue:** #484 (active, all 6 batches done — e2e validation in progress)
-- Build: pending verification (full build running)
-- E2E: DispatchRoutingE2ETest 3/3 green, NodeFailure/Quorum not yet run
+- **.plan queue:** #484 (active, all batches done, e2e validated)
+- Build: green (full build passes, 94 cluster tests, e2e profile-gated)
