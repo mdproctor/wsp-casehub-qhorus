@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-485-cluster-bug-fixes
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo:
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [x] casehubio/qhorus#485 — Issue #485
 - [x] casehubio/qhorus#486 — Cross-node proxy dispatch silently drops messages
