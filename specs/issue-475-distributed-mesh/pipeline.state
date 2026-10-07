@@ -1,6 +1,6 @@
 format_version: 1
-state: POST_SPEC_REVIEW
-entered: 2026-10-07T17:35:00+01:00
+state: PLANNING
+entered: 2026-10-07T17:36:00+01:00
 decision_count: 9
 dimensions_completed: 1
 dimensions_total: 1
