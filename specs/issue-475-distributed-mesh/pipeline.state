@@ -1,6 +1,6 @@
 format_version: 1
-state: DECISION_REVIEW
-entered: 2026-10-07T12:30:00+01:00
+state: PLANNING
+entered: 2026-10-07T12:50:00+01:00
 decision_count: 38
 dimensions_completed: 0
 dimensions_total: 0
