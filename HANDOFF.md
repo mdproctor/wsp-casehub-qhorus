@@ -2,7 +2,7 @@
 
 ## What happened
 
-Continued #484 (audit and e2e cluster testing). Completed Batch 4 (CDI wiring integration tests) and Batch 5/6 infrastructure (e2e-cluster module with 3 Podman scenario tests).
+Continued #484 (audit and e2e cluster testing). Completed all 6 batches — Batch 4 (CDI wiring integration tests), Batches 5-6 (e2e-cluster module with Podman scenario tests), plus critical infrastructure fixes discovered during e2e validation.
 
 ### Implementation — Batch 4: CDI Wiring Integration Tests
 
@@ -10,44 +10,38 @@ Continued #484 (audit and e2e cluster testing). Completed Batch 4 (CDI wiring in
 |--------|------|
 | e3f25454 | CDI wiring and config gate integration tests — first @QuarkusTest in cluster module |
 
-Added @QuarkusTest infrastructure to the cluster module:
-- `quarkus-junit`, `quarkus-junit-mockito`, `persistence-memory`, `casehub-platform`, H2 deps
-- `ClusterCdiWiringTest` — verifies all 8 relay beans resolve, MessageDispatcher=WriteRoutingDecorator, ChannelManager=ChannelManagerDecorator
-- `ClusterDisabledTest` — verifies all 8 relay beans NOT resolvable when relay property absent (enableIfMissing=false)
-- Discovery: @IfBuildProperty removal unregisters the @ConfigMapping, so disabled profile must NOT set relay properties (orphaned properties fail validation)
-- Both tests use @TestProfile with full datasource config overrides per project convention
-- 94 cluster module tests pass (90 existing + 4 new)
-
 ### Implementation — Batches 5-6: E2E Cluster Module
 
 | Commit | What |
 |--------|------|
 | 7a9cf6aa | e2e-cluster module with ClusterTestHarness + 3 Podman e2e scenarios |
 
-Profile-gated module (`-Pwith-e2e-cluster`) using Testcontainers:
-- `ClusterTestHarness` — manages PostgreSQL + N Qhorus mesh containers on shared Docker network
-- `DispatchRoutingE2ETest` — message routing between nodes, convergence
-- `NodeFailureE2ETest` — DEAD detection, fallback-to-local, node rejoin
-- `QuorumEnforcementE2ETest` — minority rejects writes, majority restores
+### Infrastructure Fixes (discovered during e2e validation)
 
-Uses REST API (`POST/GET /api/channels/{id}/messages`) for message dispatch and verification.
+| Commit | What |
+|--------|------|
+| 475996f8 | Add Jandex indexes to cluster/cache + enable relay in mesh — without these, cluster and cache beans were invisible to the mesh module's Quarkus augmentation |
+| 92f9a507 | Fix e2e harness — parallel startup (dead-peer race), API field names, deps |
+
+### Key discoveries
+
+1. **Cluster and cache modules had no Jandex index** — their CDI beans were completely invisible when used as library dependencies. All `@IfBuildProperty`-gated beans (relay, heartbeat, ownership, cache) were silently excluded from the mesh relay node. This means the mesh module was running WITHOUT clustering or caching in production.
+
+2. **`@IfBuildProperty` is build-time only** — must be in `application.properties` at augmentation time. Runtime env vars (`CASEHUB_QHORUS_RELAY_ENABLED`) cannot activate build-time gates. Added `casehub.qhorus.relay.enabled=true` to mesh module.
+
+3. **HeartbeatService skips DEAD peers** — once a peer is marked DEAD (via missed heartbeats), it's never re-probed. Sequential container startup causes permanent DEAD state. Fixed in e2e with parallel startup via `Startables.deepStart()`. The heartbeat skip-DEAD design is a production concern for node restarts — should be tracked separately.
+
+4. **Cross-node proxy dispatch bug** — messages dispatched via `WriteRoutingDecorator` proxy (node-b → node-a) return 200 but don't appear in the shared database. The InternalMeshResource receives the proxy request but the dispatch silently fails. Needs investigation — tracked separately.
+
+5. **`@IfBuildProperty` unregisters `@ConfigMapping`** — when the property gate removes all beans that inject a `@ConfigMapping` interface, the config mapping is unregistered. Any remaining properties under that prefix fail validation. Disabled test profiles must NOT set properties under the gated prefix.
 
 ## Next action
 
-**Run the e2e tests with Podman** to verify they pass against real multi-node containers. The tests compile but haven't been executed yet. Requires:
-1. Full build green (mesh module's `quarkus-app` artifact)
-2. `mvn test -pl e2e-cluster -Pwith-e2e-cluster`
-
-Then: fix any e2e test failures, commit fixes, and close #484 via work-end.
-
-The ownership transfer scenario (Task 10) was skipped — it requires sustained write patterns and evaluation cycle timing that's harder to test in e2e. Can be added later as a follow-up.
-
-## Architecture context
-
-Key findings from CDI wiring work:
-- **@IfBuildProperty unregisters @ConfigMapping** when no remaining bean injects it. Disabled test profiles must not set properties under that prefix. This affects all Quarkus modules with opt-in @IfBuildProperty gating.
-- **ClientProxy.unwrap()** needed for `instanceof` checks against CDI-produced beans. Producer methods create proxy subclasses, not the declared type directly.
-- **quarkus-junit5 → quarkus-junit** artifact rename in Quarkus 3.31+ (deprecated, still works via relocation)
+1. **File issues** for the two production bugs discovered:
+   - HeartbeatService skipping DEAD peers (prevents node recovery)
+   - Cross-node proxy dispatch silently dropping messages
+2. **Run NodeFailure and Quorum e2e tests** — these haven't been validated yet
+3. **Close #484** via work-end once e2e validation is complete
 
 ## References
 
@@ -61,7 +55,8 @@ Key findings from CDI wiring work:
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 40 commits (Phases 1-7 + Phase 8 Batches 1-6)
+- **Project branch:** `issue-475-distributed-mesh` — 42 commits
 - **Workspace branch:** `issue-475-distributed-mesh`
-- **.plan queue:** #484 (active, Batches 1-6 of 6 done — pending e2e validation)
-- Build: green (all modules, all tests pass) — e2e tests not yet executed
+- **.plan queue:** #484 (active, all 6 batches done — e2e validation in progress)
+- Build: pending verification (full build running)
+- E2E: DispatchRoutingE2ETest 3/3 green, NodeFailure/Quorum not yet run
