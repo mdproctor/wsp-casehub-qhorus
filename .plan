@@ -12,6 +12,6 @@ design-section-hashes:
 flyway-next-v: 
 
 ## Queue
-- [ ] casehubio/qhorus#485 — Issue #485 ← active
-- [ ] casehubio/qhorus#486 — Cross-node proxy dispatch silently drops messages
-- [ ] casehubio/qhorus#487 — Quorum enforcement does not reject writes via REST
+- [x] casehubio/qhorus#485 — Issue #485
+- [x] casehubio/qhorus#486 — Cross-node proxy dispatch silently drops messages
+- [x] casehubio/qhorus#487 — Quorum enforcement does not reject writes via REST
