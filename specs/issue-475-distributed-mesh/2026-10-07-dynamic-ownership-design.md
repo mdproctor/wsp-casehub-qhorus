@@ -70,7 +70,7 @@ rotate():      advance current, clear next bucket
 
 - `recordWrite(UUID channelId)` — O(1), lock-free (`AtomicLong.incrementAndGet`)
 - `getCount(UUID channelId)` — O(buckets), sums non-expired buckets
-- `rotate()` — called by `OwnershipEvaluator` on each tick, advances the bucket pointer
+- `rotate()` — called by `OwnershipEvaluator` on each tick; only advances the bucket pointer when the current bucket's duration has elapsed (30s default). Multiple evaluator ticks (10s) may pass without rotation.
 - `getActiveChannels()` — returns channel IDs with non-zero counts (for evaluation scan)
 
 Memory footprint: 10 longs × 8 bytes = 80 bytes per channel. At 10,000
@@ -228,6 +228,14 @@ count 30. B sees A's claim (count 100) in the next heartbeat — 30 < 2×100,
 so B relinquishes. The 2x threshold plus heartbeat propagation ensures
 convergence within one heartbeat round. During the brief overlap, DB locks
 (D11, D20) guarantee correctness.
+
+**Edge case — sporadic writers:** A channel receiving one write every
+6 minutes oscillates between dynamic ownership (the write triggers a
+claim) and hash ring fallback (the 5-minute window expires before the
+next write). This is harmless: the `minClaimWrites` threshold (default 5)
+prevents a single write from triggering a claim. A channel must
+sustain at least 5 writes within the window to earn dynamic ownership.
+Below that rate, it stays on the hash ring permanently.
 
 ## 4. ClusterManager changes
 
