@@ -438,3 +438,93 @@ Process:
 **Sources:** Consolidated spec §5 (sync strategy)
 **Exploration:** quick
 **Status:** captured
+
+## D32: Write-frequency tracking component
+
+**Choice:** Standalone `WriteFrequencyTracker` bean in the cluster module — a new `@ApplicationScoped` bean maintaining a `ConcurrentHashMap<UUID, ChannelWriteStats>` with per-node write counts in a sliding window. `WriteRoutingDecorator` calls `tracker.recordWrite(channelId)` after each dispatch. CDI-free POJO with `Clock` injection for testability.
+**Alternatives:**
+- Inside `ClusterManager` — co-locates with hash ring but violates single responsibility (already handles peer lifecycle, ring management, quorum)
+- Inside `WriteRoutingDecorator` — avoids a new class but mixes routing logic with frequency tracking
+**Rationale:** Separation keeps each component focused and independently testable. The tracker is a pure counter; the decorator consults it for routing decisions.
+**Trade-offs:** One more class to wire, but the separation pays for itself in test clarity.
+**Sources:** ClusterManager.java, WriteRoutingDecorator.java, RelayConfig.java
+**Exploration:** quick
+**Status:** captured
+
+## D33: Ownership resolution strategy
+
+**Choice:** Layered `DynamicOwnershipResolver` wrapping the existing `ConsistentHashRing`. For each channel: if the `WriteFrequencyTracker` has data and a node exceeds the 2x hysteresis threshold over the current owner, that node is the owner. Otherwise, fall back to hash ring. `ClusterManager.owner()` delegates to this resolver instead of directly to the hash ring.
+**Alternatives:**
+- Full replacement (no hash ring in dynamic mode) — fragile: a single write locks ownership until window expires
+- Separate ownership map updated by periodic evaluator — introduces sync gap between map and tracker
+**Rationale:** Hash ring is always the sensible default; dynamic ownership is an optimisation layered on top. Channels only transfer when evidence is strong (2x threshold).
+**Trade-offs:** Hash ring is never fully eliminated — channels with no write history or no dominant writer always use it. This is a feature, not a limitation.
+**Depends on:** D5 (consistent hashing), D11 (hash ring + DB safety net), D32 (tracker)
+**Sources:** ConsistentHashRing.java, ClusterManager.owner(), consolidated spec §2 Level 4
+**Exploration:** quick
+**Status:** captured
+
+## D34: Ownership claim propagation
+
+**Choice:** Ownership claims piggybacked on existing heartbeat protocol. Add `Map<UUID, OwnershipClaim>` field to `HeartbeatResponse` — each node advertises which channels it claims to own. On receiving a heartbeat response, the local node updates its ownership map. On restart, one heartbeat round reconstructs the full cluster ownership map.
+**Alternatives:**
+- Separate ownership endpoint polled on heartbeat tick — cleaner separation but doubles HTTP calls per tick (N-1 heartbeats + N-1 ownership fetches)
+- Event-sourced ownership log with delta sync — handles large maps efficiently but heavy machinery for hundreds of channels
+**Rationale:** At conversation scale, the ownership map is small (hundreds of entries). Piggybacking on heartbeat keeps the protocol surface minimal. Payload increase is negligible.
+**Trade-offs:** Ownership transfer latency bounded by heartbeat interval (3s default). Acceptable for conversation-pace workloads.
+**Depends on:** D7 (heartbeat), D33 (resolver)
+**Sources:** HeartbeatService.java, HeartbeatResponse.java, consolidated spec §2 Level 4
+**Exploration:** quick
+**Status:** captured
+
+## D35: Sliding window implementation
+
+**Choice:** Bucket-based sliding window. Divide the window into fixed-size buckets (e.g. 5-minute window with 10 × 30-second buckets). Each bucket holds an `AtomicLong` counter. On write, increment the current bucket. To query, sum all non-expired buckets. On tick, rotate: clear the oldest bucket and advance the pointer. O(1) per write, O(buckets) per query, bounded memory.
+**Alternatives:**
+- Timestamp queue per channel — exact counts but unbounded memory under high write rates, wrong data structure for a counter
+- Single atomic counter with periodic decay — simplest memory but abrupt halving creates spurious ownership transfers
+**Rationale:** Bucket-based windows are the standard pattern for rate counting. Bounded memory, O(1) writes, predictable decay. At conversation pace even 10 buckets per channel is negligible memory.
+**Trade-offs:** Granularity limited by bucket size (30s default). Writes at bucket boundaries may be attributed to adjacent buckets. Acceptable imprecision for an optimisation heuristic.
+**Depends on:** D32 (tracker)
+**Sources:** Standard sliding-window rate limiter pattern (e.g. Redis sliding window, Guava RateLimiter internals)
+**Exploration:** quick
+**Status:** captured
+
+## D36: Ownership evaluation cadence
+
+**Choice:** Periodic `@Scheduled` evaluator running every 10 seconds (configurable). For each channel with write data, compares the local node's write count against the current owner's write count (from heartbeat claims). Claims channel if local writes > 2x current owner's writes. Each node evaluates independently — can only claim for itself, never assign to others.
+**Alternatives:**
+- Evaluate on every write — lowest latency but adds overhead to every write path; without other nodes' counts, single-node comparison is incomplete
+- Evaluate on heartbeat tick — ties evaluation to heartbeat cadence, mixes heartbeat concerns with ownership logic
+**Rationale:** Dedicated scheduled evaluation keeps concerns separated. 10-second default balances responsiveness with overhead. Evaluation has full access to local write counts and peer ownership data from heartbeats.
+**Trade-offs:** Up to 10s delay between earning ownership and claiming it. At conversation pace this is negligible.
+**Depends on:** D32 (tracker), D33 (resolver), D34 (heartbeat claims)
+**Sources:** WatchdogScheduler pattern (existing @Scheduled evaluation), consolidated spec §4
+**Exploration:** quick
+**Status:** captured
+
+## D37: Write count visibility for 2x comparison
+
+**Choice:** Include write count in heartbeat ownership claims. Change payload from `Map<UUID, String>` to `Map<UUID, OwnershipClaim>` where `OwnershipClaim(long writeCount)`. Each owner advertises its write rate alongside the claim. A challenger compares: `myWrites > 2 * owner.writeCount`.
+**Alternatives:**
+- Absolute threshold only (no cross-node comparison) — prevents ownership transfer between active writers
+- Full write-count gossip (all nodes share all channel counts) — most information but heaviest payload (N nodes × M channels)
+**Rationale:** Only owners share counts, and only for channels they claim. Payload bounded by channels a node owns. Challengers have exactly the data needed for the 2x comparison.
+**Trade-offs:** Write counts are slightly stale (up to one heartbeat interval). A challenger might over-claim briefly, but DB locks guarantee correctness during the overlap.
+**Depends on:** D34 (heartbeat claims), D35 (sliding window), D36 (evaluator)
+**Sources:** HeartbeatResponse.java, consolidated spec risk register (oscillation prevention)
+**Exploration:** quick
+**Status:** captured
+
+## D38: Ownership relinquishment
+
+**Choice:** Revert to hash ring when writes drop to zero. If the owner's write count drops to 0 within the sliding window (no writes in the full 5-minute window), ownership reverts to the hash ring assignment. The next active writer can earn it via the normal 2x claim process.
+**Alternatives:**
+- Revert below minimum threshold (e.g. 2 writes/window) — more responsive but adds tuning parameter interacting with hysteresis
+- Never relinquish (only transfer via 2x) — stable but idle channels never return to hash ring, creating unbalanced distribution
+**Rationale:** Zero writes is an unambiguous signal. The channel returns to its hash ring home, which is the stable default. If a new writer emerges, they earn it normally.
+**Trade-offs:** A channel with very sporadic writes (1 write every 6 minutes) oscillates between dynamic and hash ring. The hysteresis on the claim side (2x + min-claim-writes) prevents routing instability.
+**Depends on:** D33 (resolver), D35 (sliding window)
+**Sources:** Consolidated spec §2 Level 4 (ownership drift), risk register (oscillation)
+**Exploration:** quick
+**Status:** captured
