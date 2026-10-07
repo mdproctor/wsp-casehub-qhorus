@@ -36,10 +36,7 @@ Designed and implemented write-frequency-based channel ownership for the relay c
 
 ## Next action
 
-**Phase 7** or **work-end.** Possible next phases from the consolidated spec roadmap:
-- WriteProxyClient wiring (actual HTTP proxying)
-- Health check endpoint for ownership stats
-- CLUSTER-scoped MessageObserver for remote cache population (deferred from Phase 5)
+**work-end.** All 6 phases from the consolidated spec roadmap are implemented. Remaining deferred items (WriteProxyClient HTTP wiring, health endpoints, CLUSTER-scoped cache observer) are follow-on work, not part of the epic's defined scope.
 
 ## Deferred items from Phase 6
 
