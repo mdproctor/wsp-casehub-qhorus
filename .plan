@@ -2,11 +2,12 @@
 
 ## State
 branch: issue-475-distributed-mesh
-state: active
+state: closing:review
 Current: none
 date: 
 current: casehubio/qhorus#484
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#481 — add ChannelStore.listAllIds() for FullSyncService efficiency
 - [ ] casehubio/qhorus#477 — wire dynamic ownership CDI — @Scheduled evaluator + tracker injection
