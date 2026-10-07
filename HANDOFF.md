@@ -2,45 +2,54 @@
 
 ## What happened
 
-Session checkpoint before Phase 5 brainstorming. Verified Phases 1-4 build green (all modules, 6m09s). No code changes this session — continuation from prior session's completed Phase 3-4 plan.
+Phase 5 brainstorming and implementation for the distributed mesh epic (#475).
 
-### Phases 1-4 summary (complete, 16 commits on branch)
+### Phase 5: relay depth modes — casehub-qhorus-cache module
 
-| Phase | What | Commits |
-|-------|------|---------|
-| 1 | Runtime safety net — SELECT FOR UPDATE on Merkle frontier, LAST_WRITE, commitment transitions | 3 commits |
-| 2 | Cluster module — ConsistentHashRing, ClusterManager, HeartbeatService, WriteRoutingDecorator, ChannelManagerDecorator, InternalMeshResource, ClusterHealthResource, RelayConfig | 7 commits |
-| 3 | REST API gaps — InstanceResource (CRUD), GET /api/channels/{id}/messages (paginated) | 2 commits |
-| 4 | Mesh wiring — PostgreSQL + cluster + postgres-broadcaster deps, env var config, Dockerfile | 3 commits + 1 fixup |
+Designed and implemented an in-memory caching layer for the qhorus relay:
 
-Levels 1-3 of the topology ladder are now functional. Level 4 (dynamic ownership) deferred to Phase 6.
+- **Brainstormed** shallow + full caching modes (7 decisions: D25-D31)
+- **Wrote spec:** `specs/issue-475-distributed-mesh/2026-10-07-relay-depth-modes-design.md`
+- **Wrote plan:** `plans/2026-10-07-relay-depth-modes-phase5.md`
+- **Implemented** (4 commits):
+
+| Component | What it does | Tests |
+|-----------|-------------|-------|
+| `ChannelMessageBuffer` | Per-channel ring buffer (ConcurrentSkipListMap), afterId pagination, bounded/unbounded eviction | 11 |
+| `CachingMessageStore` | MessageStore decorator: cache-first reads, write-through on put(), pass-through for aggregates | 10 |
+| `FullSyncService` | Background sync for full mode: batch-loads from PostgreSQL, SYNCING→READY transition | 5 |
+| Mesh integration | casehub-qhorus-cache dep added to mesh module, cache mode configurable via env var | — |
+
+**26 unit tests total**, all CDI-free with Mockito. Full build pending verification.
+
+### Architecture summary
+
+- Cache is a CDI-free POJO (`CachingMessageStore implements MessageStore`)
+- Per-channel buffers stored in Caffeine cache keyed by channel UUID
+- Local writes populate inline after `put()` delegates to JPA
+- Remote writes populate via existing `deliverRemote()` → `find()` path (piggyback on pg_notify)
+- Shallow mode: bounded LRU (200 messages/channel, 1000 channels)
+- Full mode: unbounded buffers, background batch-load from PostgreSQL
 
 ## Next action
 
-Brainstorm Phase 5: relay depth modes (shallow caching with LRU per channel, full mirroring with background sync from PostgreSQL). This was explicitly deferred as a separate spec → plan cycle.
-
-After Phase 5: Phase 6 (dynamic ownership heuristics).
-
-## Deferred items
-
-- **SSE events endpoint** — `GET /api/channels/{id}/events` for real-time push. Should be a separate `sse-observer/` module. Polling via `GET /api/channels/{id}/messages?afterId=` works as interim.
-- **Spec §11 stale entry** — spec lists `POST /api/channels/{id}/messages` as a REST gap but it already exists in `ChannelResource.java:198`.
+1. Verify full build is green
+2. Deferred: CDI producer wiring (`@Alternative @Priority` activation), health check endpoint
+3. After Phase 5: Phase 6 (dynamic ownership heuristics) or work-end to land Phases 1-5
 
 ## References
 
 | Artifact | Path |
 |----------|------|
+| Phase 5 spec | `specs/issue-475-distributed-mesh/2026-10-07-relay-depth-modes-design.md` |
+| Phase 5 plan | `plans/2026-10-07-relay-depth-modes-phase5.md` |
+| Decisions D25-D31 | `specs/issue-475-distributed-mesh/decisions.md` |
 | Consolidated spec | `specs/issue-475-distributed-mesh/2026-10-06-distributed-mesh-consolidated.md` |
-| Decisions D1-D24 | `specs/issue-475-distributed-mesh/decisions.md` |
-| Phase 2 plan (done) | `plans/2026-10-06-cluster-module-phase2.md` |
-| Phase 3-4 plan (done) | `plans/2026-10-06-distributed-mesh-phase3-4.md` |
-| Blog entry | `blog/2026-10-06-mdp03-the-ring-that-routes.md` |
 | Epic issue | casehubio/qhorus#475 |
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 16 commits
+- **Project branch:** `issue-475-distributed-mesh` — 20 commits
 - **Workspace branch:** `issue-475-distributed-mesh`
-- Build: green (`mvn clean install` — all modules, all tests pass)
-- Cluster module: 41 tests, 15 source files
-- Mesh relay: compiles and starts (35s build)
+- Build: pending verification
+- Cache module: 26 tests, 4 source files
