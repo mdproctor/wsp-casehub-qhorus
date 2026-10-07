@@ -2,57 +2,78 @@
 
 ## What happened
 
-Completed Phase 7 (#483) of the distributed mesh epic (#475) — all 6 CDI wiring and proxy issues implemented and closed.
+Brainstormed, designed, and began implementing #484 (audit and e2e cluster testing). Completed Phase A — all 15 code audit fixes across cluster and cache modules. Batches 1-3 of 6 done.
 
-### Phase 7 summary
+### Design phase
 
-| Issue | Title | Commit | Tests |
-|-------|-------|--------|-------|
-| #481 | ChannelStore.listAllIds() for FullSyncService efficiency | c60a083b | 2 contract tests |
-| #477 | Wire dynamic ownership CDI — @Scheduled evaluator + tracker | 657257e1 | 2 unit tests |
-| #478 | Wire CachingMessageStore as CDI @Alternative | d8ac4a99 | — (CDI producer) |
-| #480 | CLUSTER-scoped MessageObserver for remote cache population | cd62410b | 4 unit tests |
-| #479 | Health check endpoints for cache and ownership stats | 3993ef50 | — (REST endpoints) |
-| #482 | Wire WriteProxyClient — actual HTTP client | 42f9c997 | 4 unit tests |
-| fix | Fix flaky evaluateOwnership test | 78119711 | — |
+- Brainstormed #484 with 8 design decisions (D39-D46), Standard decision review (3 rounds, added D47 for quorum enforcement)
+- Wrote spec: `specs/issue-475-distributed-mesh/2026-10-07-audit-e2e-design.md`
+- Light spec review surfaced 16 findings — all incorporated (HeartbeatScheduler gap, proxy loop risk, constructor signature fix, full mutation coverage, postgres-broadcaster dependency, container networking)
+- Wrote implementation plan: `plans/2026-10-07-audit-e2e-cluster.md` (6 batches, 12 tasks)
 
-**Full build green** (3m42s). 78 cluster tests, 30 cache tests.
+### Implementation — Batch 1: Critical Cluster Wiring
 
-### What was wired
+| Commit | What |
+|--------|------|
+| 48501aaf | HeartbeatScheduler + HeartbeatService CDI producer — heartbeat protocol was completely inert in production |
+| acaf0fdc | Gate InternalMeshResource with @IfBuildProperty + fix proxy loop by injecting CdiMessageService |
+| a6de4c3c | ChannelManagerDecorator CDI producer + fix write tracking to local-only paths |
 
-- **OwnershipScheduler** — `@Scheduled` bean calls `ClusterManager.evaluateOwnership()` every 10s (configurable), gated by relay + dynamic routing
-- **WriteRoutingDecorator** — produced as `@Alternative @Priority(100) MessageDispatcher`, injecting `CdiMessageService` by concrete class to break interface cycle
-- **CachingMessageStore** — `@Alternative @Priority(1) MessageStore` via `CacheProducer`, wrapping `JpaMessageStore`, gated by `casehub.qhorus.cache.enabled=true`
-- **FullSyncService** — CDI-produced by `CacheProducer` for background sync in full mode
-- **CachePopulationObserver** — `MessageObserver` with `Scope.CLUSTER` for remote cache warm-up
-- **WriteProxyClient** — real `java.net.http.HttpClient` calling `InternalMeshResource` endpoints (dispatch, create/delete/pause/resume channel), timeout from config
-- **Health endpoints** — `GET /health/ownership` (claims map), `GET /health/cache` (channel/message counts, sync status)
+### Implementation — Batch 2: Security + Config Mutations
+
+| Commit | What |
+|--------|------|
+| ed85b159 | InternalSecretFilter — shared-secret auth for /internal/* endpoints |
+| 6b68232a | Wire all 15 config mutation proxying + ClusterShutdownHandler for graceful leave |
+
+### Implementation — Batch 3: Cache Fixes
+
+| Commit | What |
+|--------|------|
+| 74fd77d8 | ChannelMessageBuffer.remove()/recentMessages(), delete() cache invalidation, CacheSyncScheduler, CacheProducer enableIfMissing fix |
+
+**Full build green** (3m44s). 90 cluster tests, 34 cache tests.
 
 ## Next action
 
-**#484 — audit and e2e cluster testing.** The .plan queue has this as the last item. This is XL and blocked nothing — it's the final validation pass before the distributed mesh can ship.
+**Continue with Batch 4: Integration Tests (Phase B).** The plan at `plans/2026-10-07-audit-e2e-cluster.md` has the full task breakdown:
 
-## Architecture summary
+- Task 7: CDI wiring smoke test + config gate tests (`@QuarkusTest` with relay+cache enabled)
+- Task 8: Create e2e-cluster/ module with ClusterTestHarness (Testcontainers infrastructure)
+- Tasks 9-12: Four e2e scenarios (dispatch routing, ownership transfer, node failure, quorum enforcement)
 
-The distributed mesh is now fully wired:
-- `RelayProducer` (cluster module) produces all cluster beans: `ClusterManager`, `WriteProxyClient`, `WriteFrequencyTracker`, `WriteRoutingDecorator` (as `MessageDispatcher`), `OwnershipEvaluator` (internal to manager)
-- `CacheProducer` (cache module) produces `CachingMessageStore` and `FullSyncService`
-- `OwnershipScheduler` drives periodic ownership evaluation
-- `CachePopulationObserver` populates remote caches via CLUSTER-scoped observer
+The integration tests (B4) verify the CDI composition we just fixed. The e2e tests (B5-B6) verify distributed behaviour via Podman containers.
+
+## Architecture context
+
+Phase A fixes applied:
+- **HeartbeatScheduler** — `@Scheduled` bean driving `HeartbeatService.tick()` every 3s (was completely unwired)
+- **HeartbeatService CDI** — produced by `RelayProducer` with `proxyClient::heartbeat` function
+- **InternalMeshResource** — gated by `@IfBuildProperty`, injects `CdiMessageService` (not `MessageDispatcher`) to prevent proxy loops
+- **ClusterHealthResource** — gated by `@IfBuildProperty`
+- **ChannelManagerDecorator CDI** — produced as `@Alternative @Priority(100) ChannelManager`
+- **Config mutation proxying** — all 15 mutations proxied via generic `/internal/channel/{id}/config` endpoint + `ChannelConfigRequest` dispatch
+- **WriteRoutingDecorator** — write tracking moved to local-dispatch and fallback-to-local paths only
+- **InternalSecretFilter** — `@PreMatching` filter checking `X-Internal-Secret` header on `/internal/*`
+- **ClusterShutdownHandler** — `@Observes ShutdownEvent` sends leave notifications
+- **CachingMessageStore.delete()** — now invalidates channel buffers
+- **CacheSyncScheduler** — `@Scheduled` driver for `FullSyncService.syncBatch()` in full mode
+- **CacheProducer** — `enableIfMissing` corrected to `true`
+- **ChannelMessageBuffer** — gains `remove(Long)` and `recentMessages(int)`
 
 ## References
 
 | Artifact | Path |
 |----------|------|
-| Phase 7 issues | #477, #478, #479, #480, #481, #482 (all closed) |
-| Phase 7 epic | #483 (closed) |
-| Next issue | #484 — audit and e2e cluster testing |
-| Cluster module | `cluster/` — 28 source files, 78 tests |
-| Cache module | `cache/` — 7 source files, 30 tests |
+| Design spec | `specs/issue-475-distributed-mesh/2026-10-07-audit-e2e-design.md` |
+| Implementation plan | `plans/2026-10-07-audit-e2e-cluster.md` |
+| Decisions | `specs/issue-475-distributed-mesh/decisions.md` (D39-D47) |
+| Issue | #484 — audit and e2e cluster testing |
+| Epic | #475 — distributed mesh |
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 32 commits (Phases 1-7)
+- **Project branch:** `issue-475-distributed-mesh` — 38 commits (Phases 1-7 + Phase 8 Batches 1-3)
 - **Workspace branch:** `issue-475-distributed-mesh`
-- **.plan queue:** #484 (next)
-- Build: green (all modules, all tests pass, 3m42s)
+- **.plan queue:** #484 (active, Batches 1-3 of 6 done)
+- Build: green (all modules, all tests pass, 3m44s)
