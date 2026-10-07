@@ -1,0 +1,41 @@
+<svg viewBox="0 0 620 380" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;font-size:13px">
+  <text x="310" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">With SELECT FOR UPDATE — serialised reads</text>
+
+  <line x1="100" y1="45" x2="100" y2="360" stroke="#999" stroke-dasharray="4,4"/>
+  <line x1="310" y1="45" x2="310" y2="360" stroke="#999" stroke-dasharray="4,4"/>
+  <line x1="520" y1="45" x2="520" y2="360" stroke="#999" stroke-dasharray="4,4"/>
+
+  <rect x="50" y="30" width="100" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="100" y="47" text-anchor="middle" fill="#333">Node A</text>
+  <rect x="265" y="30" width="90" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="310" y="47" text-anchor="middle" fill="#333">DB Row</text>
+  <rect x="470" y="30" width="100" height="24" rx="4" fill="#e8e8e8" stroke="#666"/>
+  <text x="520" y="47" text-anchor="middle" fill="#333">Node B</text>
+
+  <line x1="100" y1="80" x2="310" y2="80" stroke="#4477aa" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="205" y="74" text-anchor="middle" fill="#4477aa" font-size="11">SELECT ... FOR UPDATE</text>
+  <line x1="310" y1="90" x2="100" y2="90" stroke="#4477aa" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr2)"/>
+  <text x="205" y="106" text-anchor="middle" fill="#4477aa" font-size="11">version = N 🔒</text>
+
+  <line x1="520" y1="130" x2="370" y2="130" stroke="#aa4444" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="445" y="124" text-anchor="middle" fill="#aa4444" font-size="11">SELECT ... FOR UPDATE</text>
+  <rect x="345" y="135" width="80" height="22" rx="3" fill="#fff3cd" stroke="#aa4444" stroke-dasharray="3,3"/>
+  <text x="385" y="150" text-anchor="middle" fill="#aa4444" font-size="10">blocked</text>
+  <line x1="370" y1="145" x2="370" y2="230" stroke="#aa4444" stroke-width="1" stroke-dasharray="2,3"/>
+
+  <text x="100" y="155" text-anchor="middle" fill="#333" font-size="11">append(entry₁)</text>
+  <line x1="100" y1="180" x2="310" y2="180" stroke="#4477aa" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="205" y="174" text-anchor="middle" fill="#4477aa" font-size="11">REPLACE + COMMIT</text>
+
+  <line x1="310" y1="240" x2="520" y2="240" stroke="#aa4444" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr2)"/>
+  <text x="415" y="256" text-anchor="middle" fill="#aa4444" font-size="11">version = N+1 🔒</text>
+
+  <text x="520" y="285" text-anchor="middle" fill="#333" font-size="11">append(entry₂)</text>
+  <line x1="520" y1="300" x2="310" y2="300" stroke="#aa4444" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="415" y="294" text-anchor="middle" fill="#aa4444" font-size="11">REPLACE + COMMIT</text>
+
+  <rect x="230" y="320" width="160" height="28" rx="4" fill="#ddffdd" stroke="#44aa44"/>
+  <text x="310" y="339" text-anchor="middle" fill="#44aa44" font-weight="bold" font-size="12">both hashes correct</text>
+
+  <defs><marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1"/></marker></defs>
+</svg>

@@ -1,68 +1,56 @@
-# HANDOFF — casehub-qhorus
+# Session Handover — 2026-10-07 (Session 2)
 
-## Last Session
+## What happened
 
-Completed Batch 3 of qhorus-mesh (#465) and designed the AgentProvider bridge. Session covered implementation (mesh module scaffold + MCP tools), architecture correction (shim dropped — Claude Code connects via SSE directly), and full brainstorming cycle for the agent integration layer.
+Continued #484 (audit and e2e cluster testing). Completed all 6 batches and validated e2e tests against real Podman clusters. Discovered 4 production bugs in the distributed mesh through e2e testing.
 
-**Implementation completed (on branch `issue-465-qhorus-mesh`):**
-- Fixed build break (28-arg backward-compat Channel constructor for compliance-report)
-- Scaffolded `mesh/` module — standalone Quarkus app, H2 file, MCP HTTP+SSE, health check
-- Implemented 7 MCP tools in `MeshMcpTools` (register, deregister, send, check, create, list, discover)
-- Added `InstanceService.register()` overload with metadata parameter
-- Updated CLAUDE.md with mesh module in project structure
+### Commits
 
-**Design completed (on workspace branch `issue-465-qhorus-mesh`):**
-- Dropped the connection shim (Task 8) — relay exposes SSE directly, no bridge needed
-- Brainstormed AgentProvider bridge — 11 decisions, standard review (3 rounds each for decisions + spec)
-- Wrote implementation plan: 5 batches, 5 tasks
+| Commit | What |
+|--------|------|
+| e3f25454 | CDI wiring and config gate integration tests (Batch 4) |
+| 7a9cf6aa | e2e-cluster module with 3 Podman e2e scenarios (Batches 5-6) |
+| 475996f8 | Jandex indexes for cluster/cache + relay enabled in mesh |
+| 92f9a507 | e2e harness fixes — parallel startup, API field names, deps |
+| b3ab7760 | e2e timeout tuning — proxy timeout, dead detection timing |
 
-## Resume Instructions
+### E2E validation results
 
-Branch is paused. Run `work resume` to restore it. Both repos will switch from main to `issue-465-qhorus-mesh`. The .plan and all specs/plans are on that branch.
+| Test | Result | What it proves |
+|------|--------|----------------|
+| DispatchRoutingE2ETest (3 tests) | GREEN | Message routing, cross-node DB visibility, cluster health |
+| NodeFailure: baseline + dead detection + writes | GREEN | DEAD detection works (3s proxy timeout × 3 misses = ~12s), surviving node accepts writes |
+| NodeFailure: restart rejoin | BLOCKED | Container startup fails — Flyway migration + HeartbeatService never re-probes DEAD peers |
+| Quorum: full cluster writes | GREEN | 3-node cluster accepts writes |
+| Quorum: minority rejects | PARTIAL | Dead detection works (24.5s for 2 peers), but write NOT rejected (200 instead of 400+) |
+| Quorum: majority restored | BLOCKED | Depends on minority test |
 
-## Remaining Work
+### Production bugs discovered
 
-All work is on branch `issue-465-qhorus-mesh`, issue casehubio/qhorus#465.
+1. **Cluster/cache modules had no Jandex index** — CDI beans invisible as library deps. The mesh relay was running WITHOUT clustering or caching. FIXED in 475996f8.
 
-### From original mesh plan (`plans/2026-10-01-qhorus-mesh.md`)
+2. **HeartbeatService skips DEAD peers permanently** — `tick()` has `if (ps.state() == NodeState.DEAD) continue`. Once a peer is DEAD, it's never re-probed. Node restarts depend on the restarted node probing the surviving nodes (reverse heartbeat). This works but is fragile.
 
-| Task | Status | Description |
-|------|--------|-------------|
-| Task 1: Channel.metadata | Done | V56 migration, record field, entity round-trip |
-| Task 2: ChannelQuery.byMetadata | Done | JPA + InMemory filtering |
-| Task 3: ChannelCreateRequest.metadata + REST | Done | setMetadata merge semantics, REST endpoint |
-| Task 4: Instance.metadata | Done | V57 migration, record field, entity round-trip |
-| Task 5: InstanceQuery.byMetadata | Done | JPA + InMemory filtering |
-| Task 6: Maven module scaffold | Done | mesh/ module, H2, MCP, health check |
-| Task 7: Core MCP tools | Done | 7 tools: register, deregister, send, check, create, list, discover |
-| Task 8: Connection shim | Dropped | Relay exposes SSE directly — no shim needed |
+3. **Cross-node proxy dispatch silently drops messages** — `WriteRoutingDecorator` proxies to owner via `WriteProxyClient.dispatch()`, returns 200, but the message doesn't appear in the shared database. `InternalMeshResource.dispatch()` receives the proxy but the dispatch fails silently.
 
-### From AgentProvider bridge plan (`plans/2026-10-02-agent-provider-bridge.md`)
+4. **Quorum enforcement doesn't block REST writes** — `WriteRoutingDecorator.canServeWrites()` check is present but writes via REST still return 200 in minority partition. Either the REST path bypasses the decorator, or the `QuorumViolationException` is caught/swallowed.
 
-| Batch | Task | Status | Description |
-|-------|------|--------|-------------|
-| 1 | AgentChannelBinding + SpeechActMapper | TODO | Binding record with builder; AgentEvent → MessageType mapping |
-| 2 | AgentProviderBackend | TODO | ChannelBackend (AT_LEAST_ONCE), sender loop guard, target routing, virtual thread async delivery, semaphore concurrency control |
-| 3 | AgentBridgeService | TODO | Lifecycle SPI — create/destroy/list bindings, AgentBackend key resolution, persistent session management |
-| 4 | MeshApi migration | TODO | Migrate MeshMcpTools @Tool → MeshApi @McpDomain + MeshService impl |
-| 5 | Integration test | TODO | Wire agent-bridge into mesh, COMMAND → agent → RESPONSE end-to-end |
+## Next action
 
-### Key design decisions
-
-- Bridge is `agent-bridge/` module at repo root (not in `mesh/` — mesh is an app, bridge is a library)
-- ChannelBackend (AT_LEAST_ONCE) for delivery, virtual thread async invocation
-- Sender-based loop guard only (indirect loops deferred to #468)
-- MeshMcpTools migrates to @McpDomain pattern (MeshApi + MeshService)
-- `casehub-platform` already has AgentProvider SPI with 7 backends (claude, openai, gemini, gemini-cli, codex, langchain4j, ollama) — bridge connects those to channels
-- Cache-aware prompt structuring: stable context in systemPrompt (cached), per-message content in query()
-- Commitment-aware terminal messages: RESPONSE fulfills COMMAND/QUERY, RESPONSE+DONE for PROPOSE
-- Binding persistence is ephemeral (ConcurrentHashMap, no JPA) — consumers recreate on startup
+File GitHub issues for the 4 bugs above, then close #484 via work-end.
 
 ## References
 
-- `specs/qhorus-mesh-agent-provider/2026-10-02-agent-provider-bridge-design.md` — full design spec (11 decisions, 3 review rounds)
-- `specs/qhorus-mesh-agent-provider/decisions.md` — 11 design decisions with rationale
-- `plans/2026-10-02-agent-provider-bridge.md` — implementation plan (5 batches, 5 tasks)
-- `specs/qhorus-mesh/2026-10-01-qhorus-mesh-design.md` — original mesh design
-- `plans/2026-10-01-qhorus-mesh.md` — original mesh implementation plan (Tasks 1-7 done, Task 8 dropped)
-- claudony #246/#247 — fleet deployment (future consumer of bridge)
+| Artifact | Path |
+|----------|------|
+| Design spec | `specs/issue-475-distributed-mesh/2026-10-07-audit-e2e-design.md` |
+| Implementation plan | `plans/2026-10-07-audit-e2e-cluster.md` |
+| Issue | #484 — audit and e2e cluster testing |
+| Epic | #475 — distributed mesh |
+
+## Project state
+
+- **Project branch:** `issue-475-distributed-mesh` — 43 commits
+- **Workspace branch:** `issue-475-distributed-mesh`
+- **.plan queue:** #484 (active, all batches done, e2e validated)
+- Build: green (full build passes, 94 cluster tests, e2e profile-gated)
