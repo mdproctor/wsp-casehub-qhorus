@@ -36,15 +36,15 @@
 
 ## D4: Consistency model
 
-**Choice:** Eventual consistency + total order per channel. Single writer per channel via partition ownership.
+**Choice:** Eventual consistency + total order per channel. Single writer per channel via partition ownership under normal operation; concurrent writers serialized by DB locks during network partitions (D11, D20).
 **Alternatives:**
 - Strong consistency everywhere — linearizable but kills throughput (cross-node coordination per message)
 - Best-effort with client-side dedup — simplest server-side but pushes complexity to clients
-**Rationale:** Conversation order within a channel is what matters. Cross-channel ordering is not semantically meaningful for agent communication.
-**Trade-offs:** Cross-channel queries (e.g., "all messages from agent X across channels") may see temporarily inconsistent views.
+**Rationale:** Conversation order within a channel is what matters. Cross-channel ordering is not semantically meaningful for agent communication. The "single writer" property is a performance optimisation via the hash ring, not a correctness invariant — DB locks (D11) guarantee serialisation regardless of how many nodes write concurrently.
+**Trade-offs:** Cross-channel queries (e.g., "all messages from agent X across channels") may see temporarily inconsistent views. During network partitions, fallback-to-local (D20) creates concurrent writers on the same channel — correctness is maintained by DB locks, but callers should not assume single-writer as an invariant.
 **Sources:** Channel-per-conversation design in qhorus
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-08)
 
 ## D5: Channel partitioning
 
@@ -54,9 +54,10 @@
 - Dynamic load-based rebalancing — best throughput distribution but complex (migration protocol, state transfer, split-brain prevention)
 **Rationale:** Deterministic, no coordination needed to route. Adding/removing nodes reassigns a fraction of channels. Well-understood (Dynamo, Cassandra, Kafka pattern).
 **Trade-offs:** Hot channels (high-traffic single channel) can't be split across nodes. Acceptable since agent channels are typically low-throughput.
+**Scope:** Applies at topology Level 4 (channel ownership) only. Levels 1–3 use any-node writes with DB lock serialisation (D18). D12, D15, and D16 depend on D5 but are only active when routing is enabled at Level 4.
 **Sources:** Consistent hashing literature (Karger et al.)
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-13)
 
 ## D6: Replication strategy
 
@@ -64,11 +65,11 @@
 **Alternatives:**
 - Per-node databases with custom replication — stronger data locality but requires state transfer protocol and creates consistency headaches
 - Everything replicated via application-level sync — unnecessary when all nodes share one database
-**Rationale:** Shared PostgreSQL eliminates the need for a custom replication protocol entirely. "Partitioned" means write-ownership (which node does the INSERT), not data locality. Every node reads from the same tables. This is a distributed application layer over a shared database, not a distributed database.
+**Rationale:** Shared PostgreSQL eliminates the need for a custom write replication protocol. "Partitioned" means write-ownership (which node does the INSERT), not data locality. Every node reads from the same tables. This is a distributed application layer over a shared database, not a distributed database. Read-side caching (D31 background sync) is an application-level optimisation that populates local caches from PostgreSQL — it is a one-directional read cache, not a correctness replication protocol.
 **Trade-offs:** Single PostgreSQL is a bottleneck at extreme scale. Mitigated by PostgreSQL read replicas for read-heavy workloads, and by the fact that agent messaging is conversation-pace, not streaming-pace.
 **Sources:** postgres-broadcaster module (existing cross-node primitive)
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-14)
 
 ## D7: Failure handling
 
@@ -112,10 +113,10 @@
 **Choice:** Container image accepting env vars (peer list, storage config, transport ports). Health endpoints reporting cluster membership status. Topology API for drift detection (expected vs actual cluster size, partition health).
 **Alternatives:** None — this is the contract ops specified.
 **Rationale:** Ops team explicitly defined the interface: "Don't design for ops integration. Design the best distributed messaging system you can. Ops will wrap whatever you build."
-**Trade-offs:** None — this is a boundary agreement, not a design choice.
+**Trade-offs:** Accepting the ops contract means qhorus cannot impose deployment constraints: minimum node count for quorum (D47), deployment ordering, or health prerequisites before accepting writes. The topology maturity ladder (D18) mitigates this by making each level self-contained and gracefully degradable.
 **Sources:** Ops team feedback
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-18)
 
 ## D11: Write model — hybrid hash ring + DB safety net
 
@@ -136,16 +137,17 @@
 
 ## D12: Write routing interception point
 
-**Choice:** CDI decorator on `MessageDispatcher` and `ChannelManager`. All callers (REST, MCP, A2A) get routing transparently — single interception point, no adapter changes needed. The decorator checks channel ownership via `ClusterManager.owner(channelId)` before delegating to the real service.
+**Choice:** `@Alternative @Priority` bean displacement on `MessageDispatcher` and `ChannelManager` via CDI producer methods in `RelayProducer`. All callers (REST, MCP, A2A) get routing transparently — single interception point, no adapter changes needed. The replacement bean checks channel ownership via `ClusterManager.owner(channelId)` before delegating to the real service.
 **Alternatives:**
 - JAX-RS filter on write endpoints — catches HTTP but MCP tools bypass JAX-RS (direct CDI calls), creating two interception points
+- CDI `@Decorator` with `@Delegate` — composes naturally via decoration chain, supports multiple decorators with `@Priority` ordering, but requires the delegate interface to be explicitly declared as a decorated type
 - Explicit routing in each protocol adapter — most control but every adapter must be modified and future adapters could forget to route
-**Rationale:** CDI decorator is the standard Quarkus interception mechanism. It sits at the service layer boundary, catching all callers regardless of protocol. Single place to maintain, impossible to bypass accidentally.
-**Trade-offs:** Decorator adds one method call per dispatch even for local writes (isLocal check). Negligible overhead — a hash lookup and string comparison.
+**Rationale:** `@Alternative @Priority` bean displacement via `RelayProducer` producer methods is the standard Quarkus pattern for conditional bean replacement gated by `@IfBuildProperty`. It sits at the service layer boundary, catching all callers regardless of protocol. Single place to maintain, impossible to bypass accidentally.
+**Trade-offs:** Bean displacement adds one method call per dispatch even for local writes (isLocal check). Negligible overhead. Unlike CDI `@Decorator` (which composes via decoration chain), `@Alternative @Priority` replaces the bean entirely — if a second wrapper is needed (e.g., metrics), the producer must explicitly compose the wrappers rather than relying on CDI decorator ordering.
 **Depends on:** D5 (consistent hashing), D11 (hybrid write model)
-**Sources:** Quarkus CDI decorator documentation, existing MessageDispatcher interface in api/message/
+**Sources:** RelayProducer.java (producer methods), existing MessageDispatcher interface in api/message/
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-11)
 
 ## D13: Internal node-to-node transport
 
@@ -177,11 +179,11 @@
 **Alternatives:**
 - Route MessageDispatcher.dispatch() only — simpler decorator, but channel config mutations during ring transitions could cause brief inconsistencies (one node modifying allowedWriters while another dispatches)
 **Rationale:** Channel ownership means owning ALL writes to that channel. Creating a channel on one node but dispatching to it on another creates a window where the channel exists in the DB but the owning node hasn't initialized its gateway registry for it. Routing creation to the eventual owner eliminates this.
-**Trade-offs:** Two decorators to maintain (MessageDispatcher + ChannelManager) instead of one. The ChannelManager decorator is thin — same pattern, same proxy client.
-**Depends on:** D5 (consistent hashing), D12 (decorator approach)
+**Trade-offs:** Two bean replacements to maintain (MessageDispatcher + ChannelManager) instead of one. The ChannelManager replacement is thin — same pattern, same proxy client. `findOrCreate()` currently bypasses routing — it always calls the local delegate; this is acceptable because name-based lookup is idempotent and the first-writer creates the channel regardless of node. Remote config mutation proxying (pause/resume, constraint changes) is not yet wired — throws `UnsupportedOperationException` for non-local channels. This is Phase A audit scope (#484).
+**Depends on:** D5 (consistent hashing), D12 (bean displacement approach)
 **Sources:** ChannelCreateHelper.java (creation + gateway init coupling), ChannelGateway.initChannel()
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-05)
 
 ## D16: Channel creation routing key
 
@@ -197,14 +199,14 @@
 
 ## D17: Cluster activation mechanism
 
-**Choice:** Config-gated CDI beans. `casehub.qhorus.cluster.enabled=true` activates clustering. When absent or false, all cluster beans are disabled via `@IfBuildProperty` — the decorator, heartbeat, health endpoints don't exist. Zero overhead in single-node mode.
+**Choice:** Config-gated CDI beans. `casehub.qhorus.relay.enabled=true` activates relay functionality. When absent or false, all relay beans are disabled via `@IfBuildProperty` — the routing decorator, heartbeat, health endpoints don't exist. Zero overhead in single-node mode.
 **Alternatives:**
 - Classpath presence only — adding the jar activates clustering; simpler but the decorator always wraps dispatch even in single-node mode, adding a code path that's never needed
-**Rationale:** The mesh app always includes the cluster module on its classpath, but not every deployment needs clustering (dev, small teams). Config gate ensures zero overhead when clustering isn't needed — no decorator, no heartbeat scheduler, no health endpoints.
-**Trade-offs:** Build-time property (`@IfBuildProperty`) means clustering can't be toggled at runtime — requires restart. Acceptable since cluster membership is a deployment-time decision.
-**Sources:** QhorusConfig pattern, existing @IfBuildProperty usage in qhorus
+**Rationale:** The mesh app always includes the cluster module on its classpath, but not every deployment needs relay functionality (dev, small teams). Config gate ensures zero overhead when relay is disabled — no routing decorator, no heartbeat scheduler, no health endpoints.
+**Trade-offs:** Build-time property (`@IfBuildProperty`) means relay mode can't be toggled at runtime — requires restart. Acceptable since relay membership is a deployment-time decision.
+**Sources:** RelayConfig (`@ConfigMapping(prefix = "casehub.qhorus.relay")`), RelayProducer (`@IfBuildProperty(name = "casehub.qhorus.relay.enabled")`)
 **Exploration:** quick
-**Status:** captured
+**Status:** revised (decision review R1-10)
 
 ---
 
@@ -360,7 +362,7 @@ Writes always go through PostgreSQL regardless of depth. The full relay is a rea
 **Depends on:** D25 (decorator approach), D26 (ring buffer structure)
 **Sources:** MessageService.dispatch(), MessageObserverDispatcher (afterCompletion pattern — PP-20260608-07daa6)
 **Exploration:** quick
-**Status:** revised (decision review R1-08)
+**Status:** revised (decision review R1-08). Implementation gap: `CachingMessageStore.put()` uses inline population; `afterCompletion` callback not yet applied (Phase A audit #484 scope)
 
 ## D28: Remote cache invalidation — MessageObserver (CLUSTER scope)
 
@@ -372,11 +374,11 @@ Note: the original design proposed piggybacking on `deliverRemote()`'s `messageS
 - Proactive cache push via internal RPC — lower latency but couples relays at the cache layer
 - `MessageStore.find()` piggyback — broken because `deliverRemote` uses `CrossTenantMessageStore`, not `MessageStore`
 **Rationale:** CLUSTER-scoped observers already fire for every remote write via `deliverRemote()` → `MessageObserverDispatcher.dispatchClusterOnly()`. The observer fires after transaction commit, so the cache never contains uncommitted data. The `MessageReceivedEvent` carries all fields needed to construct a cache entry.
-**Trade-offs:** `MessageReceivedEvent` does not carry the full `Message` object — it carries `messageId`, `channelName`, `channelId`, `messageType`, `senderId`, `correlationId`, `occurredAt`, `content`. The cache observer must reconstruct enough state for the ring buffer or load the full `Message` from JPA on first cache-miss read. Loading from JPA on the observer path is acceptable — it's a single-row read.
+**Trade-offs:** `MessageReceivedEvent` does not carry the full `Message` object. The cache observer must load the full `Message` from JPA via `MessageStore.find(messageId)` rather than constructing an incomplete object from the event — incomplete cache entries (null `inReplyTo`, empty `artefactRefs`, zero `version`) cause incorrect `MessageQuery.matches()` filtering against cached remote messages. Loading from JPA on the observer path is acceptable — it's a single-row primary key read.
 **Depends on:** D27 (post-commit for local), D26 (ring buffer)
 **Sources:** MessageObserver.java (api/gateway/), MessageObserverDispatcher, ChannelGateway.deliverRemote(), CrossTenantMessageStore (decision review R1-02)
 **Exploration:** quick
-**Status:** revised (decision review R1-02)
+**Status:** revised (decision review R1-02, R1-12)
 
 ## D29: Cache miss behaviour — range check then fall-through
 
@@ -628,4 +630,22 @@ Process:
 **Depends on:** D30 (cache module), D31 (full mode sync strategy)
 **Sources:** OwnershipScheduler.java (existing @Scheduled pattern), FullSyncService.java
 **Exploration:** quick
+**Status:** captured
+
+---
+
+# Implicit Decisions Surfaced by Review
+
+## D47: Quorum enforcement for write availability
+
+**Choice:** Majority quorum on the write path. `ClusterManager.canServeWrites()` checks that a strict majority of configured peers are reachable before allowing writes. `WriteRoutingDecorator` and `ChannelManagerDecorator` call this check before every mutation. Bypassed for single-node deployments (`configuredPeers.size() <= 1`). Configurable via `casehub.qhorus.relay.quorum-enforced` (default: `true`).
+**Alternatives:**
+- No quorum (DB locks only) — higher availability during partitions, but both sides of a network split accept writes and create conflicting ownership claims even though DB locks serialize individual writes correctly
+- Fencing tokens / epoch-based ownership — stronger guarantees but requires a consensus store (etcd, ZooKeeper) that the architecture deliberately avoids
+- Lease-based ownership with time-bounded writes — avoids coordination but introduces clock-skew sensitivity
+**Rationale:** Majority quorum is the simplest split-brain prevention mechanism that works with the existing heartbeat protocol (D7). It prevents a minority partition from accepting writes, which would create conflicting ownership claims.
+**Trade-offs:** A 2-node cluster has zero write fault tolerance when quorum is enforced — if one node dies, the survivor cannot serve writes (`1 > 2/2` is false with integer division). Minimum recommended cluster size for write fault tolerance is 3 nodes. Operators deploying 2-node clusters should set `casehub.qhorus.relay.quorum-enforced=false` and accept that both nodes may write concurrently during a partition (DB locks guarantee correctness). The `quorumEnforced` default of `true` is safe for 3+ node clusters but surprising for 2-node deployments — this should be documented in operational guidance.
+**Depends on:** D7 (heartbeat failure detection), D18 (topology ladder — Level 3+ only)
+**Sources:** ClusterManager.canServeWrites(), WriteRoutingDecorator.dispatch(), ChannelManagerDecorator, RelayConfig.quorumEnforced()
+**Exploration:** quick (surfaced by decision review R1-07)
 **Status:** captured
