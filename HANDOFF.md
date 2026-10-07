@@ -2,73 +2,57 @@
 
 ## What happened
 
-Phase 6 brainstorming and implementation for the distributed mesh epic (#475). Created follow-on issues for Phase 7 (#483) and audit/e2e testing (#484).
+Completed Phase 7 (#483) of the distributed mesh epic (#475) — all 6 CDI wiring and proxy issues implemented and closed.
 
-### Phase 6: dynamic ownership heuristics
+### Phase 7 summary
 
-Designed and implemented write-frequency-based channel ownership for the relay cluster:
+| Issue | Title | Commit | Tests |
+|-------|-------|--------|-------|
+| #481 | ChannelStore.listAllIds() for FullSyncService efficiency | c60a083b | 2 contract tests |
+| #477 | Wire dynamic ownership CDI — @Scheduled evaluator + tracker | 657257e1 | 2 unit tests |
+| #478 | Wire CachingMessageStore as CDI @Alternative | d8ac4a99 | — (CDI producer) |
+| #480 | CLUSTER-scoped MessageObserver for remote cache population | cd62410b | 4 unit tests |
+| #479 | Health check endpoints for cache and ownership stats | 3993ef50 | — (REST endpoints) |
+| #482 | Wire WriteProxyClient — actual HTTP client | 42f9c997 | 4 unit tests |
+| fix | Fix flaky evaluateOwnership test | 78119711 | — |
 
-- **Brainstormed** dynamic ownership (7 decisions: D32-D38)
-- **Decision review:** light pass — reviewer challenged complexity (R1-06), kept design after analysis showed ~200 LoC and DB locks guarantee correctness regardless
-- **Wrote spec:** `specs/issue-475-distributed-mesh/2026-10-07-dynamic-ownership-design.md`
-- **Wrote plan:** `plans/2026-10-07-dynamic-ownership-phase6.md`
-- **Implemented** (5 commits):
+**Full build green** (3m42s). 78 cluster tests, 30 cache tests.
 
-| Component | What it does | Tests |
-|-----------|-------------|-------|
-| `BucketWindow` | Circular bucket array for sliding window counting (AtomicLong, Clock-injectable) | 7 |
-| `WriteFrequencyTracker` | Per-channel ConcurrentHashMap of BucketWindows, rotateAll with prune | 6 |
-| `OwnershipClaim` | Record: nodeId + writeCount, carried in HeartbeatResponse | — |
-| `DynamicOwnershipResolver` | Layered resolver: dynamic claims → hash ring fallback | 6 |
-| `OwnershipEvaluator` | Periodic scan: claims when local > 2x owner, relinquishes on zero | 7 |
-| Integration | ClusterManager ownership methods, HeartbeatResponse extension, HeartbeatService propagation, WriteRoutingDecorator tracker, RelayProducer wiring, OwnershipConfig | 5 |
+### What was wired
 
-**31 new tests, 72 total in cluster module.** Full build green (4m11s).
-
-### Follow-on issues created
-
-| Issue | Title | Scale | Blocked by |
-|-------|-------|-------|------------|
-| #477 | wire dynamic ownership CDI — @Scheduled evaluator + tracker injection | XS | — |
-| #478 | wire CachingMessageStore as CDI @Alternative | XS | — |
-| #479 | add health check endpoints for cache and ownership stats | S | — |
-| #480 | add CLUSTER-scoped MessageObserver for remote cache population | S | — |
-| #481 | add ChannelStore.listAllIds() for FullSyncService efficiency | XS | — |
-| #482 | wire WriteProxyClient — actual HTTP client for cross-node dispatch | M | — |
-| #483 | **epic: Phase 7** — groups #477-#482 | L | — |
-| #484 | distributed mesh audit and e2e cluster testing | XL | #483 |
+- **OwnershipScheduler** — `@Scheduled` bean calls `ClusterManager.evaluateOwnership()` every 10s (configurable), gated by relay + dynamic routing
+- **WriteRoutingDecorator** — produced as `@Alternative @Priority(100) MessageDispatcher`, injecting `CdiMessageService` by concrete class to break interface cycle
+- **CachingMessageStore** — `@Alternative @Priority(1) MessageStore` via `CacheProducer`, wrapping `JpaMessageStore`, gated by `casehub.qhorus.cache.enabled=true`
+- **FullSyncService** — CDI-produced by `CacheProducer` for background sync in full mode
+- **CachePopulationObserver** — `MessageObserver` with `Scope.CLUSTER` for remote cache warm-up
+- **WriteProxyClient** — real `java.net.http.HttpClient` calling `InternalMeshResource` endpoints (dispatch, create/delete/pause/resume channel), timeout from config
+- **Health endpoints** — `GET /health/ownership` (claims map), `GET /health/cache` (channel/message counts, sync status)
 
 ## Next action
 
-**Start Phase 7 (#483).** The `.plan` queue has #483 then #484. Begin with `work continue` — the branch is `issue-475-distributed-mesh` and the queue is populated.
-
-#477 and #478 are prerequisites (without them, dynamic ownership and caching are dead code). #482 (WriteProxyClient) is the largest item. #479, #480, #481 are independent.
+**#484 — audit and e2e cluster testing.** The .plan queue has this as the last item. This is XL and blocked nothing — it's the final validation pass before the distributed mesh can ship.
 
 ## Architecture summary
 
-- `routing=dynamic` activates the ownership heuristic alongside the hash ring
-- Each relay tracks its own originating writes via bucket-based sliding windows (5min, 10 buckets)
-- OwnershipEvaluator runs every 10s, claims channels when local writes > 2x owner's writes (and >= 5 min-claim-writes)
-- Claims propagated via HeartbeatResponse — one heartbeat round (~3s) reconstructs cluster ownership map on restart
-- Relinquishment on zero writes → reverts to hash ring
-- Config: `casehub.qhorus.relay.ownership.*` (window-seconds, bucket-count, evaluation-interval-seconds, hysteresis-ratio, min-claim-writes)
+The distributed mesh is now fully wired:
+- `RelayProducer` (cluster module) produces all cluster beans: `ClusterManager`, `WriteProxyClient`, `WriteFrequencyTracker`, `WriteRoutingDecorator` (as `MessageDispatcher`), `OwnershipEvaluator` (internal to manager)
+- `CacheProducer` (cache module) produces `CachingMessageStore` and `FullSyncService`
+- `OwnershipScheduler` drives periodic ownership evaluation
+- `CachePopulationObserver` populates remote caches via CLUSTER-scoped observer
 
 ## References
 
 | Artifact | Path |
 |----------|------|
-| Phase 6 spec | `specs/issue-475-distributed-mesh/2026-10-07-dynamic-ownership-design.md` |
-| Phase 6 plan | `plans/2026-10-07-dynamic-ownership-phase6.md` |
-| Decisions D1-D38 | `specs/issue-475-distributed-mesh/decisions.md` |
-| Decision review | `/Users/mdproctor/reviews/casehub-qhorus/issue-475-phase6-decision-20261007-031050/` |
-| Consolidated spec | `specs/issue-475-distributed-mesh/2026-10-06-distributed-mesh-consolidated.md` |
-| Epic issues | #475 (Phases 1-6), #483 (Phase 7), #484 (audit/e2e) |
+| Phase 7 issues | #477, #478, #479, #480, #481, #482 (all closed) |
+| Phase 7 epic | #483 (closed) |
+| Next issue | #484 — audit and e2e cluster testing |
+| Cluster module | `cluster/` — 28 source files, 78 tests |
+| Cache module | `cache/` — 7 source files, 30 tests |
 
 ## Project state
 
-- **Project branch:** `issue-475-distributed-mesh` — 25 commits (Phases 1-6)
+- **Project branch:** `issue-475-distributed-mesh` — 32 commits (Phases 1-7)
 - **Workspace branch:** `issue-475-distributed-mesh`
-- **.plan queue:** #483 → #484
-- Build: green (`mvn clean install` — all modules, all tests pass, 4m11s)
-- Cluster module: 72 tests, 21 source files
-- Cache module: 26 tests, 4 source files
+- **.plan queue:** #484 (next)
+- Build: green (all modules, all tests pass, 3m42s)
