@@ -1,1 +1,1 @@
-# Design Journal — issue-485-cluster-bug-fixes
+# Design Journal — issue-488-cluster-hardening

@@ -1,0 +1,15 @@
+# Work Plan — issue-488-cluster-hardening
+
+## State
+branch: issue-488-cluster-hardening
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 488
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#488 — Issue #488 ← active
