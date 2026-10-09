@@ -1,0 +1,15 @@
+# Work Plan — issue-484-mesh-audit-e2e
+
+## State
+branch: issue-484-mesh-audit-e2e
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 484
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#484 — Issue #484 ← active
