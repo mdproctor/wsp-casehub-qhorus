@@ -28,13 +28,14 @@ Map every write path into `MessageService.dispatch()` and verify convergence thr
 | WebSocket inbound | websocket-observer | Observer only — not a write path |
 | Connector inbound | connector-backend | ConnectorChannelBackend → ChannelGateway.receiveHumanMessage() → MessageService.dispatch() (×2: content + normaliser telemetry EVENT) |
 | Internal mesh `POST /internal/dispatch` | cluster | InternalMeshResource → CdiMessageService.dispatch() |
-| MeshService `meshSendMessage` | mesh | MeshService → MessageDispatcher.dispatch() |
+| MeshService `meshSendMessage` | mesh | MeshService → MessageDispatcher.dispatch() (CDI resolves to `RoutingConsumerMessaging` → `WriteRoutingDecorator` → `CdiMessageService` when cluster module is on classpath) |
 
 Verify:
 1. All write paths converge through `MessageService.dispatch()` enforcement gate
-2. The cluster decorator `WriteRoutingDecorator` intercepts all paths via `ConsumerMessaging` / `MessageDispatcher` CDI alternatives (`@Alternative @Priority(100)`)
+2. The cluster decorator `WriteRoutingDecorator` intercepts all paths via `ConsumerMessaging` / `MessageDispatcher` CDI alternatives (`@Alternative @Priority(100)` on producer methods in `RelayProducer`, not on the classes themselves)
 3. No path bypasses rate limiting, ACL, or protocol enforcement
 4. `InternalMeshResource` dispatches through `CdiMessageService` (not `ConsumerMessaging`) to avoid proxy loops — the proxied message must execute locally on the target node
+5. `MeshService.meshSendMessage()` injects `MessageDispatcher` which CDI resolves to `RoutingConsumerMessaging` when the cluster module is present — confirm the full routing chain is exercised, not just the local `MessageService`
 
 ### Part B: Cross-Module Composition
 
@@ -42,7 +43,7 @@ Verify correct composition when cluster, cache, and postgres-broadcaster modules
 
 | Bean | Type | Priority | Wraps |
 |---|---|---|---|
-| `RoutingConsumerMessaging` | `ConsumerMessaging` @Alternative | 100 | `CdiMessageService` (dispatch) + `CdiMessageService` (queries) |
+| `RoutingConsumerMessaging` | `ConsumerMessaging` @Alternative (via `RelayProducer` producer method) | 100 | `WriteRoutingDecorator` (dispatch routing) + `CdiMessageService` (queries via `ConsumerMessaging`) |
 | `ChannelManagerDecorator` | `ChannelManager` @Alternative | 100 | `ChannelService` |
 | `CachingMessageStore` | `MessageStore` @Alternative | 100 | `JpaMessageStore` |
 | `CachePopulationObserver` | `MessageObserver` CLUSTER | — | Direct cache population on remote nodes |
@@ -53,6 +54,7 @@ Check:
 - When cache/cluster modules are absent (not on classpath), system degrades to single-node with no errors
 - `@IfBuildProperty` gates on all cluster beans prevent config mapping registration failures when relay is disabled
 - `ChannelManagerDecorator.applyTo()` switch covers all `ChannelManager` mutation methods (verify against current interface)
+- **`findOrCreate()` routing bypass:** `ChannelManagerDecorator.findOrCreate()` currently delegates directly to the local delegate without routing or quorum checks. Every other mutation method either routes to the hash-ring owner or checks `canServeWrites()`. Fix: add quorum check to `findOrCreate()` (a minority-partition node must not create channels). Routing is less critical because the shared database provides atomicity for the find path, but the quorum bypass is a correctness gap.
 
 ### Audit Output
 
@@ -81,14 +83,22 @@ Replace generic `RuntimeException` in `WriteProxyClient` with typed exceptions:
 | `ProxyAuthException` | HTTP 401/403 from `InternalSecretFilter` | Log loudly (misconfiguration), fallback |
 | `ProxyDispatchException` (exists) | HTTP 4xx (non-auth), HTTP 5xx, fail-fast mode | Propagate or fallback per config |
 
+**Structural refactoring of `WriteProxyClient.post()` and `get()`:** Both methods currently have a single `catch (Exception e)` that wraps everything uniformly. Refactor to split the catch blocks:
+1. Inside the try, after `httpClient.send()`: check HTTP status — 401/403 → throw `ProxyAuthException`; other 4xx/5xx → throw `ProxyDispatchException` with status code
+2. Catch `IOException | InterruptedException` → throw `ProxyTimeoutException` (network-level failure)
+3. Catch `com.fasterxml.jackson.core.JsonProcessingException` → throw `ProxyDispatchException` (deserialization failure — the remote responded but the response is unparseable)
+4. Catch remaining `Exception` → throw `ProxyDispatchException` (unexpected)
+
+The `get()` method (used by heartbeat) needs the same treatment as `post()`.
+
 `WriteRoutingDecorator` catch blocks distinguish:
-- `ProxyTimeoutException` → fallback, log at DEBUG (expected during node failure)
-- `ProxyAuthException` → fallback, log at ERROR (misconfiguration needs attention)
+- `ProxyTimeoutException` → fallback, log at WARN (operationally significant — the caller's message was locally dispatched instead of proxied, and sustained timeouts indicate a dead node that needs attention)
+- `ProxyAuthException` → fallback, log at ERROR (misconfiguration needs immediate attention)
 - `ProxyDispatchException` → existing behavior (fallback or rethrow per `proxyFallback` config)
 
 ### 2c: Cleanup and Visibility
 
-- Audit `public` vs `package-private` on cluster module classes — `BucketWindow`, `WriteFrequencyTracker`, `OwnershipClaim` etc. should be package-private where only used internally
+- Audit `public` vs `package-private` on cluster module classes — `BucketWindow`, `WriteFrequencyTracker` should be package-private (confirmed: references are all within `io.casehub.qhorus.cluster`). `OwnershipClaim` must remain public — it is serialized by Jackson in `HeartbeatResponse` and `OwnershipHealthResponse` REST endpoints (inter-node API contract)
 - Remove stale TODO/stub code from the phased build
 - Consolidate `WriteProxyClient` constructor overloads (4 constructors → primary + test-injection)
 - Verify `ChannelConfigRequest.applyTo()` switch covers all current `ChannelManager` mutation methods
@@ -108,9 +118,20 @@ All tests extend the existing `ClusterTestHarness` pattern (D2). Each test class
 3. **Post-transfer proxy:** After transfer, send message from node-a → verify it gets proxied to node-b and is visible on both nodes
 4. **Relinquish:** Stop writing from node-b → wait for evaluation → verify ownership reverts to hash-ring default
 
-**Harness addition:** `getOwnership(nodeId, channelId)` — calls `GET /health/cluster/ownership/{channelId}` (new endpoint on `ClusterHealthResource` returning `{owner: nodeId, claimed: boolean}`). The existing `/health/cluster` endpoint reports cluster-level health; per-channel ownership needs a dedicated query.
+**Harness additions:**
+- `getOwnership(nodeId, channelId)` — calls `GET /health/cluster/ownership/{channelId}` (new endpoint on `ClusterHealthResource`). Response: `{owner: nodeId, source: "hash-ring" | "dynamic-claim", claimWriteCount: long}`. The `source` field distinguishes hash-ring default ownership from dynamic claim-based ownership so tests can assert that ownership transferred via a claim, not that the hash ring happened to assign it.
+- `getLocalClaims(nodeId)` — calls existing `GET /health/ownership` endpoint (returns `OwnershipHealthResponse` with all local claims for THIS node). Used to verify a node's own claim state after ownership transfer.
+- Test 3a.3 (post-transfer proxy) verifies proxy happened by querying the ownership endpoint on BOTH nodes and asserting they agree node-b is the owner — since both nodes share the same `DynamicOwnershipResolver` state via heartbeat claim propagation, agreement confirms the routing table is correct. The message being visible on both nodes then confirms the proxy path worked (node-a doesn't own the channel, so it must have proxied).
 
 **Infrastructure requirement:** The ownership evaluation interval must be shortened for e2e tests (e.g., 3s instead of 10s) via container env var `CASEHUB_QHORUS_RELAY_OWNERSHIP_EVALUATION_INTERVAL_SECONDS=3`.
+
+### 3a-bis: NodeFailureFallbackE2ETest
+
+Extends the existing `NodeFailureE2ETest` coverage with dispatch-level fallback and ownership reconstruction. 2-node cluster with dynamic routing enabled.
+
+1. **Fallback-to-local during failure:** Create channel owned by node-a (via hash ring or dynamic claim). Stop node-a. Send message from node-b targeting that channel → verify the message succeeds via fallback-to-local dispatch (`proxyFallback=local`) and is visible on node-b
+2. **Ownership reconstruction after recovery:** Restart node-a → wait for cluster convergence → send messages from node-a to the channel → wait for ownership evaluation → verify ownership claims propagate via heartbeat (query `getLocalClaims()` on both nodes to confirm convergence)
+3. **Post-recovery routing consistency:** After reconstruction, send message from node-b → verify it is proxied to the correct owner (whichever node the evaluator assigned based on write frequency)
 
 ### 3b: CacheCoherenceE2ETest
 
@@ -140,18 +161,21 @@ All tests extend the existing `ClusterTestHarness` pattern (D2). Each test class
 
 ```dockerfile
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4
-COPY target/*-runner /application
+COPY mesh-runner /application
 RUN chmod 775 /application
-ENTRYPOINT ["./application", "-Xmx64m"]
+ENTRYPOINT ["./application", "-Xmx128m"]
 ```
 
-Placed alongside the existing JVM `Dockerfile` in `e2e-cluster/src/test/resources/`.
+Placed alongside the existing JVM `Dockerfile` in `e2e-cluster/src/test/resources/`. Note: 128MB heap (not 64MB) — the mesh module runs CachingMessageStore (in-memory LRU), postgres-broadcaster (reactive PgPool/Netty buffers), and cluster module (ConcurrentHashMap-based claims, sliding window trackers). Native images use ~50-75% less heap than JVM mode (JVM uses 256MB), making 128MB the conservative lower bound with headroom.
 
 ### Build Integration
 
 - `mesh/pom.xml` already has the `native` profile from Quarkus parent
-- `ClusterTestHarness` gains a system property `mesh.container.mode` (default `jvm`, alternative `native`) that selects between Dockerfiles
-- When `native`, the harness copies `mesh/target/*-runner` instead of `mesh/target/quarkus-app/`
+- `ClusterTestHarness.buildImage()` uses Testcontainers' programmatic build context (not a traditional Docker build). For native mode, `buildImage()` must:
+  1. Select `Dockerfile.native` from classpath instead of `Dockerfile`
+  2. Copy the native runner binary (e.g., `mesh/target/casehub-qhorus-mesh-0.2-SNAPSHOT-runner`) into the build context under the name `mesh-runner` (matching the Dockerfile's `COPY mesh-runner /application`)
+  3. Use `withFileFromPath("mesh-runner", nativeRunnerPath)` instead of `withFileFromPath("quarkus-app", meshTarget)`
+- `ClusterTestHarness` gains a system property `mesh.container.mode` (default `jvm`, alternative `native`) that selects between build paths
 - New Maven profile in `e2e-cluster/pom.xml`: `-Pwith-e2e-native` sets `mesh.container.mode=native`
 
 ### What This Catches
