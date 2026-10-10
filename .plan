@@ -13,17 +13,17 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/qhorus#484 — Issue #484 ← active
-  - [ ] Batch 1: Audit-Fix
-    - [ ] Task 1: findOrCreate quorum bypass
-    - [ ] Task 2: Typed proxy exceptions
-    - [ ] Task 3: Visibility tightening
-  - [ ] Batch 2: Ownership-Endpoint
-    - [ ] Task 4: Per-channel ownership query
-  - [ ] Batch 3: E2E-Tests
-    - [ ] Task 5: Extend harness helpers
-    - [ ] Task 6: OwnershipTransferE2ETest
-    - [ ] Task 7: NodeFailureFallbackE2ETest
-    - [ ] Task 8: CacheCoherenceE2ETest
-    - [ ] Task 9: ChannelCreationRoutingE2ETest
-  - [ ] Batch 4: Native-Image
-    - [ ] Task 10: Dockerfile and harness support
+  - [x] Batch 1: Audit-Fix
+    - [x] Task 1: findOrCreate quorum bypass
+    - [x] Task 2: Typed proxy exceptions
+    - [x] Task 3: Visibility tightening
+  - [x] Batch 2: Ownership-Endpoint
+    - [x] Task 4: Per-channel ownership query
+  - [x] Batch 3: E2E-Tests
+    - [x] Task 5: Extend harness helpers
+    - [x] Task 6: OwnershipTransferE2ETest
+    - [x] Task 7: NodeFailureFallbackE2ETest
+    - [x] Task 8: CacheCoherenceE2ETest
+    - [x] Task 9: ChannelCreationRoutingE2ETest
+  - [x] Batch 4: Native-Image
+    - [x] Task 10: Dockerfile and harness support
