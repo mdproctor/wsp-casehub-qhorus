@@ -1,0 +1,15 @@
+# Work Plan — issue-489-registry-migration
+
+## State
+branch: issue-489-registry-migration
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 489
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#489 — Issue #489 ← active
