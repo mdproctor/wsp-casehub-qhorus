@@ -1,0 +1,15 @@
+# Work Plan — issue-464-yaml-channel-config
+
+## State
+branch: issue-464-yaml-channel-config
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 464
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#464 — Issue #464 ← active
