@@ -13,3 +13,9 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#464 — Issue #464 ← active
+  - [ ] Batch 1: Config+Bootstrap
+    - [ ] Task 1: ChannelConfig interface
+    - [ ] Task 2: ChannelConfigBootstrap creation
+  - [ ] Batch 2: Drift+Integration
+    - [ ] Task 3: Drift detection
+    - [ ] Task 4: Integration test
