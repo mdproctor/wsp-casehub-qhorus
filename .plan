@@ -1,0 +1,16 @@
+# Work Plan — issue-464-yaml-channel-config
+
+## State
+branch: issue-464-yaml-channel-config
+state: closing:promoted
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 464
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+evidence-era: true
+
+## Queue
+- [x] casehubio/qhorus#464 — Issue #464

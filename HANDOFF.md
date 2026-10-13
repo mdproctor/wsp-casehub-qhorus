@@ -1,33 +1,39 @@
-# Session Handover — 2026-10-08
+# Session Handover — 2026-10-13
 
 ## What happened
 
-Completed #488 (cluster hardening epic) — all three sub-tasks landed on main as `339a5464`. Closed #476 (cache CDI wiring, completed within #488). Labeled all open issues with scale/complexity.
+Completed #489 (RegistryBackedInstanceManager) — landed as `4c997ed9` on main. Then started #464 (YAML channel config) — design spec and implementation plan written, no code yet.
 
-- **Split-brain safety**: `ProxyFallbackEvent` CDI event + configurable fail-fast via `casehub.qhorus.relay.proxy-fallback` (local|fail). `WriteRoutingDecorator` fires event on every proxy failure; `fail` mode throws `ProxyDispatchException`.
-- **Cache CDI wiring (#476)**: `CacheCdiWiringTest`, `CacheDisabledTest`, `CacheHealthResourceTest`. Changed `enableIfMissing` from `true` to `false` — cache now requires explicit opt-in. Garden entry GE-20261008-6575cd captures the `enableIfMissing` gotcha.
-- **E2E test**: `cross_node_dispatch_via_proxy` — sends from node-b to channel on node-a, verifies via shared PostgreSQL.
+### #489 — RegistryBackedInstanceManager (done)
 
-## Decisions
+Thin CDI adapter implementing `InstanceManager` by delegating to platform `RegistryService` SPI.
+- `@ApplicationScoped @Alternative @Priority(100) @IfBuildProperty(casehub.qhorus.instance.registry-backed=true)`
+- Fires `InstanceRegisteredEvent` (capability diff) and `InstanceDeregisteredEvent`
+- `QhorusConfig.Instance.registryBacked()` registered for SmallRye validation
+- `@Inject` on 3-arg CDI constructor (required: multiple constructors)
+- `quarkus.index-dependency` for `casehub-platform-registry-inmem` (no Jandex in jar)
+- 16 unit + 5 integration tests. 2104 full suite, 0 regressions.
 
-- `enableIfMissing=false` for cache module — consistent with relay, correct for optional library
-- `ProxyFallbackEvent` stays in `cluster/` package (not `api/`) — cluster-internal for now, promote if external consumers need it
+### #464 — YAML channel config (in progress — design complete, implementation not started)
 
-## Next action
+- **Design spec:** `specs/issue-464-yaml-channel-config/2026-10-13-yaml-channel-config-design.md`
+- **Plan:** `plans/2026-10-13-yaml-channel-config.md`
+- **Decisions:** `specs/issue-464-yaml-channel-config/decisions.md` (4 decisions)
 
-#484 (distributed mesh audit and E2E testing) — the last open child of #475. The E2E harness and first test exist; remaining work is extending coverage and running the code audit.
+Design: SmallRye `@ConfigMapping` with `Map<String, ChannelConfig>` under `casehub.qhorus.channels`. Full field surface (everything except `preAssignedId`). `ChannelConfigBootstrap` on `@Observes StartupEvent` — `findOrCreate()` + drift detection (WARN, no auto-correct). Space resolved by name.
 
-## References
+Plan: 2 batches, 4 tasks — config interface, bootstrap bean, drift detection, integration test.
 
-| Artifact | Location |
-|----------|----------|
-| Project commits | `fccfba6f`..`339a5464` on main (5 commits) |
-| Spec | `docs/specs/issue-488-cluster-hardening/` |
-| Diary | `docs/blog/2026-10-08-mdp01-hardening-the-cluster-layer.md` |
-| Garden | GE-20261008-6575cd (enableIfMissing gotcha) |
+## To resume
 
-## Project state
+```
+work continue
+```
 
-- Both repos on main, branch `issue-488-cluster-hardening` closed and stamped
-- Build: green (105 cluster tests, 38 cache tests)
-- #475 epic: 12/13 children closed, #484 remains
+Execute the plan at `plans/2026-10-13-yaml-channel-config.md` with `executing-plans`.
+
+## State
+
+- **Project repo:** clean, on `issue-464-yaml-channel-config` (no commits on branch — same as main)
+- **Workspace:** 3 unpushed commits (spec, plan, .plan tasks)
+- **IntelliJ:** needs reopening
