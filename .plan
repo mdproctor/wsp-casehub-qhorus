@@ -1,0 +1,15 @@
+# Work Plan — issue-473-correction-retraction-erasure
+
+## State
+branch: issue-473-correction-retraction-erasure
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 473
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#473 — Issue #473 ← active
