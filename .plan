@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-464-yaml-channel-config
-state: closing:verified
+state: closing:promoted
 project-sha: 
 date: 
 issue-repo: casehubio/qhorus
