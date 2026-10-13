@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-464-yaml-channel-config
-state: closing:review
+state: closing:verified
 project-sha: 
 date: 
 issue-repo: casehubio/qhorus
@@ -10,13 +10,7 @@ covers: 464
 design-repo: 
 design-section-hashes: 
 flyway-next-v: none
-
 evidence-era: true
+
 ## Queue
-- [ ] casehubio/qhorus#464 — Issue #464 ← active
-  - [x] Batch 1: Config+Bootstrap
-    - [x] Task 1: ChannelConfig interface
-    - [x] Task 2: ChannelConfigBootstrap creation
-  - [x] Batch 2: Drift+Integration
-    - [x] Task 3: Drift detection
-    - [x] Task 4: Integration test
+- [x] casehubio/qhorus#464 — Issue #464
