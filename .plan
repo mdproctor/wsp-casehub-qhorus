@@ -1,7 +1,7 @@
 ---
 branch: issue-490-restore-defaultbean
 base_branch: main
-state: active
+state: closing:review
 ---
 
 - [x] #490 fix-cdi-ambiguity-defaultbean (casehubio/qhorus)
