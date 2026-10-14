@@ -1,7 +1,0 @@
----
-branch: issue-491-fix-test-failures
-base_branch: main
-state: closing:promoted
----
-
-- [x] #491 fix-test-failures (casehubio/qhorus)
