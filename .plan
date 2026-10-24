@@ -8,11 +8,11 @@ base-branch: main
 
 ## Queue
 - [ ] casehubio/qhorus#495 — enforce mesh participation on message posting ← active
-  - [ ] Batch 1: API Types and SPI
-    - [ ] Task 1: ParticipationPolicyMode enum + MeshAutoRegistrar SPI + Channel record update
-  - [ ] Batch 2: Persistence and Configuration
-    - [ ] Task 2: ChannelEntity JPA mapping + Flyway migration + QhorusConfig
-  - [ ] Batch 3: Core Enforcement Logic
-    - [ ] Task 3: DefaultMeshAutoRegistrar + MessageService participation gate
-  - [ ] Batch 4: Channel Configuration Bootstrap and Integration
-    - [ ] Task 4: ChannelConfigBootstrap support + ChannelsApi MCP tools + integration test
+  - [x] Batch 1: API Types and SPI
+    - [x] Task 1: ParticipationPolicyMode enum + MeshAutoRegistrar SPI + Channel record update
+  - [x] Batch 2: Persistence and Configuration
+    - [x] Task 2: ChannelEntity JPA mapping + Flyway migration + QhorusConfig
+  - [x] Batch 3: Core Enforcement Logic
+    - [x] Task 3: DefaultMeshAutoRegistrar + MessageService participation gate
+  - [x] Batch 4: Channel Configuration Bootstrap and Integration
+    - [x] Task 4: ChannelConfigBootstrap support + ChannelsApi MCP tools + integration test
