@@ -26,7 +26,7 @@
 
 ## D3: Auto-registration shape — SPI with minimal @DefaultBean
 
-**Choice:** MeshParticipationPolicy SPI with a @DefaultBean that creates minimal instances (instanceId=sender, status=online, no capabilities). Consumers provide @Alternative for enriched auto-registration.
+**Choice:** MeshAutoRegistrar SPI with a @DefaultBean that creates minimal instances (instanceId=sender, status=online, no capabilities). Consumers provide @Alternative for enriched auto-registration.
 **Alternatives:**
 - Minimal instance only, no SPI — hardcode minimal creation, add SPI later. YAGNI, but Claudony already needs enriched instances (session binding, capabilities from pool context).
 - Infer actorType as capability — use dispatch's actorType as a capability tag. Risks stale data since the sender didn't explicitly declare capabilities.

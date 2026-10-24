@@ -55,25 +55,65 @@ The participation check sits in `MessageService.dispatch()` after tenant + pause
 
 This position ensures that auto-registered instances (with SPI-provided capabilities) are visible to capability-based ACL entries in step 4.
 
+### ParticipationPolicyMode Enum
+
+```java
+// api/src/main/java/io/casehub/qhorus/api/channel/ParticipationPolicyMode.java
+public enum ParticipationPolicyMode {
+    OPEN,
+    AUTO_REGISTER,
+    ENFORCE;
+
+    public boolean requiresLookup() {
+        return this != OPEN;
+    }
+}
+```
+
+Located in `api/channel/` alongside `EnforcementMode`, `ChannelSemantic`, and `MemberRole`.
+
 ### Channel Model Addition
 
 ```java
-// On Channel record/entity
-String participationPolicy;  // null = inherit global default; "OPEN" | "AUTO_REGISTER" | "ENFORCE"
+// On Channel record — typed enum, matching enforcementMode pattern
+ParticipationPolicyMode participationPolicy;  // null = inherit global default
 ```
 
-Exposed via existing `ChannelResource` REST API and Qhorus MCP tools for channel configuration.
+The JPA `ChannelEntity` stores this as `String participationPolicy` and converts via `ParticipationPolicyMode.valueOf()` in `toDomain()`/`fromDomain()`, matching the existing `enforcementMode` pattern.
 
-### MeshParticipationPolicy SPI
+Exposed via `ChannelsApi` (`@McpDomain`) — a new Mesh Participation section with `@PlatformQuery` getter and `@PlatformMutation` setter, following the existing Enforcement and Policy Overrides pattern. Also exposed via `ChannelResource` REST API.
+
+### Config-File Per-Channel Support
+
+`QhorusConfig.ChannelConfig` gets a new field for static per-channel configuration in `application.properties`:
 
 ```java
-// api/src/main/java/io/casehub/qhorus/api/spi/MeshParticipationPolicy.java
-public interface MeshParticipationPolicy {
+// In QhorusConfig.ChannelConfig
+Optional<ParticipationPolicyMode> participationPolicy();
+```
+
+This allows operators to configure participation policy alongside other channel settings at deployment time:
+
+```properties
+casehub.qhorus.channels.work-channel.participation-policy=AUTO_REGISTER
+casehub.qhorus.channels.system-events.participation-policy=OPEN
+```
+
+`ChannelConfigBootstrap` reads this and sets it on channel creation, with drift detection for existing channels (WARN, no auto-correct) — same as all other config-bootstrapped fields.
+
+### MeshAutoRegistrar SPI
+
+```java
+// api/src/main/java/io/casehub/qhorus/api/spi/MeshAutoRegistrar.java
+public interface MeshAutoRegistrar {
 
     /**
      * Called when AUTO_REGISTER mode fires for an unregistered sender.
      * Returns the instance to register, or empty to skip auto-registration
      * (effectively treating this dispatch as OPEN for this sender).
+     *
+     * Exceptions propagate and fail the dispatch — the sender is not
+     * registered and the message is not delivered.
      */
     Optional<InstanceRegistration> autoRegister(MessageDispatch dispatch);
 
@@ -87,6 +127,10 @@ public interface MeshParticipationPolicy {
 }
 ```
 
+Named `MeshAutoRegistrar` (not `MeshParticipationPolicy`) to distinguish the SPI's purpose (how to shape an auto-registered instance) from the config's purpose (which mode to use). The config property and enum control the participation *policy*; the SPI controls the auto-registration *strategy*.
+
+**Error handling:** Exceptions from `autoRegister()` propagate and fail the dispatch. The sender is not registered and the message is not delivered. This is the correct semantic: if the SPI can't determine how to register this sender, the safe outcome is rejection, not silent OPEN fallback.
+
 **@DefaultBean implementation** (in `runtime-core`): creates a minimal instance — `instanceId=sender`, `description="Auto-registered by mesh participation policy"`, empty capabilities, `readOnly=false`, empty metadata.
 
 **Consumer override example** (Claudony): provides an `@Alternative @Priority(1)` that enriches the instance with session binding, capability tags from pool context, and case metadata.
@@ -97,7 +141,7 @@ public interface MeshParticipationPolicy {
 // In MessageService.dispatch(), after paused check, before AllowedWritersPolicy
 if (ch != null && dispatch.type() != MessageType.EVENT && !dispatch.sender().contains(":")) {
     ParticipationPolicyMode mode = resolvePolicy(ch);  // per-channel → global fallback
-    if (mode != ParticipationPolicyMode.OPEN) {
+    if (mode.requiresLookup()) {
         boolean registered = instanceService.findByInstanceId(dispatch.sender()).isPresent();
         if (!registered) {
             if (mode == ParticipationPolicyMode.ENFORCE) {
@@ -105,8 +149,8 @@ if (ch != null && dispatch.type() != MessageType.EVENT && !dispatch.sender().con
                     "Sender '" + dispatch.sender() + "' is not a registered mesh instance. "
                     + "Register via meshRegister or POST /api/instances before posting.");
             }
-            // AUTO_REGISTER
-            participationPolicy.autoRegister(dispatch).ifPresent(reg ->
+            // AUTO_REGISTER — exception propagates and fails dispatch
+            meshAutoRegistrar.autoRegister(dispatch).ifPresent(reg ->
                 instanceService.register(reg.instanceId(), reg.description(),
                     reg.capabilityTags(), null, reg.readOnly(), reg.metadata()));
         }
@@ -114,14 +158,16 @@ if (ch != null && dispatch.type() != MessageType.EVENT && !dispatch.sender().con
 }
 ```
 
+**CDI wiring:** `MeshAutoRegistrar` is injected into `MessageService` via `CdiMessageService` (new constructor parameter, following the existing 27-parameter pattern). The global default is resolved from `QhorusConfig.Mesh.participationPolicy()` at construction time and stored as a field.
+
 ### Policy Resolution
 
 ```java
 private ParticipationPolicyMode resolvePolicy(Channel ch) {
     if (ch.participationPolicy() != null) {
-        return ParticipationPolicyMode.valueOf(ch.participationPolicy());
+        return ch.participationPolicy();  // typed enum, no valueOf() needed
     }
-    return globalDefault;  // from QhorusConfig
+    return globalDefault;  // from QhorusConfig.Mesh at construction
 }
 ```
 
@@ -131,9 +177,31 @@ private ParticipationPolicyMode resolvePolicy(Channel ch) {
 # Global default (backward compatible)
 casehub.qhorus.mesh.participation-policy=OPEN
 
-# Per-channel override via REST or MCP
+# Per-channel override via config file (static, at channel creation)
+casehub.qhorus.channels.work-channel.participation-policy=AUTO_REGISTER
+
+# Per-channel override via REST or MCP (dynamic, at runtime)
 # PUT /api/channels/{id}/participation-policy  body: { "policy": "AUTO_REGISTER" }
 ```
+
+`QhorusConfig.Mesh` nested interface:
+
+```java
+interface Mesh {
+    @WithDefault("OPEN")
+    ParticipationPolicyMode participationPolicy();
+}
+```
+
+### Instance Registration Scope
+
+Auto-registration is **global** — once a sender is registered by any channel's AUTO_REGISTER policy, they are a registered mesh instance everywhere. This is correct: mesh instances represent agents, not channel memberships. Per-channel access control is handled by `AllowedWritersPolicy` (step 4), which provides fine-grained gating via capability-based ACL entries.
+
+An operator should not expect ENFORCE to be a channel-level admission gate. ENFORCE ensures mesh visibility — the sender must be a known entity. Channel-level access control (who can write where) remains the responsibility of `allowedWriters`.
+
+### Audit Trail
+
+Auto-registration fires `InstanceRegisteredEvent` via `InstanceService.register()` — CDI observers (including `BroadcastMembershipManager`) see it. No additional ledger entry or EVENT message is generated. The dispatch itself produces the normal ledger entry with the sender string, which is now a registered instance. The `InstanceRegisteredEvent` is the audit signal for auto-registration.
 
 ### EVENT Type Exemption
 
@@ -163,11 +231,21 @@ ALTER TABLE channel ADD COLUMN participation_policy VARCHAR(20);
 
 ### Test Plan
 
-- **Unit tests (MessageService):** OPEN allows unregistered sender; AUTO_REGISTER calls SPI and registers; ENFORCE rejects unregistered sender; system senders bypass all modes; EVENT type bypasses; per-channel override takes precedence over global; null channel override inherits global
-- **Unit tests (MeshParticipationPolicy):** @DefaultBean creates minimal instance; custom @Alternative provides enriched instance; autoRegister returning empty skips registration
-- **Unit tests (Channel model):** participationPolicy field round-trips through Channel builder; null vs explicit values
-- **Integration test:** full dispatch pipeline with AUTO_REGISTER — verify instance exists after dispatch, AllowedWritersPolicy can see auto-registered capabilities
+- **Unit tests (MessageService):** OPEN allows unregistered sender; AUTO_REGISTER calls SPI and registers; ENFORCE rejects unregistered sender; system senders bypass all modes; EVENT type bypasses; per-channel override takes precedence over global; null channel override inherits global; SPI exception propagates and fails dispatch; SPI returns empty skips registration (OPEN fallback)
+- **Unit tests (MeshAutoRegistrar):** @DefaultBean creates minimal instance; custom @Alternative provides enriched instance; autoRegister returning empty skips registration
+- **Unit tests (ParticipationPolicyMode):** enum values; requiresLookup() returns false for OPEN, true for AUTO_REGISTER and ENFORCE
+- **Unit tests (Channel model):** participationPolicy typed enum field round-trips through Channel builder; null vs explicit values; ChannelEntity String↔enum conversion
+- **Unit tests (QhorusConfig):** global default OPEN; config override parses correctly
+- **Integration test:** full dispatch pipeline with AUTO_REGISTER — verify instance exists after dispatch, AllowedWritersPolicy can see auto-registered capabilities, InstanceRegisteredEvent fires
+- **Integration test (config bootstrap):** ChannelConfigBootstrap reads participationPolicy from config, sets on channel creation
 - **Backward compatibility:** existing tests pass with OPEN default — zero behavioural change
+
+### Implementation Notes
+
+- `ChannelsApi` needs a new Mesh Participation section with `@PlatformQuery` and `@PlatformMutation` — follow the existing Enforcement section pattern
+- `CdiMessageService` constructor gets `MeshAutoRegistrar` as a new parameter
+- `ARC42STORIES.MD` §6 pipeline diagram needs updating to include the new gate
+- Agent-bridge module: existing registration path satisfies ENFORCE mode — the bridge registers instances as part of binding creation. No changes needed, but verify in integration test.
 
 ## References
 
