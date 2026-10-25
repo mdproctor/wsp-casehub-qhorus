@@ -6,6 +6,8 @@ branch: issue-495-enforce-mesh-participation
 covers: 495
 base-branch: main
 
+evidence-era: true
+state: closing:review
 ## Queue
 - [ ] casehubio/qhorus#495 — enforce mesh participation on message posting ← active
   - [x] Batch 1: API Types and SPI
