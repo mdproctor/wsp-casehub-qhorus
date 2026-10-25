@@ -1,6 +1,12 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-10-03)
+## Last Session (2026-10-25)
+
+Cross-repo commit from agency#354 session: added `policyOverrides` (`Map<String, String>`) to `ProtocolContext` record. One-line additive change — `MessageService.dispatch()` passes `ch.policyOverrides()` when constructing the context. All 4 protocol test files updated. BUILD SUCCESS.
+
+Commit: `feat: add policyOverrides to ProtocolContext` on main.
+
+## Previous Session (2026-10-03)
 
 Closed #467 (remove @DefaultBean from runtime-core) and epic #466 (Spring completeness). Branch `issue-467-remove-defaultbean-from-core` landed as c716cc5d on main.
 
