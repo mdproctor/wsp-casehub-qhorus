@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" font-family="system-ui, -apple-system, sans-serif">
+  <rect width="780" height="340" rx="8" fill="#f8f9fa"/>
+
+  <text x="390" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#495057">Protocol Lifecycle Events — Three Triggers</text>
+
+  <!-- Channel Created -->
+  <rect x="30" y="60" width="220" height="250" rx="6" fill="white" stroke="#b39ddb" stroke-width="2"/>
+  <text x="140" y="85" text-anchor="middle" font-size="13" font-weight="bold" fill="#4527a0">Channel Created</text>
+
+  <rect x="50" y="100" width="180" height="24" rx="3" fill="#ede7f6"/>
+  <text x="140" y="117" text-anchor="middle" font-size="10" fill="#4527a0">ChannelInitialisedEvent</text>
+
+  <line x1="140" y1="124" x2="140" y2="142" stroke="#b39ddb" stroke-width="1.5" marker-end="url(#arr-p)"/>
+
+  <rect x="50" y="142" width="180" height="24" rx="3" fill="#f3e5f5"/>
+  <text x="140" y="159" text-anchor="middle" font-size="10" fill="#6a1b9a">ProtocolLifecycleManager</text>
+
+  <line x1="140" y1="166" x2="140" y2="184" stroke="#b39ddb" stroke-width="1.5" marker-end="url(#arr-p)"/>
+
+  <rect x="50" y="184" width="180" height="24" rx="3" fill="#e8eaf6"/>
+  <text x="140" y="201" text-anchor="middle" font-size="10" fill="#283593">handler.onInit(context)</text>
+
+  <text x="140" y="230" text-anchor="middle" font-size="9" fill="#78909c">context includes:</text>
+  <text x="140" y="244" text-anchor="middle" font-size="9" fill="#78909c">• channel identity</text>
+  <text x="140" y="258" text-anchor="middle" font-size="9" fill="#78909c">• protocol name</text>
+  <text x="140" y="272" text-anchor="middle" font-size="9" fill="#78909c">• message history</text>
+  <text x="140" y="286" text-anchor="middle" font-size="9" fill="#78909c">• recovered flag</text>
+
+  <!-- Channel Deleted -->
+  <rect x="280" y="60" width="220" height="250" rx="6" fill="white" stroke="#ef9a9a" stroke-width="2"/>
+  <text x="390" y="85" text-anchor="middle" font-size="13" font-weight="bold" fill="#c62828">Channel Deleted</text>
+
+  <rect x="300" y="100" width="180" height="24" rx="3" fill="#ffebee"/>
+  <text x="390" y="117" text-anchor="middle" font-size="10" fill="#c62828">ChannelClosedEvent</text>
+
+  <line x1="390" y1="124" x2="390" y2="142" stroke="#ef9a9a" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <rect x="300" y="142" width="180" height="24" rx="3" fill="#f3e5f5"/>
+  <text x="390" y="159" text-anchor="middle" font-size="10" fill="#6a1b9a">ProtocolLifecycleManager</text>
+
+  <line x1="390" y1="166" x2="390" y2="184" stroke="#ef9a9a" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <rect x="300" y="184" width="180" height="24" rx="3" fill="#e8eaf6"/>
+  <text x="390" y="201" text-anchor="middle" font-size="10" fill="#283593">handler.onDestroy(id, name)</text>
+
+  <text x="390" y="230" text-anchor="middle" font-size="9" fill="#78909c">uses internal protocolMap</text>
+  <text x="390" y="244" text-anchor="middle" font-size="9" fill="#78909c">not channelStore lookup</text>
+  <text x="390" y="264" text-anchor="middle" font-size="9" fill="#78909c" font-style="italic">(channel may already</text>
+  <text x="390" y="278" text-anchor="middle" font-size="9" fill="#78909c" font-style="italic">be deleted from store)</text>
+
+  <!-- Protocols Changed -->
+  <rect x="530" y="60" width="220" height="250" rx="6" fill="white" stroke="#ffb74d" stroke-width="2"/>
+  <text x="640" y="85" text-anchor="middle" font-size="13" font-weight="bold" fill="#e65100">Protocols Changed</text>
+
+  <rect x="550" y="100" width="180" height="24" rx="3" fill="#fff3e0"/>
+  <text x="640" y="117" text-anchor="middle" font-size="10" fill="#e65100">ProtocolsChangedEvent</text>
+
+  <line x1="640" y1="124" x2="640" y2="142" stroke="#ffb74d" stroke-width="1.5" marker-end="url(#arr-o)"/>
+
+  <rect x="550" y="142" width="180" height="24" rx="3" fill="#f3e5f5"/>
+  <text x="640" y="159" text-anchor="middle" font-size="10" fill="#6a1b9a">ProtocolLifecycleManager</text>
+
+  <line x1="640" y1="166" x2="640" y2="184" stroke="#ffb74d" stroke-width="1.5" marker-end="url(#arr-o)"/>
+
+  <rect x="550" y="184" width="85" height="24" rx="3" fill="#ffebee"/>
+  <text x="592" y="201" text-anchor="middle" font-size="9" fill="#c62828">onDestroy</text>
+  <rect x="645" y="184" width="85" height="24" rx="3" fill="#e8eaf6"/>
+  <text x="687" y="201" text-anchor="middle" font-size="9" fill="#283593">onInit</text>
+
+  <text x="640" y="230" text-anchor="middle" font-size="9" fill="#78909c">computes diff:</text>
+  <text x="640" y="244" text-anchor="middle" font-size="9" fill="#78909c">• destroy removed protos</text>
+  <text x="640" y="258" text-anchor="middle" font-size="9" fill="#78909c">• init added protos</text>
+  <text x="640" y="278" text-anchor="middle" font-size="9" fill="#78909c" font-style="italic">fired async from</text>
+  <text x="640" y="292" text-anchor="middle" font-size="9" fill="#78909c" font-style="italic">setProtocols()</text>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arr-p" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#b39ddb"/>
+    </marker>
+    <marker id="arr-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#ef9a9a"/>
+    </marker>
+    <marker id="arr-o" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#ffb74d"/>
+    </marker>
+  </defs>
+</svg>
