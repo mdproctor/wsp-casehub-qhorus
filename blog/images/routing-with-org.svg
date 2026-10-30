@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 380" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#64748b" stroke-width="1.2"/>
+    </marker>
+    <marker id="arrow2g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#16a34a" stroke-width="1.2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="340" y="28" text-anchor="middle" font-size="14" font-weight="600" fill="#1e293b">With org-awareness: same-unit peers preferred, then fallback</text>
+
+  <!-- Sender -->
+  <rect x="30" y="140" width="120" height="56" rx="8" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+  <text x="90" y="165" text-anchor="middle" font-size="12" font-weight="600" fill="#0c4a6e">Sender</text>
+  <text x="90" y="182" text-anchor="middle" font-size="10" fill="#475569">Team Alpha</text>
+
+  <!-- RoutingBridge -->
+  <rect x="200" y="100" width="170" height="136" rx="8" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="285" y="124" text-anchor="middle" font-size="12" font-weight="600" fill="#713f12">RoutingBridge</text>
+  <line x1="210" y1="134" x2="360" y2="134" stroke="#ca8a04" stroke-width="0.5"/>
+  <text x="285" y="152" text-anchor="middle" font-size="10" fill="#78716c">1. find all matches</text>
+  <text x="285" y="168" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">2. teamMembers(sender)</text>
+  <text x="285" y="184" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">3. filter to team peers</text>
+  <text x="285" y="200" text-anchor="middle" font-size="10" fill="#78716c">4. select from filtered</text>
+  <text x="285" y="216" text-anchor="middle" font-size="10" fill="#78716c">5. fallback if empty</text>
+
+  <!-- Arrow sender to bridge -->
+  <line x1="150" y1="168" x2="195" y2="168" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+  <!-- Team Alpha candidates (green, preferred) -->
+  <rect x="450" y="60" width="200" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="550" y="82" text-anchor="middle" font-size="11" font-weight="700" fill="#14532d">analyst-1 (Team Alpha)</text>
+  <text x="550" y="100" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">trust: 0.7 -- SELECTED</text>
+
+  <rect x="450" y="210" width="200" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="550" y="232" text-anchor="middle" font-size="11" font-weight="600" fill="#14532d">analyst-3 (Team Alpha)</text>
+  <text x="550" y="250" text-anchor="middle" font-size="10" fill="#475569">trust: 0.6</text>
+
+  <!-- Team Beta candidate (dimmed) -->
+  <rect x="450" y="135" width="200" height="56" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="550" y="157" text-anchor="middle" font-size="11" fill="#94a3b8">analyst-2 (Team Beta)</text>
+  <text x="550" y="175" text-anchor="middle" font-size="10" fill="#94a3b8">trust: 0.9 -- filtered out</text>
+
+  <!-- Arrows -->
+  <line x1="370" y1="140" x2="445" y2="88" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow2g)"/>
+  <line x1="370" y1="200" x2="445" y2="238" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow2g)"/>
+
+  <!-- Org boundary box -->
+  <rect x="440" y="42" width="220" height="240" rx="12" fill="none" stroke="#16a34a" stroke-width="1" stroke-dasharray="6,4"/>
+  <text x="550" y="298" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="600">Team Alpha org boundary</text>
+
+  <!-- Annotation -->
+  <text x="340" y="340" text-anchor="middle" font-size="11" fill="#16a34a" font-style="italic">Same-unit agent selected -- shares context, protocols, and reporting chain</text>
+  <text x="340" y="358" text-anchor="middle" font-size="11" fill="#64748b" font-style="italic">If no team member qualifies, falls back to full registry (analyst-2 eligible again)</text>
+</svg>
