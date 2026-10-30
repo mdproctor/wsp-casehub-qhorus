@@ -96,3 +96,4 @@
 | [2026-10-06-mdp01-the-lock-that-doesnt-lock.md](2026-10-06-mdp01-the-lock-that-doesnt-lock.md) | 2026-10-06 | Why synchronized doesn't protect a Merkle chain across JVMs, and the hybrid hash-ring + DB-lock model for the distributed qhorus mesh |
 | [2026-10-06-mdp03-the-ring-that-routes.md](2026-10-06-mdp03-the-ring-that-routes.md) | 2026-10-06 | Phase 2 cluster module — consistent hash ring, CDI decorator routing, peer state machine with heartbeat failure detection |
 | [2026-10-27-mdp01-the-protocol-that-remembers.md](2026-10-27-mdp01-the-protocol-that-remembers.md) | 2026-10-27 | Why stateless protocols hit a wall at temporal coordination, and how lifecycle hooks enable durable playbook-backed governance |
+| [2026-10-30-mdp01-the-team-you-know.md](2026-10-30-mdp01-the-team-you-know.md) | 2026-10-30 | Why org-aware routing matters for multi-agent governance — preferring same-unit agents before widening search |
