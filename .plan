@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-494-org-aware-task-assignment
-state: active
+state: closing:review
 project-sha: 00996da41361054a00b0f26bb70c49b33fb45344
 date: 2026-10-30
 issue-repo: 
@@ -11,5 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 (empty — issues created during design)
