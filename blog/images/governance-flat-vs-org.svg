@@ -107,13 +107,15 @@
   <rect x="640" y="340" width="70" height="32" rx="6" fill="#fefce8" stroke="#ca8a04" stroke-width="1"/>
   <text x="675" y="360" text-anchor="middle" font-size="9" font-weight="600" fill="#713f12">Audit</text>
 
-  <!-- Phase labels -->
+  <!-- Phase labels and status -->
   <text x="90" y="390" text-anchor="middle" font-size="8" fill="#16a34a">Phase 1</text>
   <text x="210" y="390" text-anchor="middle" font-size="8" fill="#ca8a04">Phase 2</text>
-  <text x="330" y="390" text-anchor="middle" font-size="8" fill="#ca8a04">Phase 3</text>
-  <text x="450" y="390" text-anchor="middle" font-size="8" fill="#ca8a04">Phase 2</text>
+  <text x="330" y="390" text-anchor="middle" font-size="8" fill="#16a34a">Phase 1</text>
+  <text x="450" y="390" text-anchor="middle" font-size="8" fill="#16a34a">Phase 1</text>
   <text x="570" y="390" text-anchor="middle" font-size="8" fill="#ca8a04">Phase 3</text>
   <text x="675" y="390" text-anchor="middle" font-size="8" fill="#ca8a04">Phase 3</text>
 
   <text x="90" y="404" text-anchor="middle" font-size="8" fill="#16a34a" font-weight="600">done</text>
+  <text x="330" y="404" text-anchor="middle" font-size="8" fill="#16a34a" font-weight="600">done</text>
+  <text x="450" y="404" text-anchor="middle" font-size="8" fill="#16a34a" font-weight="600">done</text>
 </svg>
