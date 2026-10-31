@@ -97,3 +97,4 @@
 | [2026-10-06-mdp03-the-ring-that-routes.md](2026-10-06-mdp03-the-ring-that-routes.md) | 2026-10-06 | Phase 2 cluster module — consistent hash ring, CDI decorator routing, peer state machine with heartbeat failure detection |
 | [2026-10-27-mdp01-the-protocol-that-remembers.md](2026-10-27-mdp01-the-protocol-that-remembers.md) | 2026-10-27 | Why stateless protocols hit a wall at temporal coordination, and how lifecycle hooks enable durable playbook-backed governance |
 | [2026-10-30-mdp01-the-team-you-know.md](2026-10-30-mdp01-the-team-you-know.md) | 2026-10-30 | Why org-aware routing matters for multi-agent governance — preferring same-unit agents before widening search |
+| [2026-10-31-mdp01-governance-follows-the-org-chart.md](2026-10-31-mdp01-governance-follows-the-org-chart.md) | 2026-10-31 | Why multi-agent governance needs org structure across routing, trust, delegation, capacity, protocols, and audit |

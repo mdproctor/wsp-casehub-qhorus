@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 260" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <marker id="nfa" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="none" stroke="#64748b" stroke-width="1"/>
+    </marker>
+    <marker id="nfg" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="none" stroke="#16a34a" stroke-width="1"/>
+    </marker>
+    <marker id="nfr" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="none" stroke="#ca8a04" stroke-width="1"/>
+    </marker>
+  </defs>
+
+  <text x="300" y="22" text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">The nullable/fallback contract</text>
+
+  <!-- Decision diamond -->
+  <polygon points="300,50 370,90 300,130 230,90" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="300" y="87" text-anchor="middle" font-size="10" font-weight="600" fill="#713f12">OrgAware</text>
+  <text x="300" y="100" text-anchor="middle" font-size="10" font-weight="600" fill="#713f12">available?</text>
+
+  <!-- Yes path -->
+  <line x1="370" y1="90" x2="470" y2="90" stroke="#16a34a" stroke-width="1.5" marker-end="url(#nfg)"/>
+  <text x="420" y="82" text-anchor="middle" font-size="9" fill="#16a34a" font-weight="600">yes</text>
+
+  <rect x="475" y="60" width="110" height="60" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="530" y="82" text-anchor="middle" font-size="10" font-weight="600" fill="#14532d">Org-aware</text>
+  <text x="530" y="96" text-anchor="middle" font-size="10" font-weight="600" fill="#14532d">path</text>
+  <text x="530" y="112" text-anchor="middle" font-size="8" fill="#475569">filter, escalate,</text>
+  <!-- <text x="530" y="124" text-anchor="middle" font-size="8" fill="#475569">authorise</text> -->
+
+  <!-- No path -->
+  <line x1="230" y1="90" x2="130" y2="90" stroke="#ca8a04" stroke-width="1.5" marker-end="url(#nfr)"/>
+  <text x="180" y="82" text-anchor="middle" font-size="9" fill="#ca8a04" font-weight="600">no (null)</text>
+
+  <rect x="15" y="60" width="110" height="60" rx="8" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="70" y="82" text-anchor="middle" font-size="10" font-weight="600" fill="#713f12">Current</text>
+  <text x="70" y="96" text-anchor="middle" font-size="10" font-weight="600" fill="#713f12">behaviour</text>
+  <text x="70" y="112" text-anchor="middle" font-size="8" fill="#475569">unchanged</text>
+
+  <!-- Both converge -->
+  <line x1="70" y1="120" x2="70" y2="170" stroke="#ca8a04" stroke-width="1" marker-end="url(#nfr)"/>
+  <line x1="530" y1="120" x2="530" y2="170" stroke="#16a34a" stroke-width="1" marker-end="url(#nfg)"/>
+
+  <!-- Result box -->
+  <rect x="30" y="175" width="540" height="50" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1"/>
+  <text x="300" y="198" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">Same external API. Same failure modes. No new dependencies required.</text>
+  <text x="300" y="215" text-anchor="middle" font-size="10" fill="#475569">Eidos org module is optional — not on classpath means flat governance, not broken governance.</text>
+
+  <text x="300" y="250" text-anchor="middle" font-size="10" fill="#64748b" font-style="italic">Applied consistently across routing, trust, delegation, capacity, and audit</text>
+</svg>
