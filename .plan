@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-502-org-governance-phase2
-state: closing:merged
+state: active
 project-sha: 2af2bf6abc833a772e794c750541147357aa1d81
 date: 2026-11-01
 issue-repo: 
@@ -13,8 +13,8 @@ flyway-next-v: unknown
 evidence-era: true
 
 ## Queue
-- [ ] casehubio/qhorus#501 — Unit-first capacity redistribution
-- [ ] casehubio/qhorus#503 — Delegation authorisation
+- [x] casehubio/qhorus#501 — Unit-first capacity redistribution
+- [x] casehubio/qhorus#503 — Delegation authorisation
 - [ ] casehubio/qhorus#506 — fix MessageDispatcher.broadcast UnsupportedOperationException
 - [ ] casehubio/qhorus#507 — test ORG_DELEGATION advisory integration test
 - [ ] casehubio/qhorus#502 — feat protocol inheritance from org units to channels
