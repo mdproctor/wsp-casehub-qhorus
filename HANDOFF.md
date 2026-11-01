@@ -1,34 +1,35 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-10-30)
+## Last Session (2026-11-01)
 
-**Branch:** `issue-500-org-governance-phase1-3` — plan written, ready to execute.
+**Branch:** `issue-502-org-governance-phase2` — scaffolded, ready to plan and execute.
 
-Three issues queued, plan at `plans/2026-10-31-org-governance-batch.md`:
+Five issues queued, ordered quick-fixes first then M-scale features:
 
-| # | Title | Batch | Scale | Status |
-|---|-------|-------|-------|--------|
-| 500 | Escalation routing — walk org tree before hard-failing | 1 | S/Low | Ready |
-| 501 | Unit-first capacity redistribution | 2 | S/Low | Likely already done — verify |
-| 503 | Delegation authorisation — HANDOFF follows reporting lines | 3 | S/Med | Ready |
+| # | Title | Scale | Complexity | Notes |
+|---|-------|-------|------------|-------|
+| 506 | fix: MessageDispatcher.broadcast() throws UnsupportedOperationException | S | Low | Wire or remove the default impl |
+| 507 | test: add integration test for ORG_DELEGATION advisory | S | Low | Deferred from #503 code review |
+| 502 | feat: protocol inheritance from org units to channels | M | Med | Phase 2 org governance |
+| 505 | feat: orgUnitId on ledger entries | M | Med | Phase 2 — compliance reporting per org boundary |
+| 504 | feat: unit-level watchdog aggregation | M | Med | Phase 2 — alert per org unit not per agent |
 
-**To resume:** `work continue` then invoke `executing-plans`.
+**To resume:** `work continue` → brainstorm/plan for the batch, then execute.
 
 **Key context:**
-- `OrgAwareDispatch` already wired into `RoutingBridge` from #494
-- `RedistributionDelegate` routes through `RoutingBridge.resolve()` — #501 may already work
-- `MessageService.dispatch()` needs `OrgAwareDispatch` added for #503 — template is the `ObligorTrustPolicy` check at ~line 310
+- `OrgAwareDispatch` API (in casehub-eidos-api) has: `escalate()`, `canDelegateTo()`, `teamMembers()`, `orgDistance()` — all already used in RoutingBridge
+- Phase 1 landed on main: routing preference (#494), escalation (#500), redistribution verification (#501), delegation authorisation (#503)
+- #502 will need a new SPI or extension to `OrgAwareDispatch` for protocol lookup by org unit
+- #505 needs a new column on `MessageLedgerEntry` (next Flyway migration V2005) + stamping in `LedgerWriteService.record()`
+- #504 needs `WatchdogEvaluationService` to group evaluations by org unit
 
-**Also done this session:**
-- Closed #444 (message-scoped erasure — already implemented)
-- Implemented and landed #494 (org-aware routing in `RoutingBridge`)
-- Wrote blog: "The Team You Know" with SVG diagrams
-- Filed epic casehub-ops#217 with 9 child issues across eidos, qhorus, ledger
+## Previous Session (2026-10-31)
 
-## Previous Session (2026-10-25)
-
-Cross-repo commit from agency#354 session: added `policyOverrides` (`Map<String, String>`) to `ProtocolContext` record. One-line additive change — `MessageService.dispatch()` passes `ch.policyOverrides()` when constructing the context. All 4 protocol test files updated. BUILD SUCCESS.
-
-## Previous Session (2026-10-03)
-
-Closed #467 (remove @DefaultBean from runtime-core) and epic #466 (Spring completeness). Branch `issue-467-remove-defaultbean-from-core` landed as c716cc5d on main.
+Landed Phase 1 org governance batch on `issue-500-org-governance-phase1-3`:
+- #500: org-aware escalation routing in RoutingBridge
+- #501: verified redistribution inherits org-awareness (no code changes)
+- #503: delegation authorisation for HANDOFF messages
+- Refactored: extracted `tryOrgEscalation()` helper, fixed FQN import
+- Blog: revised "Governance Follows the Org Chart" with escalation SVG
+- Filed #507 (deferred integration test)
+- Closed #500, #501, #503 on GitHub

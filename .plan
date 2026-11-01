@@ -1,17 +1,22 @@
 # Work Plan — issue-500-org-governance-phase1-3
 
 ## State
-branch: issue-500-org-governance-phase1-3
+branch: issue-502-org-governance-phase2
 state: closing:merged
-project-sha: 31d1d668744e06f55e5e6b4e4a2fe2bd3176f4f3
-date: 2026-10-31
+project-sha: 2af2bf6abc833a772e794c750541147357aa1d81
+date: 2026-11-01
 issue-repo: 
 covers: 
 design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
-
 evidence-era: true
+
 ## Queue
 - [ ] casehubio/qhorus#501 — Unit-first capacity redistribution
 - [ ] casehubio/qhorus#503 — Delegation authorisation
+- [ ] casehubio/qhorus#506 — fix MessageDispatcher.broadcast UnsupportedOperationException
+- [ ] casehubio/qhorus#507 — test ORG_DELEGATION advisory integration test
+- [ ] casehubio/qhorus#502 — feat protocol inheritance from org units to channels
+- [ ] casehubio/qhorus#505 — feat orgUnitId on ledger entries
+- [ ] casehubio/qhorus#504 — feat unit-level watchdog aggregation
