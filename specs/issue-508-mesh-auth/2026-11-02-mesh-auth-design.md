@@ -196,14 +196,18 @@ configured. Quarkus HTTP security policy in `application.properties`:
 quarkus.http.auth.permission.default.paths=/*
 quarkus.http.auth.permission.default.policy=authenticated
 quarkus.http.auth.permission.internal.paths=/internal/*
-quarkus.http.auth.permission.internal.policy=authenticated
+quarkus.http.auth.permission.internal.policy=permit
 quarkus.http.auth.permission.health.paths=/q/*
 quarkus.http.auth.permission.health.policy=permit
 ```
 
 Health endpoints (`/q/health`, `/q/metrics`) remain open.
-`/internal/*` paths are additionally guarded by `InternalSecretFilter`
-(inter-node auth — unchanged).
+`/internal/*` paths are permitted at the HTTP auth policy level because
+`InternalSecretFilter @Priority(50)` already guards them with
+`X-Internal-Secret`. The filter doesn't set a `SecurityIdentity`,
+so the `authenticated` policy would reject valid inter-node requests.
+The two auth layers are orthogonal: Quarkus HTTP security handles
+external clients, `InternalSecretFilter` handles inter-node.
 
 **When no API keys and no OIDC are configured:** Quarkus's anonymous
 authentication mechanism applies, and the `authenticated` policy still
