@@ -1,0 +1,15 @@
+# Work Plan — issue-475-distributed-mesh-phase2
+
+## State
+branch: issue-475-distributed-mesh-phase2
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 475
+design-repo: project
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#475 — Issue #475 ← active
