@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-508-mesh-auth
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/qhorus
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/qhorus#508 — Issue #508 ← active
   - [x] Batch 1: SPI+ConfigResolver
