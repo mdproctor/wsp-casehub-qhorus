@@ -18,5 +18,5 @@ flyway-next-v:
     - [x] Task 2: Config-based resolver impl
   - [x] Batch 2: Mechanism+OIDC
     - [x] Task 3: ApiKeyAuthenticationMechanism
-  - [ ] Batch 3: SecurityPolicy
-    - [ ] Task 4: Mesh security config and integration tests
+  - [x] Batch 3: SecurityPolicy
+    - [x] Task 4: Mesh security config and integration tests
