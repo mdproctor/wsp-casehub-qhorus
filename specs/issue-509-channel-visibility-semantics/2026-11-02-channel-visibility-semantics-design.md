@@ -289,17 +289,14 @@ List<Channel> findByVisibility(ChannelVisibility visibility) {
 }
 ```
 
-### 9. ChannelManager Extension
+### 9. setVisibility Behavior
 
-One new method:
+`VisibilityManager.setVisibility(UUID channelId, ChannelVisibility visibility)` updates the
+entity field. No retroactive enforcement — changing a channel's visibility doesn't alter its
+existing membership or settings. The guard in `join()/leave()` reads visibility at call time.
 
-```java
-Channel setVisibility(UUID channelId, ChannelVisibility visibility);
-```
-
-On `ChannelService` — updates the entity field. No retroactive enforcement — changing a
-channel's visibility doesn't alter its existing membership or settings. The guard in
-`join()/leave()` reads visibility at call time.
+Setting visibility to DIRECT on a channel with != 2 members throws `IllegalStateException`.
+Setting visibility to null removes visibility constraints (returns to legacy behavior).
 
 ### 10. REST API
 
