@@ -13,10 +13,10 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/qhorus#508 — Issue #508 ← active
-  - [ ] Batch 1: SPI+ConfigResolver
-    - [ ] Task 1: ApiKeyIdentityResolver SPI
-    - [ ] Task 2: Config-based resolver impl
-  - [ ] Batch 2: Mechanism+OIDC
-    - [ ] Task 3: ApiKeyAuthenticationMechanism
+  - [x] Batch 1: SPI+ConfigResolver
+    - [x] Task 1: ApiKeyIdentityResolver SPI
+    - [x] Task 2: Config-based resolver impl
+  - [x] Batch 2: Mechanism+OIDC
+    - [x] Task 3: ApiKeyAuthenticationMechanism
   - [ ] Batch 3: SecurityPolicy
     - [ ] Task 4: Mesh security config and integration tests
