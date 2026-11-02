@@ -1,1 +1,1 @@
-# Design Journal — issue-508-mesh-auth
+# Design Journal — issue-509-channel-visibility-semantics

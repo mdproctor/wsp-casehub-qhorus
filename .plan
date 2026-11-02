@@ -1,0 +1,15 @@
+# Work Plan — issue-509-channel-visibility-semantics
+
+## State
+branch: issue-509-channel-visibility-semantics
+state: scaffolded
+project-sha: 70ac1398
+date: 2026-11-02
+issue-repo: casehubio/qhorus
+covers: 509
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [ ] casehubio/qhorus#509 — Issue #509 ← active
