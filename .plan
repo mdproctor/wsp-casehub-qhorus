@@ -1,0 +1,15 @@
+# Work Plan — issue-508-mesh-auth
+
+## State
+branch: issue-508-mesh-auth
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 508
+design-repo: project
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/qhorus#508 — Issue #508 ← active
