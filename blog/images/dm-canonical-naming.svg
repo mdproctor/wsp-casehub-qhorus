@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" font-family="Inter, -apple-system, sans-serif">
+  <style>
+    .label { font-size: 13px; fill: #374151; }
+    .heading { font-size: 14px; fill: #111827; font-weight: 600; }
+    .sub { font-size: 11px; fill: #6b7280; }
+    .mono { font-size: 13px; fill: #4b5563; font-family: "JetBrains Mono", "SF Mono", monospace; }
+    .arrow { fill: none; stroke: #6b7280; stroke-width: 1.5; marker-end: url(#arrowhead); }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6b7280"/>
+    </marker>
+  </defs>
+
+  <!-- Left: two orderings -->
+  <g transform="translate(20, 20)">
+    <rect x="0" y="0" width="220" height="70" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text class="heading" x="110" y="24" text-anchor="middle">Call 1</text>
+    <text class="mono" x="110" y="48" text-anchor="middle">getOrCreateDirect(</text>
+    <text class="mono" x="110" y="64" text-anchor="middle">"bob", "alice")</text>
+  </g>
+
+  <g transform="translate(20, 110)">
+    <rect x="0" y="0" width="220" height="70" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text class="heading" x="110" y="24" text-anchor="middle">Call 2</text>
+    <text class="mono" x="110" y="48" text-anchor="middle">getOrCreateDirect(</text>
+    <text class="mono" x="110" y="64" text-anchor="middle">"alice", "bob")</text>
+  </g>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M 240 55 L 340 95"/>
+  <path class="arrow" d="M 240 145 L 340 105"/>
+
+  <!-- Right: single channel -->
+  <g transform="translate(350, 55)">
+    <rect x="0" y="0" width="230" height="90" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text class="heading" x="115" y="24" text-anchor="middle">Same channel</text>
+    <text class="mono" x="115" y="50" text-anchor="middle">dm/alice/bob</text>
+    <text class="sub" x="115" y="72" text-anchor="middle">sorted lexicographically → idempotent</text>
+  </g>
+</svg>

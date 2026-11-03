@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" font-family="Inter, -apple-system, sans-serif">
+  <style>
+    .label { font-size: 13px; fill: #374151; }
+    .heading { font-size: 14px; fill: #111827; font-weight: 600; }
+    .sub { font-size: 11px; fill: #6b7280; }
+    .box { rx: 8; ry: 8; stroke-width: 1.5; }
+    .agent { fill: #dbeafe; stroke: #3b82f6; }
+    .channel { rx: 4; ry: 4; stroke-width: 1.5; }
+  </style>
+
+  <!-- PUBLIC -->
+  <g transform="translate(20, 20)">
+    <rect class="box" x="0" y="0" width="230" height="270" fill="#f0fdf4" stroke="#22c55e"/>
+    <text class="heading" x="115" y="28" text-anchor="middle">PUBLIC</text>
+    <text class="sub" x="115" y="46" text-anchor="middle">BROADCAST · OPEN</text>
+
+    <rect class="channel" x="55" y="60" width="120" height="30" fill="#bbf7d0" stroke="#22c55e"/>
+    <text class="label" x="115" y="80" text-anchor="middle">broadcast/nlp</text>
+
+    <rect class="box agent" x="15" y="110" width="60" height="36"/>
+    <text class="label" x="45" y="133" text-anchor="middle">A</text>
+    <rect class="box agent" x="85" y="110" width="60" height="36"/>
+    <text class="label" x="115" y="133" text-anchor="middle">B</text>
+    <rect class="box agent" x="155" y="110" width="60" height="36"/>
+    <text class="label" x="185" y="133" text-anchor="middle">C</text>
+
+    <line x1="75" y1="90" x2="45" y2="110" stroke="#22c55e" stroke-width="1"/>
+    <line x1="115" y1="90" x2="115" y2="110" stroke="#22c55e" stroke-width="1"/>
+    <line x1="155" y1="90" x2="185" y2="110" stroke="#22c55e" stroke-width="1"/>
+
+    <text class="sub" x="115" y="170" text-anchor="middle">Anyone can join</text>
+    <text class="sub" x="115" y="186" text-anchor="middle">Anyone can write</text>
+
+    <rect class="box" x="65" y="200" width="100" height="36" fill="#fef3c7" stroke="#f59e0b"/>
+    <text class="label" x="115" y="223" text-anchor="middle">D (new)</text>
+    <path d="M 115 236 L 115 252" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3"/>
+    <text class="sub" x="115" y="264" text-anchor="middle" fill="#f59e0b">auto-joins ✓</text>
+  </g>
+
+  <!-- PRIVATE -->
+  <g transform="translate(275, 20)">
+    <rect class="box" x="0" y="0" width="230" height="270" fill="#fef3c7" stroke="#f59e0b"/>
+    <text class="heading" x="115" y="28" text-anchor="middle">PRIVATE</text>
+    <text class="sub" x="115" y="46" text-anchor="middle">APPEND · ENFORCE</text>
+
+    <rect class="channel" x="35" y="60" width="160" height="30" fill="#fde68a" stroke="#f59e0b"/>
+    <text class="label" x="115" y="80" text-anchor="middle">group/engineering</text>
+
+    <rect class="box agent" x="25" y="110" width="60" height="36"/>
+    <text class="label" x="55" y="133" text-anchor="middle">A</text>
+    <rect class="box agent" x="85" y="110" width="60" height="36"/>
+    <text class="label" x="115" y="133" text-anchor="middle">B</text>
+    <rect class="box agent" x="145" y="110" width="60" height="36"/>
+    <text class="label" x="175" y="133" text-anchor="middle">C</text>
+
+    <line x1="75" y1="90" x2="55" y2="110" stroke="#f59e0b" stroke-width="1"/>
+    <line x1="115" y1="90" x2="115" y2="110" stroke="#f59e0b" stroke-width="1"/>
+    <line x1="155" y1="90" x2="175" y2="110" stroke="#f59e0b" stroke-width="1"/>
+
+    <text class="sub" x="115" y="170" text-anchor="middle">Members only</text>
+    <text class="sub" x="115" y="186" text-anchor="middle">Bound to org unit</text>
+
+    <rect class="box" x="65" y="200" width="100" height="36" fill="#fee2e2" stroke="#ef4444"/>
+    <text class="label" x="115" y="223" text-anchor="middle">D (new)</text>
+    <line x1="95" y1="210" x2="135" y2="230" stroke="#ef4444" stroke-width="2"/>
+    <line x1="135" y1="210" x2="95" y2="230" stroke="#ef4444" stroke-width="2"/>
+    <text class="sub" x="115" y="264" text-anchor="middle" fill="#ef4444">rejected ✗</text>
+  </g>
+
+  <!-- DIRECT -->
+  <g transform="translate(530, 20)">
+    <rect class="box" x="0" y="0" width="230" height="270" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text class="heading" x="115" y="28" text-anchor="middle">DIRECT</text>
+    <text class="sub" x="115" y="46" text-anchor="middle">APPEND · ENFORCE</text>
+
+    <rect class="channel" x="45" y="60" width="140" height="30" fill="#ddd6fe" stroke="#8b5cf6"/>
+    <text class="label" x="115" y="80" text-anchor="middle">dm/alice/bob</text>
+
+    <rect class="box agent" x="25" y="110" width="80" height="36"/>
+    <text class="label" x="65" y="133" text-anchor="middle">alice</text>
+    <rect class="box agent" x="125" y="110" width="80" height="36"/>
+    <text class="label" x="165" y="133" text-anchor="middle">bob</text>
+
+    <line x1="90" y1="90" x2="65" y2="110" stroke="#8b5cf6" stroke-width="1"/>
+    <line x1="140" y1="90" x2="165" y2="110" stroke="#8b5cf6" stroke-width="1"/>
+
+    <text class="sub" x="115" y="170" text-anchor="middle">Exactly 2 members</text>
+    <text class="sub" x="115" y="186" text-anchor="middle">Immutable membership</text>
+
+    <rect class="box" x="65" y="200" width="100" height="36" fill="#fee2e2" stroke="#ef4444"/>
+    <text class="label" x="115" y="223" text-anchor="middle">carol</text>
+    <line x1="95" y1="210" x2="135" y2="230" stroke="#ef4444" stroke-width="2"/>
+    <line x1="135" y1="210" x2="95" y2="230" stroke="#ef4444" stroke-width="2"/>
+    <text class="sub" x="115" y="264" text-anchor="middle" fill="#ef4444">rejected ✗</text>
+  </g>
+</svg>
