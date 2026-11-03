@@ -87,10 +87,11 @@ New fields on `ChannelCreateRequest`:
 ```java
 ChannelVisibility visibility       // nullable
 ParticipationPolicyMode participationPolicy  // nullable — enables caller override at creation
+UUID boundGroupId                  // nullable — group binding, same pattern as spaceId
 ```
 
-Builder gains `.visibility(ChannelVisibility v)` and `.participationPolicy(ParticipationPolicyMode p)`
-methods.
+Builder gains `.visibility(ChannelVisibility v)`, `.participationPolicy(ParticipationPolicyMode p)`,
+and `.boundGroupId(UUID v)` methods.
 
 **Note:** `participationPolicy` was already on `Channel` (added in V58) and `ChannelEntity`, but
 was never plumbed through the creation path. `Channel.fromRequest()` always passed `null`. This
@@ -132,7 +133,7 @@ public static Channel fromRequest(ChannelCreateRequest req, String tenancyId) {
     } else {
         if (semantic == null) semantic = ChannelSemantic.APPEND;
     }
-    // ... construct Channel with semantic, policy, req.visibility(), etc.
+    // ... construct Channel with semantic, policy, req.visibility(), req.boundGroupId(), etc.
 }
 ```
 
@@ -507,7 +508,7 @@ classified," not "implicitly PUBLIC."
 
 **Modified files:**
 - `api/channel/Channel.java` — add `visibility` + `boundGroupId` fields + backward-compat constructor
-- `api/channel/ChannelCreateRequest.java` — add `visibility` + `participationPolicy` fields + builder methods
+- `api/channel/ChannelCreateRequest.java` — add `visibility` + `participationPolicy` + `boundGroupId` fields + builder methods
 - `api/channel/ChannelManager.java` — add `setVisibility()`
 - `api/channel/ChannelReader.java` — add `findByVisibility()`
 - `api/store/query/ChannelQuery.java` — add `visibility` + `boundGroupId` filters
