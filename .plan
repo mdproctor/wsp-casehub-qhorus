@@ -10,6 +10,7 @@ covers: 509
 design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
+flyway_next_v: V59
 
 ## Queue
 - [ ] casehubio/qhorus#509 — Issue #509 ← active
