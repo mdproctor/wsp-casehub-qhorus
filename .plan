@@ -14,3 +14,11 @@ flyway_next_v: V59
 
 ## Queue
 - [ ] casehubio/qhorus#509 — Issue #509 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: Enum + record extension + migration
+  - [ ] Batch 2: Guards
+    - [ ] Task 2: DIRECT membership guards
+  - [ ] Batch 3: Service
+    - [ ] Task 3: VisibilityManager + VisibilityService
+  - [ ] Batch 4: Integration
+    - [ ] Task 4: REST endpoints + BroadcastMembershipManager
