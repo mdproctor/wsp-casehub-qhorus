@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-509-channel-visibility-semantics
-state: closing:verified
+state: closing:promoted
 project-sha: 70ac1398
 date: 2026-11-02
 issue-repo: casehubio/qhorus
