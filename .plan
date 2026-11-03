@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-509-channel-visibility-semantics
-state: scaffolded
+state: active
 project-sha: 70ac1398
 date: 2026-11-02
 issue-repo: casehubio/qhorus
@@ -13,12 +13,4 @@ flyway-next-v: unknown
 flyway_next_v: V59
 
 ## Queue
-- [ ] casehubio/qhorus#509 — Issue #509 ← active
-  - [x] Batch 1: Foundation
-    - [x] Task 1: Enum + record extension + migration
-  - [x] Batch 2: Guards
-    - [x] Task 2: DIRECT membership guards
-  - [x] Batch 3: Service
-    - [x] Task 3: VisibilityManager + VisibilityService
-  - [x] Batch 4: Integration
-    - [x] Task 4: REST endpoints + BroadcastMembershipManager
+- [x] casehubio/qhorus#509 — Issue #509
