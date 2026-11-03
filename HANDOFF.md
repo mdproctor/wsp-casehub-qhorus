@@ -1,35 +1,43 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-11-01)
+## Last Session (2026-11-03)
 
-**Branch:** `issue-502-org-governance-phase2` — scaffolded, ready to plan and execute.
+**Branch:** `issue-509-channel-visibility-semantics` — implementation complete, tests outstanding.
 
-Five issues queued, ordered quick-fixes first then M-scale features:
+### What Was Built
 
-| # | Title | Scale | Complexity | Notes |
-|---|-------|-------|------------|-------|
-| 506 | fix: MessageDispatcher.broadcast() throws UnsupportedOperationException | S | Low | Wire or remove the default impl |
-| 507 | test: add integration test for ORG_DELEGATION advisory | S | Low | Deferred from #503 code review |
-| 502 | feat: protocol inheritance from org units to channels | M | Med | Phase 2 org governance |
-| 505 | feat: orgUnitId on ledger entries | M | Med | Phase 2 — compliance reporting per org boundary |
-| 504 | feat: unit-level watchdog aggregation | M | Med | Phase 2 — alert per org unit not per agent |
+Added `ChannelVisibility` (PUBLIC, PRIVATE, DIRECT) as a typed enum field on `Channel`, with:
 
-**To resume:** `work continue` → brainstorm/plan for the batch, then execute.
+- **DIRECT channels:** deterministic `dm/{sorted-a}/{sorted-b}` naming, exactly 2 immutable members, count-based join guard in `ChannelMembershipService`
+- **Group channels:** `group/{slug}` naming with `boundGroupId` (first-class UUID field, indexed) linking to eidos org units
+- **VisibilityManager interface** (4 methods): `getOrCreateDirect`, `findDirectChannelsFor`, `createGroupChannel`, `findGroupChannel`
+- **Creation-time defaults:** PUBLIC→BROADCAST/OPEN, PRIVATE/DIRECT→APPEND/ENFORCE (overridable)
+- **REST API:** `/api/visibility/direct`, `/api/visibility/group`, `PUT /api/channels/{id}/visibility`, `GET /api/channels?visibility=X`
+- **BroadcastMembershipManager** stamps new broadcast channels with `visibility=PUBLIC`
+- **Flyway V61:** `visibility VARCHAR(20)` + `bound_group_id UUID` columns with indexes
 
-**Key context:**
-- `OrgAwareDispatch` API (in casehub-eidos-api) has: `escalate()`, `canDelegateTo()`, `teamMembers()`, `orgDistance()` — all already used in RoutingBridge
-- Phase 1 landed on main: routing preference (#494), escalation (#500), redistribution verification (#501), delegation authorisation (#503)
-- #502 will need a new SPI or extension to `OrgAwareDispatch` for protocol lookup by org unit
-- #505 needs a new column on `MessageLedgerEntry` (next Flyway migration V2005) + stamping in `LedgerWriteService.record()`
-- #504 needs `WatchdogEvaluationService` to group evaluations by org unit
+### Code Review Findings — All Addressed
 
-## Previous Session (2026-10-31)
+| # | Fixed | Description |
+|---|-------|-------------|
+| C1 | Yes | REST path collision — VisibilityResource moved to `/api/visibility` |
+| C2 | Yes | Spring RuntimeAutoConfiguration uses 4-arg constructor with ChannelStore |
+| H1 | Yes | ChannelConfigBootstrap wires visibility/boundGroupId/participationPolicy from YAML |
+| H2 | Yes | ChannelDetail + QhorusEntityMapper updated with visibility/boundGroupId |
+| M1 | **No** | Zero test files written — this is the outstanding work |
+| M2 | Yes | Test name renamed to `semanticDefaultsToNull` |
 
-Landed Phase 1 org governance batch on `issue-500-org-governance-phase1-3`:
-- #500: org-aware escalation routing in RoutingBridge
-- #501: verified redistribution inherits org-awareness (no code changes)
-- #503: delegation authorisation for HANDOFF messages
-- Refactored: extracted `tryOrgEscalation()` helper, fixed FQN import
-- Blog: revised "Governance Follows the Org Chart" with escalation SVG
-- Filed #507 (deferred integration test)
-- Closed #500, #501, #503 on GitHub
+### What's Left
+
+**M1: Tests.** No tests were written. The next session should write:
+
+1. CDI-free unit tests in `testing/` — `ChannelMembershipServiceDirectGuardTest`, `VisibilityServiceTest`
+2. `@QuarkusTest` integration tests in `runtime/` — `ChannelVisibilityTest`, `VisibilityResourceTest`
+3. **Known issue:** `OrgUnitIdLedgerTest` (from #505) blocks JUnit discovery after `mvn clean`. Workaround: `mvn install -pl api,runtime-core,persistence-memory,testing,runtime -DskipTests` before running tests.
+
+### Design Artifacts (workspace)
+
+- Spec: `specs/issue-509-channel-visibility-semantics/2026-11-02-channel-visibility-semantics-design.md`
+- Decisions: `specs/issue-509-channel-visibility-semantics/decisions.md` (7 decisions)
+- Plan: `plans/2026-11-03-channel-visibility-semantics.md`
+- Blog: `blog/2026-11-03-mdp01-when-agents-need-mailboxes.md`

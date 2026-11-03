@@ -98,3 +98,5 @@
 | [2026-10-27-mdp01-the-protocol-that-remembers.md](2026-10-27-mdp01-the-protocol-that-remembers.md) | 2026-10-27 | Why stateless protocols hit a wall at temporal coordination, and how lifecycle hooks enable durable playbook-backed governance |
 | [2026-10-30-mdp01-the-team-you-know.md](2026-10-30-mdp01-the-team-you-know.md) | 2026-10-30 | Why org-aware routing matters for multi-agent governance — preferring same-unit agents before widening search |
 | [2026-10-31-mdp01-governance-follows-the-org-chart.md](2026-10-31-mdp01-governance-follows-the-org-chart.md) | 2026-10-31 | Why multi-agent governance needs org structure across routing, trust, delegation, capacity, protocols, and audit |
+| [2026-11-02-mdp01-the-key-that-opens-the-mesh.md](2026-11-02-mdp01-the-key-that-opens-the-mesh.md) | 2026-11-02 | Mesh auth — OIDC + API key coexistence, SPI boundary, constant-time comparison |
+| [2026-11-03-mdp01-when-agents-need-mailboxes.md](2026-11-03-mdp01-when-agents-need-mailboxes.md) | 2026-11-03 | Channel visibility semantics — PUBLIC/PRIVATE/DIRECT as organisational intent, agent mail inbox, group binding |
