@@ -2,7 +2,7 @@
 
 ## Last Session (2026-11-03)
 
-**Branch:** `issue-509-channel-visibility-semantics` — implementation complete, tests outstanding.
+**Branch:** `issue-509-channel-visibility-semantics` — implementation and tests complete.
 
 ### What Was Built
 
@@ -16,6 +16,26 @@ Added `ChannelVisibility` (PUBLIC, PRIVATE, DIRECT) as a typed enum field on `Ch
 - **BroadcastMembershipManager** stamps new broadcast channels with `visibility=PUBLIC`
 - **Flyway V61:** `visibility VARCHAR(20)` + `bound_group_id UUID` columns with indexes
 
+### Tests (46 total, all pass)
+
+| Test class | Location | Count | Type |
+|------------|----------|-------|------|
+| `ChannelMembershipServiceDirectGuardTest` | `testing/src/test/` | 9 | CDI-free |
+| `VisibilityServiceTest` | `runtime/src/test/` | 15 | CDI-free (Mockito) |
+| `ChannelVisibilityTest` | `runtime/src/test/` | 13 | @QuarkusTest |
+| `VisibilityResourceTest` | `runtime/src/test/` | 9 | @QuarkusTest |
+
+### Bugs Found and Fixed During Testing
+
+| Bug | Fix |
+|-----|-----|
+| DIRECT join guard fired before existing-member check, blocking role updates | Moved existing-member lookup before DIRECT guard |
+| `JpaChannelStore.scan()` missing visibility/boundGroupId JPQL clauses | Added filter clauses to JPA query builder |
+| `VisibilityResource` POST methods missing `@Transactional` | Added `@Transactional` to `createDirect` and `createGroup` |
+| `VisibilityService` missing no-args constructor for CDI proxying | Added `protected` no-args constructor |
+| `CreateChannelRequest` missing visibility/boundGroupId fields | Added fields + wired in `ChannelCore.create()` |
+| `ChannelConfigBootstrapTest` StubChannelConfig missing new methods | Added `visibility()` and `boundGroupId()` stubs |
+
 ### Code Review Findings — All Addressed
 
 | # | Fixed | Description |
@@ -24,16 +44,12 @@ Added `ChannelVisibility` (PUBLIC, PRIVATE, DIRECT) as a typed enum field on `Ch
 | C2 | Yes | Spring RuntimeAutoConfiguration uses 4-arg constructor with ChannelStore |
 | H1 | Yes | ChannelConfigBootstrap wires visibility/boundGroupId/participationPolicy from YAML |
 | H2 | Yes | ChannelDetail + QhorusEntityMapper updated with visibility/boundGroupId |
-| M1 | **No** | Zero test files written — this is the outstanding work |
+| M1 | **Yes** | 46 tests written across 4 test classes |
 | M2 | Yes | Test name renamed to `semanticDefaultsToNull` |
 
 ### What's Left
 
-**M1: Tests.** No tests were written. The next session should write:
-
-1. CDI-free unit tests in `testing/` — `ChannelMembershipServiceDirectGuardTest`, `VisibilityServiceTest`
-2. `@QuarkusTest` integration tests in `runtime/` — `ChannelVisibilityTest`, `VisibilityResourceTest`
-3. **Known issue:** `OrgUnitIdLedgerTest` (from #505) blocks JUnit discovery after `mvn clean`. Workaround: `mvn install -pl api,runtime-core,persistence-memory,testing,runtime -DskipTests` before running tests.
+Branch is ready for `work end`. All implementation batches complete, all tests pass, all code review findings addressed.
 
 ### Design Artifacts (workspace)
 
