@@ -2,6 +2,9 @@
 title: "The guard that revealed the callers"
 date: 2026-06-08
 tags: [casehub-qhorus, MessageDispatch, EVENT, CDI, MessageObserver, bug-fix]
+entry_type: note
+subtype: diary
+projects: [casehubio/qhorus]
 ---
 
 Three bugs came in together from the quarkmind Layer 3 integration: EVENT messages silently dropping their payload, dot-notation channel names throwing a confusing error, and custom-qualified `MessageObserver` beans never receiving anything. All three were discovered by someone actually using the system. All three had silent failure modes. None of them were obvious from reading the code.

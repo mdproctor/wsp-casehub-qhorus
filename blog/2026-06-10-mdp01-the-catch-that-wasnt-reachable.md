@@ -1,3 +1,12 @@
+---
+layout: post
+title: "The Catch That Wasn't Reachable"
+date: 2026-06-10
+entry_type: note
+subtype: diary
+projects: [casehubio/qhorus]
+---
+
 # The Catch That Wasn't Reachable
 
 Multi-tenancy in Qhorus was half-done. The JPA stores filtered by tenant, `MessageService` resolved the tenant from `CurrentPrincipal`, and the ledger recorded the right tenant on every write. But three gaps remained: A2A endpoints had no tenant source at all, the AgentCard returned no tenant identity, and `MessageLedgerEntryRepository` queried across tenants as if they didn't exist.

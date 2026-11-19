@@ -1,3 +1,12 @@
+---
+layout: post
+title: "The Key That Opens the Mesh"
+date: 2026-11-02
+entry_type: note
+subtype: diary
+projects: [casehubio/qhorus]
+---
+
 # The Key That Opens the Mesh
 
 Multi-agent systems have an identity problem. When agents communicate over a shared mesh, the infrastructure has to answer a deceptively simple question: *who is talking?*

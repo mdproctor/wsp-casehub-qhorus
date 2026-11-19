@@ -5,6 +5,9 @@ author: Mark Proctor
 type: essay
 tags: [speech-act-theory, message-taxonomy, negotiation, FIPA, design-decision]
 issue: 395
+entry_type: note
+subtype: diary
+projects: [casehubio/qhorus]
 ---
 
 When we shipped the 9-type message taxonomy in April, ADR-0005 made a completeness argument: every message type maps to exactly one obligation lifecycle transition, no transition is unrepresented, no type covers two transitions. The taxonomy covers Searle's five illocutionary categories — directives (QUERY, COMMAND), assertives (RESPONSE, DECLINE, STATUS), commissives (STATUS), declarations (HANDOFF, DONE, FAILURE), and expressives (not applicable for machine agents). Formally complete.

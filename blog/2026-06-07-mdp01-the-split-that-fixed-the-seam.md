@@ -1,3 +1,12 @@
+---
+layout: post
+title: "CaseHub Qhorus — The Split That Fixed The Seam"
+date: 2026-06-07
+entry_type: note
+subtype: diary
+projects: [casehubio/qhorus]
+---
+
 # CaseHub Qhorus — The Split That Fixed The Seam
 
 **Date:** 2026-06-07
