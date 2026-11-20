@@ -2,19 +2,19 @@
 
 ## D1: Playbook YAML storage
 
-**Choice:** Inline on Channel as `protocolDefinitions` (Map<String, String>, protocol name → YAML content)
+**Choice:** Dedicated `ProtocolDefinitionStore` in the bridge module. Definitions load lazily when evaluation needs them. Channel carries protocol names only (existing `List<String> protocols`).
 **Alternatives:**
-- Separate entity (ChannelPlaybookDefinition) — cleaner separation but adds a store + FK + migration for data that's conceptually part of channel config
+- Inline on Channel as Map<String, String> — simple but ChannelEntity is loaded on every dispatch; TEXT-column YAML bloats the most-queried entity in the system
 - SharedData artefact — reuses artefact infrastructure but adds indirection; definitions aren't artefacts
-**Rationale:** Consistent with how `policyOverrides` and `metadata` already work on Channel. Protocol definitions are channel configuration, not independent domain entities.
-**Trade-offs:** Adds weight to every Channel record load (TEXT column). Acceptable because most channels won't have playbook definitions, and the YAML is typically small.
-**Sources:** Channel.java (policyOverrides pattern), ChannelEntity.java (JPA converter pattern)
-**Exploration:** quick
-**Status:** captured
+**Rationale:** Channel is the hot-path entity (loaded every dispatch via MessageService). Playbook YAML is multi-kilobyte source code, not lightweight config like policyOverrides. A dedicated store loads definitions only when the bridge's evaluate() fires — not on every dispatch. The bridge module owns the entity, store, and migration — no changes to Channel or core code.
+**Trade-offs:** Adds a store interface + JPA entity + InMemory impl + migration in the bridge module. Justified by keeping the dispatch hot path lightweight.
+**Sources:** Channel.java (protocols field — names only), PushNotificationConfigEntity (bridge-owned JPA entity precedent), R1-01 decision review
+**Exploration:** quick → revised after decision review (R1-01)
+**Status:** revised
 
 ## D2: Module placement
 
-**Choice:** New optional Maven module `casehub-qhorus-playbook-protocol`
+**Choice:** New optional Maven module `casehub-qhorus-playbook-bridge`
 **Alternatives:**
 - In runtime-core with Instance<> guard — simpler but pulls platform playbook types into qhorus core compilation
 - SPI-only in api/ with platform providing impl — maximum decoupling but platform must depend on qhorus-api
@@ -49,15 +49,16 @@
 
 ## D5: Playbook output to DispatchAdvisory mapping
 
-**Choice:** Convention-based output keys
+**Choice:** Convention-based output keys with bridge-owned validation
 **Alternatives:**
-- Typed PlaybookAdvisoryResult — stronger typing but couples playbook compiler to qhorus advisory vocabulary
+- Typed PlaybookAdvisoryResult in the compiler — couples compiler to qhorus advisory vocabulary
 - Raw output passthrough — loses granularity (one run = one advisory)
-**Rationale:** The playbook's `advisory` step already produces severity/message/action in its output. The bridge reads well-known keys from `PlaybookRunResult.output()`: an `advisories` list of maps with severity/message/action/evidence. Simple contract, no compiler changes needed.
-**Trade-offs:** Convention-based means validation at runtime, not compile time. Acceptable because playbook YAML is already a runtime-validated format.
-**Sources:** PlaybookRunnerCore (advisory step output), DispatchAdvisory record (api/spi/)
-**Exploration:** quick
-**Status:** captured
+- Pure convention without validation — runtime failures on typos (e.g., `severety` instead of `severity`), invalid enum values silently dropped or crash dispatch
+**Rationale:** The playbook's `advisory` step produces severity/message/action in output. The bridge defines a `PlaybookProtocolOutput` record specifying the expected structure, and validates playbook output against it at evaluation time. Invalid entries produce clear error advisories (source="playbook-bridge:validation") instead of silent failures. The compiler remains uncoupled — validation lives in the bridge where the dependency on both DispatchAdvisory and PlaybookRunResult already exists.
+**Trade-offs:** Validation code in the bridge module. Justified by catching typos and enum mismatches at evaluation time with clear diagnostics.
+**Sources:** DispatchAdvisory record (api/spi/), PlaybookRunnerCore (advisory step output), R1-03 decision review
+**Exploration:** quick → revised after decision review (R1-03)
+**Status:** revised
 
 ## D6: Timer event dispatch mechanism
 
@@ -97,7 +98,7 @@
 
 ## D9: Bridge and timer in same module
 
-**Choice:** Both bridge (#528) and timer (#529) in `casehub-qhorus-playbook-protocol`
+**Choice:** Both bridge (#528) and timer (#529) in `casehub-qhorus-playbook-bridge`
 **Alternatives:**
 - Separate modules — more granular but the timer can't work without the bridge (deadline definitions come from playbook YAML), making separation artificial
 **Rationale:** They share the same dependency (playbook executor), the timer feeds events through the bridge, and a single classpath activation is simpler.
