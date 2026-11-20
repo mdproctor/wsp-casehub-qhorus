@@ -275,7 +275,7 @@ protocol evaluation yet.
 - Create: `playbook-bridge/src/main/java/io/casehub/qhorus/playbook/bridge/ProtocolDefinitionStore.java`
 - Create: `playbook-bridge/src/main/java/io/casehub/qhorus/playbook/bridge/ProtocolDefinitionEntity.java`
 - Create: `playbook-bridge/src/main/java/io/casehub/qhorus/playbook/bridge/JpaProtocolDefinitionStore.java`
-- Create: `playbook-bridge/src/main/java/io/casehub/qhorus/playbook/bridge/InMemoryProtocolDefinitionStore.java`
+- Create: `playbook-bridge/src/test/java/io/casehub/qhorus/playbook/bridge/InMemoryProtocolDefinitionStore.java`
 - Create: `playbook-bridge/src/main/resources/db/qhorus/migration/V62__protocol_definition.sql`
 - Create: `playbook-bridge/src/test/java/io/casehub/qhorus/playbook/bridge/ProtocolDefinitionStoreTest.java`
 - Modify: `pom.xml` (parent — add `<module>playbook-bridge</module>`)
