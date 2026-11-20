@@ -13,3 +13,16 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/qhorus#528 — Issue #528 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: ProtocolResolver SPI and ProtocolRegistry fallback
+  - [ ] Batch 2: Scaffold
+    - [ ] Task 2: Module scaffold and ProtocolDefinitionStore
+  - [ ] Batch 3: Bridge
+    - [ ] Task 3: PlaybookProtocolOutput validator
+    - [ ] Task 4: PlaybookProtocolResolver and PlaybookChannelProtocol
+  - [ ] Batch 4: Timer
+    - [ ] Task 5: ProtocolDeadlineScheduler
+    - [ ] Task 6: PlaybookProtocolLifecycleHandler with deadline registration
+  - [ ] Batch 5: REST
+    - [ ] Task 7: ProtocolDefinitionResource REST endpoint
+- [ ] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
