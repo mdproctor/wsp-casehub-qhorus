@@ -9,7 +9,7 @@ issue-repo: casehubio/qhorus
 covers: 528
 design-repo: 
 design-section-hashes: 
-flyway-next-v: none
+flyway-next-v: V62
 
 ## Queue
 - [ ] casehubio/qhorus#528 — Issue #528 ← active
