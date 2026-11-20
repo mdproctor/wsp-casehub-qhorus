@@ -438,7 +438,7 @@ durations rejected with 400 before persistence.
 
 ## Migration
 
-**V60:** `protocol_definition` table (see section 3)
+**V62:** `protocol_definition` table (see section 3)
 
 ## Module structure
 
