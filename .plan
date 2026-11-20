@@ -26,3 +26,6 @@ flyway-next-v: V62
   - [ ] Batch 5: REST
     - [ ] Task 7: ProtocolDefinitionResource REST endpoint
 - [ ] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
+- [ ] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
+- [ ] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
+- [ ] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
