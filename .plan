@@ -1,0 +1,15 @@
+# Work Plan — issue-528-playbook-protocol-bridge
+
+## State
+branch: issue-528-playbook-protocol-bridge
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/qhorus
+covers: 528
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/qhorus#528 — Issue #528 ← active
