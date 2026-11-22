@@ -2,11 +2,13 @@
 layout: post
 title: "The Bridge That Closes the Loop"
 date: 2026-11-20
-entry_type: article
+entry_type: note
 subtype: diary
 projects: [casehubio/qhorus]
-tags: [protocol, playbook, bridge, deadline, governance, design]
+tags: [protocol, playbook, bridge, deadline, governance, implementation]
 ---
+
+# The Bridge That Closes the Loop
 
 The protocol lifecycle hooks shipped in October — `ProtocolLifecycleHandler` with init, destroy, and recovery. At the time I wrote that it "opens up" temporal coordination, learning protocols, compliance tracking. All true. But the mechanism was half a bridge: the lifecycle side could manage per-channel state, while the evaluation side — `ProtocolRegistry` — was still a static map of CDI beans built once at startup.
 
@@ -39,20 +41,26 @@ Protocols evaluate synchronously during message dispatch. If no message arrives,
 
 The tempting solution was to hook into commitments — they already have `expiresAt`, a scheduler-driven sweep, and CDI event firing. But commitments are message-level obligations (COMMAND → DONE). Protocol deadlines are channel-level governance timeouts. Mixing them would pollute obligation stats, stalled-obligation queries, and the normative audit trail — a semantic error that gets worse as the system scales.
 
-The pattern is right; the entity is wrong. We followed the same `@Scheduled` sweep pattern that `CommitmentService.expireOverdue()` uses, but with an in-memory `ConcurrentHashMap` instead of a JPA entity. Protocol deadlines are derived state — the YAML definition says *what* the deadline is, the message history says *when* it was last relevant. The registration is just a timer cache.
+The pattern is right; the entity is wrong. The deadline scheduler follows the same `@Scheduled` sweep pattern that `CommitmentService.expireOverdue()` uses, but with an in-memory `ConcurrentHashMap` instead of a JPA entity. Protocol deadlines are derived state — the YAML definition says *what* the deadline is, the message history says *when* it was last relevant. The registration is just a timer cache.
 
 When a deadline fires, the scheduler dispatches a synthetic EVENT message to the channel — `sender=system:protocol-timer`. The EVENT flows through normal `dispatch()`, which triggers protocol evaluation. The playbook sees the timeout in its `ProtocolContext` and can react: escalate, resolve, quarantine. The full enforcement pipeline applies. The ledger records it. It's not a side channel.
 
 On restart, `ProtocolLifecycleHandler.onInit(recovered=true)` recomputes every deadline from the YAML duration and the timestamp of the last relevant message. Past-due deadlines fire immediately. No persistence needed beyond what the definition store and message history already provide.
 
+## What implementation revealed
+
+The deadline scheduler exposed a tension between testability and CDI wiring that's worth naming. The scheduler's `sweep()` method needs to dispatch EVENTs through `MessageDispatcher`, but CDI-free tests can't construct a real `MessageDispatch` without the full Quarkus context. The solution was to split the concern: `ProtocolDeadlineScheduler` is a plain class that accepts a `Consumer<DeadlineKey>` — trivially testable with a list collector. A separate `PlaybookBridgeBeans` CDI producer constructs it with the fire action wired to `MessageDispatcher`, and `DeadlineSweepScheduler` drives the `@Scheduled` tick. Three classes where one was planned, but each has exactly one job.
+
+The platform playbook executor (`PlaybookRunnerCore`) currently takes a file path, not a YAML string. The `run(String, PlaybookRunConfig)` overload is a prerequisite that hasn't landed yet. Rather than block the entire bridge on a cross-repo dependency, I abstracted behind a `PlaybookExecutor` functional interface. The bridge is fully built and tested against mocks. When the platform overload ships, a single `@DefaultBean` adapter wires it in.
+
 ## The bridge module
 
-Everything lands in one optional module — `casehub-qhorus-playbook-bridge`. Activates by classpath presence, same as `connector-backend` or `slack-channel`. The module depends on `casehub-platform-yaml-step-runtime` for the playbook compiler and executor — a cross-repo optional dependency that follows the established bridge pattern.
+Everything lands in one optional module — `casehub-qhorus-playbook-bridge`. Activates by classpath presence, same as `connector-backend` or `slack-channel`.
 
-The module contains five things: the resolver (looks up definitions, caches compilations, runs playbooks), the lifecycle handler (parses deadline metadata, registers timers), the deadline scheduler (fires EVENTs on expiry), the definition store (JPA entity with REST CRUD), and an output validator (maps playbook results to `DispatchAdvisory` with error diagnostics for malformed output).
+![Playbook bridge dispatch and deadline flows](images/playbook-bridge-flow.svg)
 
-## What this means
+The module contains the resolver (looks up definitions, caches compilations, delegates to the executor), the lifecycle handler (parses deadline metadata, registers timers), the deadline scheduler (fires EVENTs on expiry), the definition store (JPA entity with REST CRUD), and an output validator (maps playbook results to `DispatchAdvisory` with error diagnostics for malformed output).
 
 A channel operator writes a protocol in YAML, stores it via a REST endpoint, and it evaluates on every message — returning the same `DispatchAdvisory` results that built-in protocols return. The enforcement pipeline doesn't know or care whether the advisory came from a Java class or a playbook. Deadlines fire even when nobody is talking. The lifecycle hooks handle init, destroy, recovery, and runtime reconfiguration.
 
-This is the second half of the bridge. The lifecycle hooks gave playbook protocols a place to live. The resolver gives them a voice in the dispatch pipeline. The deadline scheduler gives them a sense of time.
+The lifecycle hooks gave playbook protocols a place to live. The resolver gives them a voice in the dispatch pipeline. The deadline scheduler gives them a sense of time.

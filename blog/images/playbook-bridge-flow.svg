@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 520" font-family="'Inter','Helvetica Neue',sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#555"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#3b82f6"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="410" y="24" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">Playbook Protocol Bridge — Dispatch + Deadline Flows</text>
+
+  <!-- Dispatch flow (top half) -->
+  <rect x="20" y="50" width="160" height="44" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="100" y="77" text-anchor="middle" font-weight="500" fill="#334155">MessageService</text>
+  <text x="100" y="77" text-anchor="middle" font-size="11" fill="#64748b" dy="14">dispatch()</text>
+
+  <line x1="180" y1="72" x2="224" y2="72" stroke="#555" marker-end="url(#arrow)"/>
+
+  <rect x="228" y="50" width="160" height="44" rx="6" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="308" y="77" text-anchor="middle" font-weight="500" fill="#0c4a6e">ProtocolRegistry</text>
+  <text x="308" y="77" text-anchor="middle" font-size="11" fill="#0369a1" dy="14">forProtocols(names, chId)</text>
+
+  <!-- Static path -->
+  <line x1="308" y1="94" x2="308" y2="130" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="228" y="134" width="160" height="36" rx="6" fill="#f0fdf4" stroke="#86efac"/>
+  <text x="308" y="157" text-anchor="middle" font-size="12" fill="#166534">Static CDI map ✓</text>
+
+  <!-- Fallback path -->
+  <line x1="388" y1="72" x2="444" y2="72" stroke="#555" marker-end="url(#arrow)"/>
+  <text x="416" y="65" text-anchor="middle" font-size="10" fill="#94a3b8">unresolved</text>
+
+  <rect x="448" y="50" width="170" height="44" rx="6" fill="#fef3c7" stroke="#fbbf24"/>
+  <text x="533" y="77" text-anchor="middle" font-weight="500" fill="#78350f">PlaybookProtocolResolver</text>
+  <text x="533" y="77" text-anchor="middle" font-size="11" fill="#92400e" dy="14">resolve(names, channelId)</text>
+
+  <!-- Resolver to store -->
+  <line x1="533" y1="94" x2="533" y2="130" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="448" y="134" width="170" height="36" rx="6" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="533" y="157" text-anchor="middle" font-size="12" fill="#9a3412">ProtocolDefinitionStore</text>
+
+  <!-- Cache -->
+  <line x1="618" y1="152" x2="662" y2="152" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="666" y="134" width="130" height="36" rx="6" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="731" y="157" text-anchor="middle" font-size="12" fill="#5b21b6">CompilationCache</text>
+
+  <!-- Resolver to protocol -->
+  <line x1="533" y1="170" x2="533" y2="206" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="438" y="210" width="190" height="44" rx="6" fill="#fef3c7" stroke="#fbbf24"/>
+  <text x="533" y="237" text-anchor="middle" font-weight="500" fill="#78350f">PlaybookChannelProtocol</text>
+  <text x="533" y="237" text-anchor="middle" font-size="11" fill="#92400e" dy="14">evaluate(ctx)</text>
+
+  <!-- Protocol to executor -->
+  <line x1="533" y1="254" x2="533" y2="290" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="453" y="294" width="160" height="36" rx="6" fill="#fce7f3" stroke="#f9a8d4"/>
+  <text x="533" y="317" text-anchor="middle" font-size="12" fill="#9d174d">PlaybookExecutor</text>
+
+  <!-- Executor to output -->
+  <line x1="533" y1="330" x2="533" y2="362" stroke="#555" marker-end="url(#arrow)"/>
+  <rect x="438" y="366" width="190" height="36" rx="6" fill="#fef3c7" stroke="#fbbf24"/>
+  <text x="533" y="389" text-anchor="middle" font-size="12" fill="#78350f">PlaybookProtocolOutput.parse()</text>
+
+  <!-- Output back to dispatch -->
+  <path d="M438,384 L100,384 L100,94" fill="none" stroke="#555" marker-end="url(#arrow)"/>
+  <text x="260" y="400" text-anchor="middle" font-size="11" fill="#64748b">List&lt;DispatchAdvisory&gt;</text>
+
+  <!-- Deadline flow (bottom half) -->
+  <rect x="20" y="440" width="200" height="44" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="120" y="462" text-anchor="middle" font-weight="500" fill="#1e40af">DeadlineSweepScheduler</text>
+  <text x="120" y="462" text-anchor="middle" font-size="11" fill="#1d4ed8" dy="14">@Scheduled(60s)</text>
+
+  <line x1="220" y1="462" x2="274" y2="462" stroke="#3b82f6" marker-end="url(#arrow-blue)"/>
+
+  <rect x="278" y="440" width="200" height="44" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="378" y="462" text-anchor="middle" font-weight="500" fill="#1e40af">ProtocolDeadlineScheduler</text>
+  <text x="378" y="462" text-anchor="middle" font-size="11" fill="#1d4ed8" dy="14">sweep() → fire expired</text>
+
+  <line x1="478" y1="462" x2="532" y2="462" stroke="#3b82f6" marker-end="url(#arrow-blue)"/>
+
+  <rect x="536" y="440" width="140" height="44" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="606" y="462" text-anchor="middle" font-weight="500" fill="#1e40af">MessageDispatcher</text>
+  <text x="606" y="462" text-anchor="middle" font-size="11" fill="#1d4ed8" dy="14">EVENT → dispatch()</text>
+
+  <!-- Loop arrow from dispatcher back to MessageService -->
+  <path d="M676,462 L740,462 L740,72 L180,72" fill="none" stroke="#3b82f6" stroke-dasharray="6,3" marker-end="url(#arrow-blue)"/>
+  <text x="760" y="270" text-anchor="middle" font-size="10" fill="#3b82f6" transform="rotate(90,760,270)">re-enters dispatch</text>
+
+  <!-- Legend -->
+  <rect x="20" y="500" width="12" height="12" rx="2" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="38" y="511" font-size="11" fill="#64748b">Dispatch flow</text>
+  <rect x="130" y="500" width="12" height="12" rx="2" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="148" y="511" font-size="11" fill="#64748b">Deadline timer loop</text>
+  <rect x="270" y="500" width="12" height="12" rx="2" fill="#fef3c7" stroke="#fbbf24"/>
+  <text x="288" y="511" font-size="11" fill="#64748b">Bridge module</text>
+  <rect x="390" y="500" width="12" height="12" rx="2" fill="#fce7f3" stroke="#f9a8d4"/>
+  <text x="408" y="511" font-size="11" fill="#64748b">Platform dependency (abstracted)</text>
+</svg>
