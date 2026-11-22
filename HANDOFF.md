@@ -1,20 +1,26 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-11-20)
+## Last Session (2026-11-22)
 
-Design session for #528 (playbook-executor-backed ChannelProtocol bridge) and #529 (timer/deadline event source). Brainstormed, made 9 decisions (D1 and D5 revised after decision review — D1 moved from inline Channel storage to dedicated ProtocolDefinitionStore, D5 added bridge-owned output validation). Wrote spec, ran two rounds of review (decision + post-spec), wrote implementation plan (5 batches, 7 tasks). Filed 3 follow-up issues (#531 platform prerequisite, #532 ChannelCreateRequest integration, #533 CLAUDE.md update).
+Implemented and landed #528 (playbook protocol bridge) and #529 (deadline timer). 7 tasks across 5 batches: ProtocolResolver SPI in api/, playbook-bridge module scaffold with ProtocolDefinitionStore (JPA + migration V62), PlaybookProtocolOutput validator, PlaybookProtocolResolver with CompilationCache and PlaybookExecutor abstraction, ProtocolDeadlineScheduler with Consumer-based fire action, PlaybookProtocolLifecycleHandler, REST endpoint with CDI producers. Code review caught 4 CDI wiring issues (scheduler missing @ApplicationScoped, registry not injected, unused ChannelManager, tenancy filtering gap) — fixed 2 inline, filed 4 issues (#534-#537). Squashed 9→6 commits. Landed on main, published.
 
-## Immediate Next Step
+## Queue State
 
-Begin implementation — `work continue` picks up Task 1 (ProtocolResolver SPI + ProtocolRegistry fallback). Tasks 1-3 can proceed without the platform prerequisite (#531); Task 4 needs it.
+#532 is active but depends on deferred #531 (platform prerequisite). #533 (CLAUDE.md update) is the next actionable item. Queue: #532, #533, #534, #535, #536, #537.
 
 ## Cross-Module
 
-- casehubio/qhorus#531 — `PlaybookRunnerCore.run(String, PlaybookRunConfig)` overload needed in casehub-platform. Blocks Task 4.
+- casehubio/qhorus#531 — `PlaybookRunnerCore.run(String, PlaybookRunConfig)` overload needed in casehub-platform. Deferred. Blocks #532 and final PlaybookExecutor wiring.
+
+## Open Follow-ups
+
+- #534 — REST endpoint should manage channel.protocols list on PUT/DELETE
+- #535 — JpaProtocolDefinitionStore queries need tenancy filtering
+- #536 — @QuarkusTest integration and recovery tests for playbook-bridge
+- #537 — Use proper YAML parser for deadline metadata
 
 ## References
 
 - `specs/issue-528-playbook-protocol-bridge/2026-11-20-playbook-protocol-bridge-design.md`
-- `specs/issue-528-playbook-protocol-bridge/decisions.md`
 - `plans/2026-11-20-playbook-protocol-bridge.md`
 - `blog/2026-11-20-mdp01-the-bridge-that-closes-the-loop.md`
