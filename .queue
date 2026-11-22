@@ -1,0 +1,32 @@
+- [x] casehubio/qhorus#528 — Issue #528
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: ProtocolResolver SPI and ProtocolRegistry fallback
+  - [ ] Batch 2: Scaffold
+    - [ ] Task 2: Module scaffold and ProtocolDefinitionStore
+  - [ ] Batch 3: Bridge
+    - [ ] Task 3: PlaybookProtocolOutput validator
+    - [ ] Task 4: PlaybookProtocolResolver and PlaybookChannelProtocol
+  - [ ] Batch 4: Timer
+    - [ ] Task 5: ProtocolDeadlineScheduler
+    - [ ] Task 6: PlaybookProtocolLifecycleHandler with deadline registration
+  - [ ] Batch 5: REST
+    - [ ] Task 7: ProtocolDefinitionResource REST endpoint
+- [ ] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks        ← active
+- [ ] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
+- [ ] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
+- [ ] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
+- [ ] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
+- [ ] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering
+- [ ] casehubio/qhorus#536 — integration and recovery tests
+- [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
+
+## State
+branch: issue-528-playbook-protocol-bridge
+issue-repo: casehubio/qhorus
+status: active
+covers: 528
+project-sha: 
+date: 
+design-repo: 
+design-section-hashes: 
+flyway-next-v: V62
