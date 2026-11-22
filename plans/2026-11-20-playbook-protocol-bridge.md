@@ -413,7 +413,7 @@ public interface ProtocolDefinitionStore {
 
 - [ ] **Step 4: Create InMemoryProtocolDefinitionStore**
 
-Create `playbook-bridge/src/main/java/io/casehub/qhorus/playbook/bridge/InMemoryProtocolDefinitionStore.java`:
+Create `../../playbook-bridge/src/test/java/io/casehub/qhorus/playbook/bridge/InMemoryProtocolDefinitionStore.java`:
 
 ```java
 package io.casehub.qhorus.playbook.bridge;
