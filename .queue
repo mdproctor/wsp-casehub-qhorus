@@ -1,10 +1,10 @@
 # Work Plan —
 
 ## State
-branch: 
+branch: issue-531-playbook-executor-adapter
 issue-repo: casehubio/qhorus
 status: active
-covers: 528
+covers: 531
 project-sha: 
 date: 
 design-repo: 
