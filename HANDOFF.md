@@ -2,27 +2,35 @@
 
 ## Last Session (2026-11-23)
 
-Completed the entire playbook-bridge cleanup queue (#536–#539). Four issues closed in one session:
+Completed the entire playbook-bridge cleanup queue (#536–#539) and started a new queue (#530, #527). Four issues closed, branch scaffolded for #530.
 
-- **#536** (on main) — Added 26 `@QuarkusTest` integration tests (CDI wiring, JPA store against H2, REST Assured HTTP round-trips) and 4 CDI-free recovery tests (past-due deadlines, partial expiry, empty history). Test infrastructure follows the connector-backend pattern: dual H2 datasources, InMemory store alternatives, entity package registration.
-- **#537** — Replaced hand-rolled YAML line-splitting in `parseDeadlines()` with snakeyaml (transitive dep). Fixes 4-space indent, inline comments, nested keys. Validator delegates to shared `parseDeadlines()` instead of duplicating the logic. 4 edge case tests added.
-- **#538** — Removed dead `tenancyId` field from `ProtocolDefinitionRequest` (unused since #535). All test call sites updated to single-arg constructor.
+### Closed this session
+
+- **#536** (on main) — 26 `@QuarkusTest` integration tests + 4 CDI-free recovery tests for playbook-bridge. Test infrastructure follows connector-backend pattern: dual H2 datasources, InMemory store alternatives, entity package registration.
+- **#537** — Replaced hand-rolled YAML line-splitting with snakeyaml (transitive dep). Fixes 4-space indent, inline comments, nested keys. Validator delegates to shared `parseDeadlines()`.
+- **#538** — Removed dead `tenancyId` field from `ProtocolDefinitionRequest`.
 - **#539** — Renamed `put_defaultsTenancyId` to `put_usesCurrentPrincipalTenancyId`.
 
-Blog entry: "Testing the Bridge from Outside" — covers the optional module integration test pattern and the YAML parser lesson.
+### Active work
+
+**#530** — `policyOverrides` not visible to `ProtocolLifecycleHandler.onInit()` — set after `ChannelInitialisedEvent` fires. Branch scaffolded (`issue-530-policyoverrides-timing-race`), no code written.
+
+**Root cause:** `ChannelService.create()` → `ChannelCreateHelper.createChannelOnly()` → `channelGateway.initChannel()` fires `ChannelInitialisedEvent` synchronously. But `ChannelProvisionHandler.provision()` calls `setPolicyOverrides()` only *after* `create()` returns. Any `ProtocolLifecycleHandler.onInit()` sees no overrides.
+
+**Fix path:** Add `policyOverrides` to `ChannelCreateRequest` so they're set at creation time, before the init event fires. Touches central API — check all `ChannelCreateRequest.builder()` call sites.
 
 ## Queue State
 
-Queue is empty — all items complete. #537, #538, #539 on stacked branches awaiting landing.
+- [active] casehubio/qhorus#530 — policyOverrides timing race
+- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
+- [deferred] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
 
 ## Cross-Module
 
-- casehubio/platform#922 — template-based message extraction pipeline. #921, #923, #925, #928, #929 delivered. #924 (integrate TemplateExtractor with governance runtime) depends on #922.
+- casehubio/platform#922 — template-based message extraction pipeline. #924 (integrate TemplateExtractor with governance runtime) depends on #922.
 
 ## References
 
-- `specs/issue-528-playbook-protocol-bridge/2026-11-20-playbook-protocol-bridge-design.md`
-- `plans/2026-11-20-playbook-protocol-bridge.md`
-- `blog/2026-11-20-mdp01-the-bridge-that-closes-the-loop.md`
-- `blog/2026-11-23-mdp01-three-gaps-one-pass.md`
 - `blog/2026-11-23-mdp02-testing-the-bridge-from-outside.md`
+- `blog/2026-11-23-mdp01-three-gaps-one-pass.md`
+- `blog/2026-11-20-mdp01-the-bridge-that-closes-the-loop.md`
