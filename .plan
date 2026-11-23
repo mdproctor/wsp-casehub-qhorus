@@ -25,11 +25,11 @@ flyway-next-v: V62
     - [ ] Task 6: PlaybookProtocolLifecycleHandler with deadline registration
   - [ ] Batch 5: REST
     - [ ] Task 7: ProtocolDefinitionResource REST endpoint
-- [ ] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
+- [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
 - [ ] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
 - [ ] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
 - [ ] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
-- [ ] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
+- [x] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
 - [ ] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering
 - [ ] casehubio/qhorus#536 — integration and recovery tests
 - [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
