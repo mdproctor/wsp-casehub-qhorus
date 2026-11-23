@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340">
+  <style>
+    text { font-family: 'Segoe UI', system-ui, sans-serif; }
+    .title { font-size: 13px; font-weight: 600; fill: #1a1a2e; }
+    .label { font-size: 11px; fill: #4a4a6a; }
+    .code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 10px; fill: #2d2d4e; }
+    .arrow { stroke: #6c6c8a; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+    .danger { fill: #fef2f2; stroke: #dc2626; stroke-width: 1.5; rx: 6; }
+    .safe { fill: #f0fdf4; stroke: #16a34a; stroke-width: 1.5; rx: 6; }
+    .neutral { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; rx: 6; }
+    .event-box { fill: #fefce8; stroke: #ca8a04; stroke-width: 1.5; rx: 6; }
+    .danger-text { font-size: 10px; fill: #dc2626; font-weight: 600; }
+    .safe-text { font-size: 10px; fill: #16a34a; font-weight: 600; }
+    .phase-label { font-size: 9px; fill: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .divider { stroke: #e2e8f0; stroke-width: 1; stroke-dasharray: 4,3; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6c6c8a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="360" y="28" text-anchor="middle" class="title" style="font-size:15px">Create-then-Configure vs Configure-then-Create</text>
+
+  <!-- Divider -->
+  <line x1="360" y1="45" x2="360" y2="320" class="divider"/>
+  <text x="180" y="58" text-anchor="middle" class="phase-label">❌  Before (race)</text>
+  <text x="540" y="58" text-anchor="middle" class="phase-label">✅  After (atomic)</text>
+
+  <!-- LEFT: Before (race) -->
+  <!-- Step 1: create() -->
+  <rect x="30" y="72" width="300" height="34" class="neutral"/>
+  <text x="180" y="85" text-anchor="middle" class="code">Channel created = ops.create(request)</text>
+  <text x="180" y="97" text-anchor="middle" class="label" style="font-size:9px">policyOverrides not in request</text>
+
+  <!-- Arrow down -->
+  <line x1="180" y1="106" x2="180" y2="122" class="arrow"/>
+
+  <!-- Step 2: event fires -->
+  <rect x="50" y="124" width="260" height="40" class="event-box"/>
+  <text x="180" y="140" text-anchor="middle" class="code">ChannelInitialisedEvent fires</text>
+  <text x="180" y="154" text-anchor="middle" class="label" style="font-size:9px">inside create() transaction</text>
+
+  <!-- Arrow down -->
+  <line x1="180" y1="164" x2="180" y2="180" class="arrow"/>
+
+  <!-- Step 3: handler reads -->
+  <rect x="40" y="182" width="280" height="40" class="danger"/>
+  <text x="180" y="198" text-anchor="middle" class="code">onInit() reads channel</text>
+  <text x="180" y="212" text-anchor="middle" class="danger-text">policyOverrides = null ✗</text>
+
+  <!-- Arrow down -->
+  <line x1="180" y1="222" x2="180" y2="238" class="arrow"/>
+
+  <!-- Step 4: create returns -->
+  <rect x="60" y="240" width="240" height="28" class="neutral"/>
+  <text x="180" y="258" text-anchor="middle" class="code">create() returns</text>
+
+  <!-- Arrow down -->
+  <line x1="180" y1="268" x2="180" y2="284" class="arrow"/>
+
+  <!-- Step 5: setPolicyOverrides -->
+  <rect x="30" y="286" width="300" height="28" class="neutral"/>
+  <text x="180" y="304" text-anchor="middle" class="code">ops.setPolicyOverrides(id, overrides)</text>
+
+  <!-- RIGHT: After (atomic) -->
+  <!-- Step 1: create with overrides -->
+  <rect x="390" y="72" width="300" height="48" class="neutral"/>
+  <text x="540" y="88" text-anchor="middle" class="code">ChannelCreateRequest.builder(name)</text>
+  <text x="540" y="102" text-anchor="middle" class="code">.policyOverrides(overrides).build()</text>
+  <text x="540" y="114" text-anchor="middle" class="label" style="font-size:9px">overrides part of request</text>
+
+  <!-- Arrow down -->
+  <line x1="540" y1="120" x2="540" y2="136" class="arrow"/>
+
+  <!-- Step 2: Channel.fromRequest maps it -->
+  <rect x="410" y="138" width="260" height="34" class="neutral"/>
+  <text x="540" y="152" text-anchor="middle" class="code">Channel.fromRequest(req, tenancy)</text>
+  <text x="540" y="164" text-anchor="middle" class="label" style="font-size:9px">maps req.policyOverrides()</text>
+
+  <!-- Arrow down -->
+  <line x1="540" y1="172" x2="540" y2="188" class="arrow"/>
+
+  <!-- Step 3: event fires -->
+  <rect x="410" y="190" width="260" height="40" class="event-box"/>
+  <text x="540" y="206" text-anchor="middle" class="code">ChannelInitialisedEvent fires</text>
+  <text x="540" y="220" text-anchor="middle" class="label" style="font-size:9px">channel fully configured</text>
+
+  <!-- Arrow down -->
+  <line x1="540" y1="230" x2="540" y2="246" class="arrow"/>
+
+  <!-- Step 4: handler reads -->
+  <rect x="400" y="248" width="280" height="40" class="safe"/>
+  <text x="540" y="264" text-anchor="middle" class="code">onInit() reads channel</text>
+  <text x="540" y="278" text-anchor="middle" class="safe-text">policyOverrides visible ✓</text>
+</svg>
