@@ -1,23 +1,29 @@
-- [x] casehubio/qhorus#528 — Issue #528
-- [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
-- [x] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
-- [x] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
-- [ ] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs        ← active
-- [ ] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
-- [ ] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering
-- [ ] casehubio/qhorus#536 — integration and recovery tests
-- [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
+# Work Plan —
 
 ## State
-branch: issue-531-playbook-executor-adapter
+branch: 
 issue-repo: casehubio/qhorus
 status: active
-covers: 531
+covers: 533
 project-sha: 
 date: 
 design-repo: 
 design-section-hashes: 
-flyway-next-v: V62
+flyway-next-v: V63
+
+## Queue
+- [x] casehubio/qhorus#528 — Issue #528
+- [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
+- [x] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
+- [x] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
+- [x] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
+- [x] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
+- [ ] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering ← active
+- [ ] casehubio/qhorus#536 — integration and recovery tests
+- [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
+- [ ] casehubio/qhorus#538 — remove dead tenancyId field
+- [ ] casehubio/qhorus#539 — rename misleading test name
 
 ## Deferred
 - [ ] prerequisite platform change — PlaybookRunnerCore overload (M / Med) []
+- [ ] ChannelCreateRequest integration for playbook definitions (S / Med) []

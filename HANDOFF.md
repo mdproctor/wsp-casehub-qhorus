@@ -2,11 +2,15 @@
 
 ## Last Session (2026-11-22)
 
-Implemented and landed #528 (playbook protocol bridge), #529 (deadline timer), and #531 (PlaybookRunnerExecutor adapter). Platform#931 landed the `run(String, PlaybookRunConfig)` overload; the qhorus adapter wires it via `Instance<PlaybookRunnerCore>` with availability guard. Code review caught CDI wiring issue (`PlaybookRunnerCore` is not a CDI bean — changed to `Instance<>` pattern). All three issues closed, published.
+Implemented and landed #528 (playbook protocol bridge) and #529 (deadline timer). 7 tasks across 5 batches: ProtocolResolver SPI in api/, playbook-bridge module scaffold with ProtocolDefinitionStore (JPA + migration V62), PlaybookProtocolOutput validator, PlaybookProtocolResolver with CompilationCache and PlaybookExecutor abstraction, ProtocolDeadlineScheduler with Consumer-based fire action, PlaybookProtocolLifecycleHandler, REST endpoint with CDI producers. Code review caught 4 CDI wiring issues (scheduler missing @ApplicationScoped, registry not injected, unused ChannelManager, tenancy filtering gap) — fixed 2 inline, filed 4 issues (#534-#537). Squashed 9→6 commits. Landed on main, published.
 
 ## Queue State
 
-#533 (CLAUDE.md update) is next. Queue: #533, #534, #535, #536, #537. #532 (ChannelCreateRequest integration) is deferred but no longer blocked — can be un-deferred now that #531 is done.
+#532 is active but depends on deferred #531 (platform prerequisite). #533 (CLAUDE.md update) is the next actionable item. Queue: #532, #533, #534, #535, #536, #537.
+
+## Cross-Module
+
+- casehubio/qhorus#531 — `PlaybookRunnerCore.run(String, PlaybookRunConfig)` overload needed in casehub-platform. Deferred. Blocks #532 and final PlaybookExecutor wiring.
 
 ## Open Follow-ups
 
