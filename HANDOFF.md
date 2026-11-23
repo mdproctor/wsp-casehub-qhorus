@@ -2,35 +2,37 @@
 
 ## Last Session (2026-11-23)
 
-Completed the entire playbook-bridge cleanup queue (#536–#539) and started a new queue (#530, #527). Four issues closed, branch scaffolded for #530.
+Closed #530 (policyOverrides timing race), filed two follow-up issues (#540, #541), wrote blog entry, published both repos. Scaffolded #540.
 
 ### Closed this session
 
-- **#536** (on main) — 26 `@QuarkusTest` integration tests + 4 CDI-free recovery tests for playbook-bridge. Test infrastructure follows connector-backend pattern: dual H2 datasources, InMemory store alternatives, entity package registration.
-- **#537** — Replaced hand-rolled YAML line-splitting with snakeyaml (transitive dep). Fixes 4-space indent, inline comments, nested keys. Validator delegates to shared `parseDeadlines()`.
-- **#538** — Removed dead `tenancyId` field from `ProtocolDefinitionRequest`.
-- **#539** — Renamed `put_defaultsTenancyId` to `put_usesCurrentPrincipalTenancyId`.
+- **#530** — Added `policyOverrides` to `ChannelCreateRequest` so they're set atomically at creation time, before `ChannelInitialisedEvent` fires. Also wired into `QhorusConfig.ChannelConfig` for YAML-declared channels with drift detection. Landed as `bed0f0d6`.
+
+### Filed this session
+
+- **#540** — Remove redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap` (same anti-pattern as #530)
+- **#541** — ops `ChannelProvisionHandler` should use `policyOverrides` on builder (consumer follow-up to #530)
 
 ### Active work
 
-**#530** — `policyOverrides` not visible to `ProtocolLifecycleHandler.onInit()` — set after `ChannelInitialisedEvent` fires. Branch scaffolded (`issue-530-policyoverrides-timing-race`), no code written.
+**#540** — Remove redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap`. Branch scaffolded (`issue-540-redundant-setparticipationpolicy`), no code written.
 
-**Root cause:** `ChannelService.create()` → `ChannelCreateHelper.createChannelOnly()` → `channelGateway.initChannel()` fires `ChannelInitialisedEvent` synchronously. But `ChannelProvisionHandler.provision()` calls `setPolicyOverrides()` only *after* `create()` returns. Any `ProtocolLifecycleHandler.onInit()` sees no overrides.
+**Root cause:** `processChannel()` lines 57-58 call `channelService.setParticipationPolicy()` after create, but `participationPolicy` is already on `ChannelCreateRequest` and set via the builder in `toRequest()` (line 94). The post-create call is redundant — same pattern that #530 fixed for policyOverrides.
 
-**Fix path:** Add `policyOverrides` to `ChannelCreateRequest` so they're set at creation time, before the init event fires. Touches central API — check all `ChannelCreateRequest.builder()` call sites.
+**Fix:** Remove lines 57-58 from `ChannelConfigBootstrap.processChannel()`. Verify with existing tests.
+
+### Queue anomaly
+
+**#527 was accidentally marked done in the queue** when `plan_manager.py advance` was run incorrectly. #527 (wire ApiKeyIdentityResolver to StaticCredentialStore) has NOT been worked on. It needs to be re-queued — uncheck it in `.queue` and move it back to the queued section.
 
 ## Queue State
 
-- [active] casehubio/qhorus#530 — policyOverrides timing race
-- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
-- [deferred] casehubio/qhorus#532 — ChannelCreateRequest integration for playbook definitions
-
-## Cross-Module
-
-- casehubio/platform#922 — template-based message extraction pipeline. #924 (integrate TemplateExtractor with governance runtime) depends on #922.
+- [active] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call
+- [ ] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder
+- [done but not worked] casehubio/qhorus#527 — needs re-queuing
 
 ## References
 
+- `blog/2026-11-23-mdp03-the-configuration-that-arrived-too-late.md`
 - `blog/2026-11-23-mdp02-testing-the-bridge-from-outside.md`
 - `blog/2026-11-23-mdp01-three-gaps-one-pass.md`
-- `blog/2026-11-20-mdp01-the-bridge-that-closes-the-loop.md`
