@@ -9,11 +9,14 @@
 - [x] casehubio/qhorus#537 — YAML parser for deadline metadata
 - [x] casehubio/qhorus#538 — remove dead tenancyId field
 - [x] casehubio/qhorus#539 — rename misleading test name
+- [ ] casehubio/qhorus#530 — policyOverrides timing race in onInit        ← active
+- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
 
 ## State
-branch: 
+branch: issue-530-policyoverrides-timing-race
 issue-repo: casehubio/qhorus
-status: drained
+status: active
+covers: casehubio/qhorus#530
 project-sha: 
 date: 
 design-repo: 
