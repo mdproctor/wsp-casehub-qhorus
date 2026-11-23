@@ -8,12 +8,12 @@
 - [x] casehubio/qhorus#536 — integration and recovery tests
 - [x] casehubio/qhorus#537 — YAML parser for deadline metadata
 - [x] casehubio/qhorus#538 — remove dead tenancyId field
-- [ ] casehubio/qhorus#539 — rename misleading test name ← done on issue-539-rename-misleading-test
+- [x] casehubio/qhorus#539 — rename misleading test name
 
 ## State
 branch: 
 issue-repo: casehubio/qhorus
-status: active
+status: drained
 project-sha: 
 date: 
 design-repo: 
