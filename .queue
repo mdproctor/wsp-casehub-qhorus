@@ -1,3 +1,17 @@
+# Work Plan —
+
+## State
+branch: 
+issue-repo: casehubio/qhorus
+status: active
+covers: 
+project-sha: 
+date: 
+design-repo: 
+design-section-hashes: 
+flyway-next-v: V63
+
+## Queue
 - [x] casehubio/qhorus#528 — Issue #528
 - [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
 - [x] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
@@ -5,21 +19,10 @@
 - [x] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
 - [x] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
 - [x] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering
-- [ ] casehubio/qhorus#536 — integration and recovery tests        ← active
-- [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
-- [ ] casehubio/qhorus#538 — remove dead tenancyId field
-- [ ] casehubio/qhorus#539 — rename misleading test name
-
-## State
-branch: issue-533-update-claude-md-playbook-bridge
-issue-repo: casehubio/qhorus
-status: active
-covers: 533
-project-sha: 
-date: 
-design-repo: 
-design-section-hashes: 
-flyway-next-v: V63
+- [x] casehubio/qhorus#536 — integration and recovery tests
+- [ ] casehubio/qhorus#537 — YAML parser for deadline metadata ← done on issue-537-yaml-parser-deadline-metadata
+- [ ] casehubio/qhorus#538 — remove dead tenancyId field ← done on issue-538-remove-dead-tenancyid-field
+- [ ] casehubio/qhorus#539 — rename misleading test name ← done on issue-539-rename-misleading-test
 
 ## Deferred
 - [ ] prerequisite platform change — PlaybookRunnerCore overload (M / Med) []
