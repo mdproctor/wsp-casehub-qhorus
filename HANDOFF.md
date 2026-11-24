@@ -25,6 +25,16 @@ Closed three issues (#540, #541, #527), landed ops cross-repo fix, filed one fol
 
 - **casehub-ops** — committed `db9135c` on main (branch `issue-248-policyoverrides-on-builder`, stamped). Changed `ChannelProvisionHandler.provision()` and `StubChannelOps.create()` test helper.
 
+### Active work
+
+**#542** — Add `@QuarkusTest` integration tests for `PlatformApiKeyIdentityResolver`. Branch scaffolded (`issue-542-integration-test-platform-apikey`), no code written.
+
+**Scope:** Two `@QuarkusTest` classes with `@TestProfile`:
+- `PlatformApiKeyIdentityResolverCdiTest` — enabled profile (`casehub.qhorus.identity.platform-api-keys=true`), verify bean selection via `ClientProxy.unwrap()`
+- `PlatformApiKeyIdentityResolverDisabledTest` — no property, verify `ConfigApiKeyIdentityResolver` is selected
+
+Follows the `RegistryBackedInstanceManager` pattern (see `RegistryBackedProfile`).
+
 ## References
 
 - `blog/2026-11-24-mdp01-name-the-pattern-find-the-copies.md`
