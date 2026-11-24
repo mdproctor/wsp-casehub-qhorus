@@ -2,38 +2,22 @@
 
 ## Last Session (2026-11-24)
 
-Closed three issues (#540, #541, #527), landed ops cross-repo fix, filed one follow-up (#542), wrote blog entry.
+Closed four issues (#540, #541, #527, #542), landed ops cross-repo fix, wrote blog entry. Queue empty.
 
 ### Closed this session
 
-- **#540** — Removed redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap.processChannel()`. Same create-then-configure anti-pattern that #530 fixed for policyOverrides. Landed as `5ac26474`.
-- **#541** — Cross-repo fix in `casehub-ops`: moved `policyOverrides` to the `ChannelCreateRequest` builder in `ChannelProvisionHandler.provision()`. Landed as `db9135c` on ops main. Created and closed casehubio/casehub-ops#248.
-- **#527** — Added `PlatformApiKeyIdentityResolver` in `runtime-core/identity/`. Delegates API key resolution to `StaticCredentialStore.lookup()` from `casehub-platform-api`. Gated by `@IfBuildProperty casehub.qhorus.identity.platform-api-keys=true`. Filters REVOKED and expired; ACTIVE and GRACE_PERIOD resolve. 6 CDI-free unit tests. Landed as `80b910f3`.
-
-### Filed this session
-
-- **#542** — Add `@QuarkusTest` integration tests for `PlatformApiKeyIdentityResolver` (CDI wiring, `@IfBuildProperty` gate verification). XS/Low.
-
-### Queue State
-
-- [x] casehubio/qhorus#540 — done
-- [x] casehubio/qhorus#541 — done (cross-repo, ops main)
-- [x] casehubio/qhorus#527 — done
-- [ ] casehubio/qhorus#542 — integration test for PlatformApiKeyIdentityResolver
+- **#540** — Removed redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap.processChannel()`. Same create-then-configure anti-pattern that #530 fixed for policyOverrides.
+- **#541** — Cross-repo fix in `casehub-ops`: moved `policyOverrides` to the `ChannelCreateRequest` builder in `ChannelProvisionHandler.provision()`. Created and closed casehubio/casehub-ops#248.
+- **#527** — Added `PlatformApiKeyIdentityResolver` in `runtime-core/identity/`. Delegates API key resolution to `StaticCredentialStore.lookup()`. Gated by `@IfBuildProperty casehub.qhorus.identity.platform-api-keys=true`. 6 CDI-free unit tests.
+- **#542** — Added `@QuarkusTest` integration tests verifying CDI wiring of the `@IfBuildProperty` gate. Also registered `casehub.qhorus.identity.platform-api-keys` in `QhorusConfig.Identity`.
 
 ### Cross-repo work
 
-- **casehub-ops** — committed `db9135c` on main (branch `issue-248-policyoverrides-on-builder`, stamped). Changed `ChannelProvisionHandler.provision()` and `StubChannelOps.create()` test helper.
+- **casehub-ops** — committed `db9135c` on main (branch `issue-248-policyoverrides-on-builder`, stamped). Changed `ChannelProvisionHandler.provision()` and `StubChannelOps.create()`.
 
-### Active work
+### Queue State
 
-**#542** — Add `@QuarkusTest` integration tests for `PlatformApiKeyIdentityResolver`. Branch scaffolded (`issue-542-integration-test-platform-apikey`), no code written.
-
-**Scope:** Two `@QuarkusTest` classes with `@TestProfile`:
-- `PlatformApiKeyIdentityResolverCdiTest` — enabled profile (`casehub.qhorus.identity.platform-api-keys=true`), verify bean selection via `ClientProxy.unwrap()`
-- `PlatformApiKeyIdentityResolverDisabledTest` — no property, verify `ConfigApiKeyIdentityResolver` is selected
-
-Follows the `RegistryBackedInstanceManager` pattern (see `RegistryBackedProfile`).
+Empty — no open items queued.
 
 ## References
 
