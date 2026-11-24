@@ -1,6 +1,6 @@
 - [x] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call
 - [x] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder
-- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore ← done on issue-527-apikey-resolver-credential-store
+- [x] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
 - [x] casehubio/qhorus#528 — Issue #528
 - [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
 - [x] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
@@ -13,7 +13,7 @@
 - [x] casehubio/qhorus#538 — remove dead tenancyId field
 - [x] casehubio/qhorus#539 — rename misleading test name
 - [x] casehubio/qhorus#530 — policyOverrides timing race in onInit
-- [ ] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
+- [ ] casehubio/qhorus#542 — integration-test-platform-apikey-resolver        ← active
 
 ## State
 branch: 
