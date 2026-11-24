@@ -1,38 +1,30 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-11-23)
+## Last Session (2026-11-24)
 
-Closed #530 (policyOverrides timing race), filed two follow-up issues (#540, #541), wrote blog entry, published both repos. Scaffolded #540.
+Closed three issues (#540, #541, #527), landed ops cross-repo fix, filed one follow-up (#542), wrote blog entry.
 
 ### Closed this session
 
-- **#530** — Added `policyOverrides` to `ChannelCreateRequest` so they're set atomically at creation time, before `ChannelInitialisedEvent` fires. Also wired into `QhorusConfig.ChannelConfig` for YAML-declared channels with drift detection. Landed as `bed0f0d6`.
+- **#540** — Removed redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap.processChannel()`. Same create-then-configure anti-pattern that #530 fixed for policyOverrides. Landed as `5ac26474`.
+- **#541** — Cross-repo fix in `casehub-ops`: moved `policyOverrides` to the `ChannelCreateRequest` builder in `ChannelProvisionHandler.provision()`. Landed as `db9135c` on ops main. Created and closed casehubio/casehub-ops#248.
+- **#527** — Added `PlatformApiKeyIdentityResolver` in `runtime-core/identity/`. Delegates API key resolution to `StaticCredentialStore.lookup()` from `casehub-platform-api`. Gated by `@IfBuildProperty casehub.qhorus.identity.platform-api-keys=true`. Filters REVOKED and expired; ACTIVE and GRACE_PERIOD resolve. 6 CDI-free unit tests. Landed as `80b910f3`.
 
 ### Filed this session
 
-- **#540** — Remove redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap` (same anti-pattern as #530)
-- **#541** — ops `ChannelProvisionHandler` should use `policyOverrides` on builder (consumer follow-up to #530)
+- **#542** — Add `@QuarkusTest` integration tests for `PlatformApiKeyIdentityResolver` (CDI wiring, `@IfBuildProperty` gate verification). XS/Low.
 
-### Active work
+### Queue State
 
-**#540** — Remove redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap`. Branch scaffolded (`issue-540-redundant-setparticipationpolicy`), no code written.
+- [x] casehubio/qhorus#540 — done
+- [x] casehubio/qhorus#541 — done (cross-repo, ops main)
+- [x] casehubio/qhorus#527 — done
+- [ ] casehubio/qhorus#542 — integration test for PlatformApiKeyIdentityResolver
 
-**Root cause:** `processChannel()` lines 57-58 call `channelService.setParticipationPolicy()` after create, but `participationPolicy` is already on `ChannelCreateRequest` and set via the builder in `toRequest()` (line 94). The post-create call is redundant — same pattern that #530 fixed for policyOverrides.
+### Cross-repo work
 
-**Fix:** Remove lines 57-58 from `ChannelConfigBootstrap.processChannel()`. Verify with existing tests.
-
-### Queue anomaly
-
-**#527 was accidentally marked done in the queue** when `plan_manager.py advance` was run incorrectly. #527 (wire ApiKeyIdentityResolver to StaticCredentialStore) has NOT been worked on. It needs to be re-queued — uncheck it in `.queue` and move it back to the queued section.
-
-## Queue State
-
-- [active] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call
-- [ ] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder
-- [done but not worked] casehubio/qhorus#527 — needs re-queuing
+- **casehub-ops** — committed `db9135c` on main (branch `issue-248-policyoverrides-on-builder`, stamped). Changed `ChannelProvisionHandler.provision()` and `StubChannelOps.create()` test helper.
 
 ## References
 
-- `blog/2026-11-23-mdp03-the-configuration-that-arrived-too-late.md`
-- `blog/2026-11-23-mdp02-testing-the-bridge-from-outside.md`
-- `blog/2026-11-23-mdp01-three-gaps-one-pass.md`
+- `blog/2026-11-24-mdp01-name-the-pattern-find-the-copies.md`
