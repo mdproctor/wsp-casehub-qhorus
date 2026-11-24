@@ -1,10 +1,10 @@
 # Work Plan —
 
 ## State
-branch: issue-540-redundant-setparticipationpolicy
+branch: 
 issue-repo: casehubio/qhorus
 status: active
-covers: casehubio/qhorus#540
+covers: 
 project-sha: 
 date: 
 design-repo: 
@@ -12,9 +12,9 @@ design-section-hashes:
 flyway-next-v: V63
 
 ## Queue
-- [ ] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call ← active
-- [ ] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder
-- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
+- [ ] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call ← done on issue-540-redundant-setparticipationpolicy
+- [ ] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder ← done on issue-541-policyoverrides-on-builder
+- [ ] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore ← done on issue-527-apikey-resolver-credential-store
 - [x] casehubio/qhorus#528 — Issue #528
 - [x] casehubio/qhorus#529 — timer/deadline event source for protocol playbooks
 - [x] casehubio/qhorus#531 — prerequisite platform change — PlaybookRunnerCore overload
@@ -27,6 +27,7 @@ flyway-next-v: V63
 - [x] casehubio/qhorus#538 — remove dead tenancyId field
 - [x] casehubio/qhorus#539 — rename misleading test name
 - [x] casehubio/qhorus#530 — policyOverrides timing race in onInit
+- [ ] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
 
 ## Deferred
 - [ ] prerequisite platform change — PlaybookRunnerCore overload (M / Med) []
