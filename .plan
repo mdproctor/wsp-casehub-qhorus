@@ -31,5 +31,5 @@ flyway-next-v: V62
 - [ ] casehubio/qhorus#533 — update CLAUDE.md with playbook-bridge module docs
 - [x] casehubio/qhorus#534 — REST endpoint should manage channel.protocols list
 - [ ] casehubio/qhorus#535 — JpaProtocolDefinitionStore tenancy filtering
-- [ ] casehubio/qhorus#536 — integration and recovery tests
+- [x] casehubio/qhorus#536 — integration and recovery tests
 - [ ] casehubio/qhorus#537 — YAML parser for deadline metadata
