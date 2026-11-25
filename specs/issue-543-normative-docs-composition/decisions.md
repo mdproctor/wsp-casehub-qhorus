@@ -78,3 +78,14 @@
 **Sources:** Skeptical review finding #1, platform work in progress
 **Exploration:** quick (via adversarial review)
 **Status:** captured
+
+## D8: Governed outcomes as handshake gating
+
+**Choice:** The docs frame template-extracted governance acts as part of protocol handshake gating — the governed outcome only takes effect once all participants have agreed. Not "has everyone sent a message" but "has everyone cast a structurally matched vote, and do the extracted fields constitute agreement."
+**Alternatives:**
+- Frame template matching as extraction-only, with protocol enforcement as a separate concern.
+**Rationale:** This is the natural join of template matching + protocol enforcement + commitment lifecycle. The template registry extracts the structured governance act. The protocol checks participant coverage and threshold. The commitment records the collective agreement. Without the extraction layer, the protocol can only gate on message count, not on what was actually decided.
+**Trade-offs:** Raises the bar for protocol definitions — they must understand template-extracted fields, not just message metadata.
+**Sources:** Existing qhorus protocols (CONTRIBUTION_REQUIRED, BARRIER, protocolParticipants), user direction
+**Exploration:** quick
+**Status:** captured
