@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="480" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="360" y="30" text-anchor="middle" font-size="14" font-weight="600" fill="#1e293b">Three Capabilities That Compose</text>
+
+  <!-- Communication Governance box -->
+  <rect x="40" y="55" width="200" height="150" rx="6" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+  <text x="140" y="78" text-anchor="middle" font-size="12" font-weight="600" fill="#0c4a6e">Communication</text>
+  <text x="140" y="93" text-anchor="middle" font-size="12" font-weight="600" fill="#0c4a6e">Governance</text>
+  <text x="140" y="115" text-anchor="middle" font-size="10" fill="#475569">"What did the agent say?"</text>
+  <text x="55" y="138" font-size="9" fill="#64748b">Template registry + NLP</text>
+  <text x="55" y="153" font-size="9" fill="#64748b">YAML corpus definitions</text>
+  <text x="55" y="168" font-size="9" fill="#64748b">Schema publication</text>
+  <text x="55" y="183" font-size="9" fill="#64748b">Bidirectional generation</text>
+
+  <!-- Protocol Enforcement box -->
+  <rect x="480" y="55" width="200" height="150" rx="6" fill="#fce7f3" stroke="#db2777" stroke-width="1.5"/>
+  <text x="580" y="78" text-anchor="middle" font-size="12" font-weight="600" fill="#831843">Protocol</text>
+  <text x="580" y="93" text-anchor="middle" font-size="12" font-weight="600" fill="#831843">Enforcement</text>
+  <text x="580" y="115" text-anchor="middle" font-size="10" fill="#475569">"Is it permitted?"</text>
+  <text x="495" y="138" font-size="9" fill="#64748b">Channel protocols</text>
+  <text x="495" y="153" font-size="9" fill="#64748b">Playbook bridge</text>
+  <text x="495" y="168" font-size="9" fill="#64748b">Enforcement modes</text>
+  <text x="495" y="183" font-size="9" fill="#64748b">Handshake gating</text>
+
+  <!-- Arrows from top boxes to bottom -->
+  <line x1="140" y1="205" x2="140" y2="260" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="85" y="240" font-size="8" fill="#64748b">extracts governance</text>
+  <text x="85" y="250" font-size="8" fill="#64748b">acts from prose</text>
+
+  <line x1="580" y1="205" x2="580" y2="260" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="530" y="240" font-size="8" fill="#64748b">evaluates rules,</text>
+  <text x="530" y="250" font-size="8" fill="#64748b">gates outcomes</text>
+
+  <!-- Normative Accountability box (wide, bottom) -->
+  <rect x="40" y="265" width="640" height="130" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="360" y="290" text-anchor="middle" font-size="12" font-weight="600" fill="#14532d">Normative Accountability</text>
+  <text x="360" y="308" text-anchor="middle" font-size="10" fill="#475569">"Who owes what to whom — and what happened?"</text>
+  <text x="80" y="335" font-size="9" fill="#64748b">10-type speech act taxonomy</text>
+  <text x="80" y="350" font-size="9" fill="#64748b">7-state commitment lifecycle</text>
+  <text x="300" y="335" font-size="9" fill="#64748b">Tamper-evident ledger (SHA-256)</text>
+  <text x="300" y="350" font-size="9" fill="#64748b">Bayesian trust scoring</text>
+  <text x="520" y="335" font-size="9" fill="#64748b">Peer attestation</text>
+  <text x="520" y="350" font-size="9" fill="#64748b">Causal chain linking</text>
+
+  <!-- Composition label -->
+  <text x="360" y="375" text-anchor="middle" font-size="9" font-style="italic" fill="#64748b">Each capability is independently useful. Together: prose in → governed accountability out.</text>
+
+  <!-- Pipeline at bottom -->
+  <rect x="40" y="405" width="640" height="50" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="360" y="425" text-anchor="middle" font-size="9" fill="#475569">LLM prose → Template extraction → Speech act classification → Protocol evaluation → Enforcement gate → Ledger entry</text>
+  <text x="360" y="442" text-anchor="middle" font-size="8" font-style="italic" fill="#94a3b8">Each step is optional. Removing a capability reduces what is governed, not what is possible.</text>
+</svg>
