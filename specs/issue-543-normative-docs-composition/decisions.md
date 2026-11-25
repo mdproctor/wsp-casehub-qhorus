@@ -1,0 +1,58 @@
+# Decisions — Normative Docs Composition Revision
+
+## D1: Document framing
+
+**Choice:** Composition-first — lead with three independent capabilities and their composition. Theory supports why each exists, not the other way around.
+**Alternatives:**
+- Theory-first + composition section — keeps existing narrative, adds composition as a new section. Risk: reads as bolted-on.
+- Parallel tracks — two reading paths (theory / practitioner). Risk: doc proliferation, harder to maintain.
+**Rationale:** The composition model is the thesis now. The theory served as the thesis when only accountability existed; with three capabilities, the thesis is their composition.
+**Trade-offs:** Restructuring a well-regarded 590-line doc risks losing the persuasive flow that works.
+**Sources:** normative-layer.md (current), platform template-registry module, qhorus playbook-bridge module
+**Exploration:** quick
+**Status:** captured
+
+## D2: Document strategy
+
+**Choice:** Revise normative-layer.md in place — one authoritative document, restructured around composition.
+**Alternatives:**
+- New primary + keep existing — avoids touching the existing doc, but creates two docs that partially overlap.
+- New primary + retire existing — cleanest but loses git history and inbound links.
+**Rationale:** The goal is a cohesively whole story. Two documents telling overlapping stories is the opposite.
+**Trade-offs:** A bad revision makes the existing doc worse. Quality bar is high.
+**Sources:** normative-framework.md (navigation), normative-summary.md (critique)
+**Exploration:** quick
+**Status:** captured
+
+## D3: Worked examples
+
+**Choice:** Both — extend existing insurance claim / production incident examples with template matching annotations, AND add a new governance protocol example (review/vote/escalate).
+**Alternatives:**
+- Extend existing only — natural, but doesn't show the full composition pipeline end-to-end.
+- New example only — leaves existing examples incomplete.
+**Rationale:** Extending existing examples shows template matching is not a separate feature but part of how governance always worked. The new example demonstrates the full pipeline where all three capabilities are load-bearing simultaneously.
+**Trade-offs:** Longer doc. The new example adds ~200-300 lines.
+**Sources:** TemplateRegistryIntegrationTest.java (platform), insurance claim scenario (normative-layer.md)
+**Exploration:** quick
+**Status:** captured
+
+## D4: Revision scope
+
+**Choice:** All normative docs — normative-layer.md, normative-framework.md, normative-summary.md, agent-mesh-framework.md.
+**Alternatives:**
+- normative-layer.md only — focused but leaves supporting docs inconsistent.
+- Primary + framework index — partial coherence.
+**Rationale:** The user wants a joined-up, complete story. Partial revision leaves gaps that undermine the composition narrative.
+**Trade-offs:** Larger scope, more writing, more risk of inconsistency during revision.
+**Sources:** normative-framework.md (navigation), normative-summary.md (critique), agent-mesh-framework.md (developer guide)
+**Exploration:** quick
+**Status:** captured
+
+## D5: Quality constraint
+
+**Choice:** The revision must feel cohesively whole — not bolted or patched. The composition framing should read as the natural starting point, not a retrofit.
+**Rationale:** Direct user instruction. The existing doc has a distinctive thesis-driven voice (assertive, contrast-heavy, scenario-grounded). New content must match this register.
+**Trade-offs:** Slower writing. Cannot just insert sections — must rewrite for flow.
+**Sources:** User direction
+**Exploration:** quick
+**Status:** captured
