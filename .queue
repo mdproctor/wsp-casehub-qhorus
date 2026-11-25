@@ -14,11 +14,13 @@
 - [x] casehubio/qhorus#539 — rename misleading test name
 - [x] casehubio/qhorus#530 — policyOverrides timing race in onInit
 - [x] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
+- [ ] casehubio/qhorus#543 — issue 543        ← active
 
 ## State
-branch: 
+branch: issue-543-normative-docs-composition
 issue-repo: casehubio/qhorus
-status: drained
+status: active
+covers: casehubio/qhorus#543
 project-sha: 
 date: 
 design-repo: 
