@@ -56,3 +56,25 @@
 **Sources:** User direction
 **Exploration:** quick
 **Status:** captured
+
+## D6: Template governance is not optional convenience — it is the accountability mechanism
+
+**Choice:** The docs frame template matching as the mechanism by which agent conversation becomes accountable — not as an optional enhancement for structured governance acts only. At some point, prose must result in something actionable (function call/event) or recordable (normalised structure). Without it, LLM conversations produce no accountability — which is dangerous in regulated environments.
+**Alternatives:**
+- Frame template matching as a "precision instrument for the 5-10% of messages that are governance acts" — treats the other 90% as inherently ungoverned.
+**Rationale:** The skeptical review identified the "governance gap" (90% of messages are reasoning/discussion, not governance acts). The user's position: that gap IS the problem. Agents conversing freely with no accountable outcome is the status quo the normative layer exists to change. Template matching closes that gap — conversation is free, but governed outcomes must be robust and unambiguous.
+**Trade-offs:** Sets a higher bar for the template registry — it must eventually handle the breadth of how agents express governance, not just exact template shapes.
+**Sources:** Skeptical review finding #2, user direction, platform adaptive phrase variation work
+**Exploration:** quick (via adversarial review)
+**Status:** captured
+
+## D7: Adaptive phrase variation addresses the paraphrase cliff
+
+**Choice:** Platform is building adaptive phrase variation with LLM fallthrough to learn known variations over time. The docs should acknowledge the paraphrase limitation honestly while noting it is being addressed architecturally, not just with better NLP.
+**Alternatives:**
+- Accept structural matching as the ceiling — paraphrases always require schema conformance.
+**Rationale:** The skeptical review's #1 finding (paraphrase cliff) is real but being addressed. The composition model's strength is that the matching tier is pluggable — NLP today, adaptive variation tomorrow, semantic similarity later.
+**Trade-offs:** The adaptive path is in progress, not shipped. Docs should be honest about current state.
+**Sources:** Skeptical review finding #1, platform work in progress
+**Exploration:** quick (via adversarial review)
+**Status:** captured
