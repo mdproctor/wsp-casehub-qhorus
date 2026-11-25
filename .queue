@@ -1,3 +1,17 @@
+# Work Plan —
+
+## State
+branch: 
+issue-repo: casehubio/qhorus
+status: active
+covers: 
+project-sha: 
+date: 
+design-repo: 
+design-section-hashes: 
+flyway-next-v: V63
+
+## Queue
 - [x] casehubio/qhorus#540 — remove redundant setParticipationPolicy post-create call
 - [x] casehubio/qhorus#541 — ops ChannelProvisionHandler should use policyOverrides on builder
 - [x] casehubio/qhorus#527 — wire ApiKeyIdentityResolver to StaticCredentialStore
@@ -14,18 +28,7 @@
 - [x] casehubio/qhorus#539 — rename misleading test name
 - [x] casehubio/qhorus#530 — policyOverrides timing race in onInit
 - [x] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
-- [ ] casehubio/qhorus#543 — issue 543        ← active
-
-## State
-branch: issue-543-normative-docs-composition
-issue-repo: casehubio/qhorus
-status: active
-covers: casehubio/qhorus#543
-project-sha: 
-date: 
-design-repo: 
-design-section-hashes: 
-flyway-next-v: V63
+- [ ] casehubio/qhorus#543 — issue 543 ← done on issue-543-normative-docs-composition
 
 ## Deferred
 - [ ] prerequisite platform change — PlaybookRunnerCore overload (M / Med) []
