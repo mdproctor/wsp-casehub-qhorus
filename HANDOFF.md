@@ -1,24 +1,18 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-11-24)
+## Last Session (2026-11-25)
 
-Closed four issues (#540, #541, #527, #542), landed ops cross-repo fix, wrote blog entry. Queue empty.
+Revised all four normative framework docs for composition-first framing. The normative layer is now framed as three orthogonal capabilities (communication governance, normative accountability, protocol enforcement) that compose into governed accountability from natural language. Extended worked examples with template matching, added new governed architecture review scenario with handshake gating. Fixed stale 9-type references to 10 (PROPOSE). Filed platform #972, #973, #974 from adversarial review.
 
-### Closed this session
+## Immediate Next Step
 
-- **#540** — Removed redundant `setParticipationPolicy()` post-create call in `ChannelConfigBootstrap.processChannel()`. Same create-then-configure anti-pattern that #530 fixed for policyOverrides.
-- **#541** — Cross-repo fix in `casehub-ops`: moved `policyOverrides` to the `ChannelCreateRequest` builder in `ChannelProvisionHandler.provision()`. Created and closed casehubio/casehub-ops#248.
-- **#527** — Added `PlatformApiKeyIdentityResolver` in `runtime-core/identity/`. Delegates API key resolution to `StaticCredentialStore.lookup()`. Gated by `@IfBuildProperty casehub.qhorus.identity.platform-api-keys=true`. 6 CDI-free unit tests.
-- **#542** — Added `@QuarkusTest` integration tests verifying CDI wiring of the `@IfBuildProperty` gate. Also registered `casehub.qhorus.identity.platform-api-keys` in `QhorusConfig.Identity`.
-
-### Cross-repo work
-
-- **casehub-ops** — committed `db9135c` on main (branch `issue-248-policyoverrides-on-builder`, stamped). Changed `ChannelProvisionHandler.provision()` and `StubChannelOps.create()`.
-
-### Queue State
-
-Empty — no open items queued.
+`work end` to squash, push, and land #543 on main. Review the prose with fresh eyes first — the composition framing should feel natural, not retrofitted.
 
 ## References
 
-- `blog/2026-11-24-mdp01-name-the-pattern-find-the-copies.md`
+- `specs/issue-543-normative-docs-composition/` — design spec + decisions
+- `blog/2026-11-25-mdp01-governance-needs-perception.md` — diary entry
+- `docs/normative-layer.md` — primary revised doc
+- `docs/normative-framework.md` — updated navigation
+- `docs/normative-summary.md` — revised critique
+- `docs/agent-mesh-framework.md` — new Part 11 + 10-type fix
