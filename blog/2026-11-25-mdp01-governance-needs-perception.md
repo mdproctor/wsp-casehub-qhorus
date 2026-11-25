@@ -62,4 +62,4 @@ The YAML corpus format (platform #969) is the next concrete step. It defines how
 
 On the qhorus side, speech act verification (template matching against declared MessageType) and content-level handshake gating both need implementation work. The docs describe these capabilities architecturally; the code implements the foundation they will build on.
 
-The perception gap was always there — we just did not name it until the template registry made it visible. The normative layer tracked accountability at the type level. Communication governance extends it to the content level. The composition closes the loop from natural language to governed, auditable action.
+The perception gap was always there — we just did not name it until the template registry made it visible. The normative layer tracked accountability at the type level. Communication governance extends it to the content level. The composition closes the loop from natural language to governed, auditable action. 
