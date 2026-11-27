@@ -15,11 +15,14 @@
 - [x] casehubio/qhorus#530 — policyOverrides timing race in onInit
 - [x] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
 - [x] casehubio/qhorus#543 — issue 543
+- [ ] casehubio/qhorus#545 — issue 545 ← done on issue-545-template-match-e2e
+- [ ] casehubio/qhorus#546 — issue 546        ← active
 
 ## State
-branch: 
+branch: issue-546-template-ledger-fields
 issue-repo: casehubio/qhorus
-status: drained
+status: active
+covers: casehubio/qhorus#546
 project-sha: 
 date: 
 design-repo: 
