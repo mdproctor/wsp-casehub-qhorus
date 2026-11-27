@@ -16,12 +16,12 @@
 - [x] casehubio/qhorus#542 — integration-test-platform-apikey-resolver
 - [x] casehubio/qhorus#543 — issue 543
 - [x] casehubio/qhorus#545 — issue 545
-- [ ] casehubio/qhorus#546 — issue 546 ← done on issue-546-template-ledger-fields
+- [x] casehubio/qhorus#546 — issue 546
 
 ## State
 branch: 
 issue-repo: casehubio/qhorus
-status: active
+status: drained
 project-sha: 
 date: 
 design-repo: 
