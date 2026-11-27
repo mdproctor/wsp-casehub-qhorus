@@ -1,18 +1,21 @@
 # HANDOFF — casehub-qhorus
 
-## Last Session (2026-11-25)
+## Last Session (2026-11-27)
 
-Revised all four normative framework docs for composition-first framing. The normative layer is now framed as three orthogonal capabilities (communication governance, normative accountability, protocol enforcement) that compose into governed accountability from natural language. Extended worked examples with template matching, added new governed architecture review scenario with handshake gating. Fixed stale 9-type references to 10 (PROPOSE). Filed platform #972, #973, #974 from adversarial review.
+Two issues progressed. #545 (e2e template match proof) — 23 tests proving NLP extraction, advisory flow, schema publication, and bidirectional generation work from qhorus's playbook-bridge classpath. Fixed the `buildVars()` gap: `ProtocolContext` now carries `incomingContent` (nullable), populated by `MessageService.dispatch()`, flowing to playbook vars as `${incomingContent}`. No new qhorus module needed — the existing dependency chain is sufficient.
+
+#546 (template fields in ledger entries) started — branch created, design decision made: template match metadata flows via `DispatchAdvisory.evidence()` map (Option A — no new types). Migration V2005.
+
+Platform issues filed: #1010 (persistent store for learned variations), #1011 (standalone YAML corpus loader). Platform #1002 closed — resolved by #961.
 
 ## Immediate Next Step
 
-`work end` to squash, push, and land #543 on main. Review the prose with fresh eyes first — the composition framing should feel natural, not retrofitted.
+Implement #546. Read `MessageLedgerEntry` (runtime-core/ledger/), `LedgerWriteService.record()` (runtime/ledger/), and the advisory pipeline in `MessageService.dispatch()`. Add 4 nullable columns to `message_ledger_entry` (V2005). Thread match metadata from advisory evidence map into ledger entry fields.
 
 ## References
 
-- `specs/issue-543-normative-docs-composition/` — design spec + decisions
-- `blog/2026-11-25-mdp01-governance-needs-perception.md` — diary entry
-- `docs/normative-layer.md` — primary revised doc
-- `docs/normative-framework.md` — updated navigation
-- `docs/normative-summary.md` — revised critique
-- `docs/agent-mesh-framework.md` — new Part 11 + 10-type fix
+- `playbook-bridge/src/test/java/.../TemplateMatchIntegrationTest.java` — e2e proof (23 tests)
+- `api/src/main/java/.../ProtocolContext.java` — `incomingContent` field added
+- `runtime-core/src/main/java/.../MessageService.java:372` — protocol evaluation construction site
+- `runtime-core/src/main/java/.../MessageLedgerEntry.java` — ledger entity to extend
+- `runtime/src/main/java/.../LedgerWriteService.java` — record() to modify
